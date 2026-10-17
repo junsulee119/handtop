@@ -1,7 +1,7 @@
 #!/bin/bash
 # Extract the hardware layer from the ROCKNIX image into $ROCKNIX_EX:
 #   boot/        KERNEL, extlinux.conf, device_trees/, overlays/
-#   bootloader/  u-boot-sunxi-with-spl.bin (DDR4), bl31.bin
+#   bootloader/  u-boot-sunxi-with-spl.bin (DDR4 or DDR3, see RAM_TYPE), bl31.bin
 #   modules/     lib/modules/<kver>
 #   firmware/    lib/firmware (Wi-Fi/BT, panels, regulatory.db)
 #   quirks/      ROCKNIX H700 platform quirk scripts (reference for porting)

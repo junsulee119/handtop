@@ -14,7 +14,7 @@ Design of the built-in on-screen keyboard (OSK). It is part of the input daemon 
 |---|---|
 | X | Show / hide the keyboard |
 | D-pad | Move the highlight (auto-repeat when held: 0.4 s delay, then every 0.09 s) |
-| A | Type the highlighted key |
+| A | Type the highlighted key (the button bound to `click_left`; A by default) |
 | L1 / R1 / R2 | Esc / Enter / Backspace (physical shortcuts still work while it is open) |
 | Left stick | Still moves the pointer; keys can also be clicked with the pointer |
 | Hide key | Same as X |

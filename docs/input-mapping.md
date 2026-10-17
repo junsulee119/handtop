@@ -13,7 +13,7 @@ Implemented by a custom input daemon that grabs the "H700 Gamepad" exclusively a
 | D-pad | Mouse pointer. With on-screen keyboard open: move between keys | Passed through |
 | Left stick | Mouse pointer, any direction, speed follows tilt | Left stick |
 | Right stick | Scroll in any direction (vertical + horizontal) | Right stick |
-| A | Left click (hold = drag). With keyboard open: type selected key | Passed through |
+| A | Left click (hold = drag). With keyboard open: type selected key (typing follows whichever button is bound to `click_left`) | Passed through |
 | B | Right click | Passed through |
 | X | Show/hide on-screen keyboard | Passed through |
 | Y | — | Passed through |
