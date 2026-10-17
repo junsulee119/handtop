@@ -47,6 +47,24 @@ Screen garbled or black? Your unit may have the newer panel: copy
 `device_trees\sun50i-h700-anbernic-rg35xx-h-rev6-panel.dtb` over `dtb.img` on the boot partition.
 Details: [docs/flashing.md](docs/flashing.md).
 
+## External display
+
+Plug a monitor into the mini HDMI port at any time (hot-plug). Choose what happens from the Apps menu:
+
+- **Monitor only:** the desktop moves to the monitor; the handheld screen becomes a full-size on-screen keyboard
+- **Extend:** the monitor and the handheld screen form one desktop
+- **Mirror:** both show the same picture
+
+Resolution: **tested at 1920×1080 60 Hz**. The HDMI driver allows pixel clocks up to 594 MHz, so higher modes (e.g. 1440p60, 1080p120, up to 4K60 on paper) may work but are untested, and the desktop gets slower at high resolutions. The monitor's preferred mode is used automatically; to change it (in a terminal):
+
+```sh
+wlr-randr                                        # list modes
+wlr-randr --output HDMI-A-1 --mode 1920x1080@60  # pick one
+wlr-randr --output HDMI-A-1 --scale 2            # bigger UI on 4K screens
+```
+
+There is no HDMI audio.
+
 ## Good to know
 
 - The device has 1 GB RAM; for heavy websites and video, Moonlight to a PC works best.
