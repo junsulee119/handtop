@@ -4,7 +4,7 @@
     <item label="Apps"><action name="Execute" command="rg35xxh-drawer" /></item>
     <item label="Terminal"><action name="Execute" command="foot" /></item>
     <item label="Files"><action name="Execute" command="thunar" /></item>
-    <item label="Firefox"><action name="Execute" command="firefox-esr" /></item>
+    <item label="Chromium"><action name="Execute" command="chromium" /></item>
     <item label="Moonlight"><action name="Execute" command="moonlight-qt" /></item>
     <separator />
     <item label="Reconfigure desktop"><action name="Reconfigure" /></item>

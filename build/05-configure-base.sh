@@ -31,7 +31,7 @@ mkdir -p "$ROOTFS/boot/firmware"
 cat > "$ROOTFS/etc/fstab" <<F
 LABEL=$ROOT_LABEL  /               ext4  defaults,noatime,commit=60     0 1
 LABEL=$BOOT_LABEL  /boot/firmware  vfat  defaults,noatime,umask=0022,nofail  0 2
-tmpfs              /tmp            tmpfs defaults,nosuid,nodev,size=128M  0 0
+tmpfs              /tmp            tmpfs defaults,nosuid,nodev,size=256M  0 0
 F
 
 # User

@@ -32,8 +32,7 @@ blueman
 foot
 thunar
 mousepad
-firefox-esr
-webext-ublock-origin-firefox   # ad blocking: less RAM/CPU per page
+chromium                  # browser: about half Firefox's CPU when scrolling on this device (docs/desktop.md)
 imv
 qpdfview
 mpv

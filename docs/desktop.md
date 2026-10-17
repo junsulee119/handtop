@@ -43,7 +43,7 @@ Chosen over LXQt-on-labwc (heavier) and sfwbar (smaller community) for low RAM a
 - Physical keyboard: Super+D apps, Super+Enter terminal, Super+E files, Super+X power menu, Alt+F4 close, Print screenshot.
 - **No xdg-desktop-portal**: it delayed Waybar startup (portal activation timeouts) and is only needed for screen sharing/Flatpak; GTK apps use their own file dialogs.
 - Audio: speaker starts at 100 % on a fresh system (`/etc/wireplumber/wireplumber.conf.d/50-rg35xxh.conf`; WirePlumber default is 40 %); the codec DAC and Line Out are set to 100 % by `rg35xxh-hwinit`.
-- Memory: zram swap (50 % of RAM, zstd, priority 100) plus a 2 GB swap file `/swapfile` on the SD card (priority 10, created on first boot by `rg35xxh-swapfile`). Firefox defaults for 1 GB RAM in `/etc/firefox-esr/rg35xxh.js`; uBlock Origin from `webext-ublock-origin-firefox`.
+- Memory: zram swap (50 % of RAM, zstd, priority 100) plus a 2 GB swap file `/swapfile` on the SD card (priority 10, created on first boot by `rg35xxh-swapfile`). Chromium flags in `/etc/chromium.d/50-rg35xxh`; uBlock Origin Lite force-installed by policy (`/etc/chromium/policies/managed/ublock-origin-lite.json`, downloaded on first launch).
 - Component logs: `~/.local/state/session/*.log`, labwc: `~/.local/state/labwc.log`.
 
 ### External display (mini HDMI) — verified 2026-10-08
@@ -73,7 +73,7 @@ Selection rule: light apps for 1 GB RAM; Qt apps preferred where equal, since mo
 | Purpose | Package(s) | Why |
 |---|---|---|
 | Remote desktop | `moonlight-qt` (official Moonlight Cloudsmith repo, debian/trixie arm64) | Core use case |
-| Browser | `firefox-esr` + uBlock Origin | Best site compatibility among feasible options; ad blocking cuts RAM. Heavy browsing → use the PC via Moonlight |
+| Browser | `chromium` + uBlock Origin Lite | Smoothest browser tested on this device (see below). Heavy browsing → use the PC via Moonlight |
 | File manager | `thunar` | Light, Wayland-capable, familiar |
 | Terminal | `foot` | Lightest Wayland terminal; stable app_id `foot` for copy/paste detection |
 | Text editor | `mousepad` (GUI), `micro` + `nano` (terminal) | Simple; micro supports mouse and Ctrl+C/V |
@@ -102,3 +102,19 @@ Heavy web browsing is the expected weak point (1 GB RAM).
 - **Log in:** Apps → **Tailscale login** (`rg35xxh-tailscale-login`) opens a terminal with `tailscale up --qr`: scan the QR code with a phone (or open the link) and approve. Login persists across reboots; nothing secret is stored on the boot partition.
 - **Tray:** `tailscale systray` is started from the labwc autostart (grey when logged out).
 - Defaults: no exit node, routes from other nodes not accepted, MagicDNS on (`/etc/resolv.conf` → 100.100.100.100 while connected).
+
+## Browser choice (v0.1.3)
+
+Tested 2026-10-17 on the device: fresh profile per browser, 20 s of scrolling on Wikipedia and on naver.com (ad-heavy), scored 1–5 by hand, CPU and free memory measured during the scroll.
+
+| Browser | Score (wiki / naver) | CPU | Free RAM |
+|---|---|---|---|
+| Firefox ESR 153 + uBlock Origin (until v0.1.2) | 2 / 1 | 88 % / 90 % | ~210 MB |
+| Firefox + uBlock Origin Lite | 2.5 / 1.5 | 83 % / 77 % | 196–308 MB |
+| Firefox, no ad blocker | 2.9 / 2 | 64 % / 69 % | 232–300 MB |
+| Epiphany (WebKitGTK) | 2.7 / 2.7 | 39 % / 60 % | 324–456 MB |
+| Chromium 155, no ad blocker | 3.5 / 3 | 43 % / 37 % | 374–463 MB |
+| **Chromium 155 + uBlock Origin Lite** | **4 / 3** | **38 % / 40 %** | **379–434 MB** |
+
+Earlier rounds showed Firefox's rendering path (GPU/CPU WebRender, Wayland/X11), CPU governor, smooth scrolling and frame rate made no noticeable difference; full uBlock Origin alone took 110–270 MB in Firefox's extension process.
+

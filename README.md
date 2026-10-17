@@ -26,7 +26,7 @@ Status: **v0.1.1**, developed and tested on the RG35XX H.
 - Sleep (s2idle) from the power menu or after 10 min idle; Power tap wakes
 - Charges while switched off (power button boots)
 - Wi-Fi set up from Windows/macOS by editing `wifi.txt` on the boot partition
-- Firefox ESR tuned for 1 GB RAM, with uBlock Origin; zram + 2 GB swap file
+- Chromium with uBlock Origin Lite (installed automatically on first launch when online); zram + 2 GB swap file
 - Boot logs written to the FAT partition, readable from any PC
 
 Full control map: [docs/input-mapping.md](docs/input-mapping.md).

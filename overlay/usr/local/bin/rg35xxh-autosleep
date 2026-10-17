@@ -2,7 +2,7 @@
 # Called by swayidle after AUTOSLEEP_MINUTES without input (labwc autostart).
 # Skips sleeping while charging, in gamepad mode (controller input is not seen by the
 # compositor) or with an HDMI monitor connected. Apps that play video or stream
-# (Moonlight, Firefox, mpv) block idle themselves through the idle-inhibit protocol.
+# (Moonlight, Chromium, mpv) block idle themselves through the idle-inhibit protocol.
 [ -r /etc/rg35xxh/power.conf ] && . /etc/rg35xxh/power.conf
 log() { echo "$(date '+%F %T') rg35xxh-autosleep: $*"; }
 if [ "$(cat /sys/class/power_supply/axp20x-usb/online 2>/dev/null)" = 1 ] && [ "${AUTOSLEEP_ON_CHARGER:-no}" != yes ]; then

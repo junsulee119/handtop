@@ -1,0 +1,2 @@
+# RG35XX H: run Chromium as a native Wayland client and skip the default-browser prompt.
+export CHROMIUM_FLAGS="$CHROMIUM_FLAGS --ozone-platform=wayland --no-default-browser-check"
