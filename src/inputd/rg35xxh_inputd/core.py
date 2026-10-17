@@ -84,7 +84,7 @@ class Core:
         self.swallowed = set()      # buttons whose press was consumed (e.g. screen wake)
         self.power_fired = False
         self.start_fired = False
-        self.a_on_osk = False       # A press went to the on-screen keyboard
+        self.osk_pressed_button = None  # button that triggered the current OSK press
         self.osk_next_repeat = {}   # dpad dir -> next repeat time
         self.vol_repeat = {}        # vol_up/vol_down -> [cmd, next repeat time]
         self.last_tick = None
@@ -142,8 +142,9 @@ class Core:
                 self.osk_next_repeat[name] = t + self.s["osk_repeat_delay"]
                 return [("osk", "move", dx, dy)]
             return out  # pointer motion happens in tick()
-        if name == "a" and self.osk_visible:
-            self.a_on_osk = True
+        osk_key = next((btn for btn, act in self.bind.items() if act == "click_left"), "a")
+        if name == osk_key and self.osk_visible:
+            self.osk_pressed_button = name
             return [("osk", "press")]
         return self._binding(name, True)
 
@@ -176,8 +177,8 @@ class Core:
         if name in DPAD:
             self.osk_next_repeat.pop(name, None)
             return []
-        if name == "a" and self.a_on_osk:
-            self.a_on_osk = False
+        if self.osk_pressed_button and name == self.osk_pressed_button:
+            self.osk_pressed_button = None
             return [("osk", "release")]
         return self._binding(name, False)
 

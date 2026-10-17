@@ -70,9 +70,19 @@ def test_dpad_pointer_and_osk_navigation():
     moves = [a for a in out if a[0] == "osk"]
     assert 2 <= len(moves) <= 3, moves  # 0.4 s delay, then every 0.09 s
     c.button("down", False, t2)
-    # A types the selected key instead of clicking.
+    # Button bound to click_left types the selected key instead of clicking.
     assert c.button("a", True, t2) == [("osk", "press")]
     assert c.button("a", False, t2 + 0.1) == [("osk", "release")]
+
+
+def test_osk_follows_click_left_binding():
+    # If the user remaps click_left to 'b' (e.g. PlayStation style), OSK typing follows 'b'.
+    c = Core(bindings={"b": "click_left", "a": "click_right"})
+    c.set_osk_visible(True)
+    assert c.button("b", True, 0) == [("osk", "press")]
+    assert c.button("b", False, 0.1) == [("osk", "release")]
+    # 'a' is right click now, not typing
+    assert c.button("a", True, 0.2) == [("mouse", "right", True)]
 
 
 def test_a_release_matches_press_when_osk_toggles():
