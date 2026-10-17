@@ -36,7 +36,7 @@ unsquashfs -q -n -d "$TMP/sys" "$TMP/SYSTEM" \
   usr/lib/autostart/common/050-audio usr/lib/autostart/common/020-rumble \
   usr/lib/autostart/common/055-hdmi-check usr/bin/rocknix-fake-suspend >/dev/null || true
 
-cp "$TMP/sys/usr/share/bootloader/H700_DDR4_u-boot-sunxi-with-spl.bin" "$ROCKNIX_EX/bootloader/u-boot-sunxi-with-spl.bin"
+cp "$TMP/sys/usr/share/bootloader/H700_${RAM_TYPE}_u-boot-sunxi-with-spl.bin" "$ROCKNIX_EX/bootloader/u-boot-sunxi-with-spl.bin"
 cp "$TMP/sys/usr/share/bootloader/bl31.bin" "$ROCKNIX_EX/bootloader/" 2>/dev/null || true
 cp -a "$TMP/sys/usr/lib/kernel-overlays/base/lib/modules/." "$ROCKNIX_EX/modules/"
 cp -a "$TMP/sys/usr/lib/kernel-overlays/base/lib/firmware/." "$ROCKNIX_EX/firmware/"

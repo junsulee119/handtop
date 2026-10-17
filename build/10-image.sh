@@ -11,6 +11,7 @@ for m in proc sys dev run; do
 done
 
 VER="$(date +%Y%m%d)-$(git -C "$TOP" rev-parse --short HEAD 2>/dev/null || echo "v$RELEASE_VERSION")"
+[ "$RAM_TYPE" != "DDR4" ] && VER="$VER-$RAM_TYPE"
 OUT="$WORK/out"; mkdir -p "$OUT"
 IMG="$OUT/$IMAGE_NAME-$VER.img"
 P="$WORK/image-parts"; [ -e "$P" ] && safe_rm -r "$P"; mkdir -p "$P"
