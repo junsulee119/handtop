@@ -3,6 +3,6 @@ Type=Application
 Name=Tailscale login
 Comment=Connect this device to your tailnet (shows a QR code)
 Exec=rg35xxh-tailscale-login
-Icon=network-vpn
+Icon=/usr/local/share/rg35xxh/icons/app-tailscale.png
 Terminal=false
 Categories=Network;

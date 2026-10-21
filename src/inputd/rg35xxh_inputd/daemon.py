@@ -741,7 +741,7 @@ class Daemon:
     def _signal_waybar(self):
         """SIGRTMIN+WAYBAR_SIGNAL to Waybar (re-runs rg35xxh-inputmode). Cheaper than pkill."""
         for _ in range(2):
-            if self.waybar_pid is None:
+            if self.waybar_pid is None or _comm(self.waybar_pid) != "waybar":   # gone or restarted
                 self.waybar_pid = next((int(d) for d in os.listdir("/proc") if d.isdigit()
                                         and _comm(d) == "waybar"), None)
                 if self.waybar_pid is None:

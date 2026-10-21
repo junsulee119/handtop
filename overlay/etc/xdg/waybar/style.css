@@ -4,7 +4,7 @@ window#waybar { background: #1a1e26; color: #e8eaee; border-top: 1px solid #333a
 #custom-power { background: #8a3d3d; padding: 0 12px; font-size: 15px; }
 #taskbar button { padding: 0 4px; color: #e8eaee; }
 #taskbar button.active { background: #2b3a55; }
-#tray, #pulseaudio, #network, #battery, #clock { padding: 0 6px; }
+#tray, #battery, #clock { padding: 0 6px; }
 #image.battery { padding: 0 0 0 6px; margin-top: 1px; }   /* icon, then the % (#battery) */
 #battery { padding-left: 0; }
 #image.inputmode { padding: 0 4px; margin-top: 1px; }   /* centres the 23 px icon in the 31 px under the border */

@@ -5,7 +5,7 @@
   "height": 32,
   "spacing": 4,
   "modules-left": ["custom/apps", "wlr/taskbar"],
-  "modules-right": ["image#inputmode", "tray", "pulseaudio", "network", "image#battery", "battery", "clock", "custom/power"],
+  "modules-right": ["image#inputmode", "tray", "image#battery", "battery", "clock", "custom/power"],
 
   "custom/apps":  { "format": "☰ Apps", "tooltip": false, "on-click": "rg35xxh-drawer" },
   "custom/power": { "format": "⏻", "tooltip": false, "on-click": "rg35xxh-power-menu" },
@@ -25,20 +25,7 @@
     "on-click-middle": "close",
     "on-click-right": "minimize"
   },
-  "tray": { "icon-size": 18, "spacing": 6 },
-  "pulseaudio": {
-    "format": "♪ {volume}%",
-    "format-muted": "♪ mute",
-    "on-click": "pavucontrol",
-    "scroll-step": 5
-  },
-  "network": {
-    "format-wifi": "Wi-Fi {signalStrength}%",
-    "format-ethernet": "LAN",
-    "format-disconnected": "offline",
-    "tooltip-format": "{essid} {ipaddr}",
-    "on-click": "nm-connection-editor"
-  },
+  "tray": { "icon-size": 23, "spacing": 6 },   // 23 px: Handtop's pixel-art tray icons (Bluetooth) stay sharp
   "battery": {
     "bat": "battery",
     "interval": 30,

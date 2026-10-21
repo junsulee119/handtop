@@ -4,7 +4,10 @@ sharp in the app drawer).
   app-theme.png                Theme app: a circle split into a dark and a light half (27x27 art).
   app-external-controller.png  External Controller: the input-mode glass (BT blue / wired brown split
                                diagonally, rainbow stripes) with BT waves, a USB plug and an RG35XX H.
-  app-display.png              Display: a monitor with an HDMI cable to an RG35XX H, on teal glass.
+  app-display.png              Display: a monitor with an HDMI cable to an RG35XX H (no glass, fills the grid).
+  app-ssh.png                  Enable SSH: a terminal saying "SSH" (white) over a ">_" prompt, and a key (no glass).
+  app-recenter.png             Re-center sticks: a stick well seen from above with a crosshair, a faint
+                               drifted knob up-right and a blue arrow back to the knob in the centre (no glass).
   All are 27x27 art x2 + 1 px margin = exactly 56x56, the app drawer's icon size.
   Each also gets a -light variant (dark drawing, pastel glass, deeper ring) for the light theme.
 
@@ -141,57 +144,109 @@ def external_controller_icon(light=False):
 
 
 # ---- Display ------------------------------------------------------------------------------
-DISP_MONITOR = ["W" * 19] + ["W" + "S" * 17 + "W"] * 9 + ["W" * 19]   # screen filled in below
-DISP_STAND = ["........WWW........", "......WWWWWWW......"]
+# No glass: the drawing itself fills the 27x27 grid.
+DISP_MONITOR = ["W" * 23] + ["W" + "S" * 21 + "W"] * 12 + ["W" * 23]   # screen filled in below
+DISP_STAND = ["..........WWW..........", "........WWWWWWW........"]
 DISP_HANDHELD = [".WWWWWWWWWWWWW.",
                  "WWKWWDDDDDWWxWW",
                  "WKKKWDDDDDWyWaW",
                  "WWKWWDDDDDWWbWW",
                  "WWWWWDDDDDWWWWW",
                  ".WWWWWWWWWWWWW."]
-DISP_CABLE = [(15, 21), (16, 21), (17, 21), (18, 21), (19, 21), (20, 21), (21, 21), (22, 20), (23, 19),
-              (23, 18), (23, 17), (23, 16), (23, 15), (23, 14)]       # handheld -> monitor stand
+DISP_CABLE = [(15, 22), (16, 22), (17, 22), (18, 22), (19, 22), (20, 22), (21, 22), (22, 21),
+              (23, 20), (23, 19), (23, 18), (23, 17), (23, 16), (23, 15)]   # handheld -> monitor
 DISP_DESK, DISP_BAR, DISP_WIN = (61, 90, 138), (20, 24, 32), (232, 234, 238)
-TEAL_BG, TEAL_RING = (47, 111, 122), (79, 163, 176)
-LTEAL_BG, LTEAL_RING = (159, 212, 220), (63, 143, 156)
 
 
-def display_icon(light=False):
-    colors = dict(COLORS_LIGHT if light else COLORS)
-    colors.update(S=DISP_DESK, T=DISP_BAR, V=DISP_WIN, C=(79, 88, 105) if light else (170, 179, 194))
-    shade = SHADE_LIGHT if light else SHADE
-    g = {}
-
-    def put(art, x0, y0):
-        for y, row in enumerate(art):
-            for x, c in enumerate(row):
-                if c != ".":
-                    g[(x0 + x, y0 + y)] = c
-    put(DISP_MONITOR, 6, 3)
-    for y in range(9):                                  # desktop with a window and a taskbar
-        for x in range(17):
-            g[(7 + x, 4 + y)] = "T" if y == 8 else "V" if 2 <= y <= 5 and 3 <= x <= 9 else "S"
-    put(DISP_STAND, 6, 14)
-    put(DISP_HANDHELD, 1, 19)
-    for xy in DISP_CABLE:
-        g[xy] = "C"
-    bg, ring = (LTEAL_BG, LTEAL_RING) if light else (TEAL_BG, TEAL_RING)
+def _draw(g, colors, shade):
+    """Paint grid cells; the lowest white pixel of each column gets the shade colour."""
     im = Image.new("RGBA", (EN, EN), (0, 0, 0, 0))
-    for y in range(EN):                                  # plain (unstriped) glass
-        for x in range(EN):
-            outer, inner = _coverage(x, y, 0, 5.5), _coverage(x, y, 1, 4.5)
-            fa = inner * (0.55 if light else 0.45)
-            ra = outer - inner
-            a = fa + ra
-            if a > 0:
-                col = tuple(round((bg[i] * fa + ring[i] * ra) / a) for i in range(3))
-                im.putpixel((x, y), col + (round(min(a, 1) * 255),))
     low = {}
     for (x, y), c in g.items():
         if c == "W":
             low[x] = max(low.get(x, -1), y)
     for (x, y), c in g.items():
         im.putpixel((x, y), (shade if c == "W" and low[x] == y else colors[c]) + (255,))
+    return im
+
+
+def _put(g, art, x0, y0):
+    for y, row in enumerate(art):
+        for x, c in enumerate(row):
+            if c != ".":
+                g[(x0 + x, y0 + y)] = c
+
+
+def display_icon(light=False):
+    colors = dict(COLORS_LIGHT if light else COLORS)
+    colors.update(S=DISP_DESK, T=DISP_BAR, V=DISP_WIN, C=(79, 88, 105) if light else (170, 179, 194))
+    g = {}
+    _put(g, DISP_MONITOR, 3, 1)
+    for y in range(12):                                 # desktop with a window and a taskbar
+        for x in range(21):
+            g[(4 + x, 2 + y)] = "T" if y == 11 else "V" if 2 <= y <= 7 and 3 <= x <= 12 else "S"
+    _put(g, DISP_STAND, 3, 15)
+    _put(g, DISP_HANDHELD, 0, 20)
+    for xy in DISP_CABLE:
+        g[xy] = "C"
+    return _tile(_draw(g, colors, SHADE_LIGHT if light else SHADE))
+
+
+# ---- Enable SSH -----------------------------------------------------------------------------
+# No glass: a 25-wide terminal and a key fill the 27x27 grid.
+SSH_TERM = ["T" * 25, "TrTyTgT" + "T" * 18] + ["W" + "D" * 23 + "W"] * 14 + ["W" * 25]
+SSH_KEY = [".YYY.....", "Y...Y....", "Y...YYYYY", "Y...Y.Y.Y", ".YYY....."]
+SSH_GLYPH = {"S": [".###.", "#...#", "#....", ".###.", "....#", "#...#", ".###."],
+             "H": ["#...#", "#...#", "#...#", "#####", "#...#", "#...#", "#...#"]}
+
+
+def ssh_icon(light=False):
+    colors = dict(COLORS_LIGHT if light else COLORS)
+    # G: the text, white
+    colors.update(D=(22, 26, 34), G=(232, 234, 238), Y=(240, 200, 60), r=(226, 70, 70), y=(240, 200, 60),
+                  g=(80, 190, 100), T=(79, 88, 105) if light else (200, 205, 214))
+    g = {}
+    _put(g, SSH_TERM, 1, 3)
+    for i, ch in enumerate("SSH"):                       # 5x7 letters, centred in the terminal
+        for y, row in enumerate(SSH_GLYPH[ch]):
+            for x, c in enumerate(row):
+                if c == "#":
+                    g[(5 + i * 6 + x, 7 + y)] = "G"
+    for dx, dy in ((0, 0), (1, 1), (0, 2), (3, 2), (4, 2)):   # small ">_" prompt
+        g[(5 + dx, 15 + dy)] = "G"
+    _put(g, SSH_KEY, 17, 18)
+    return _tile(_draw(g, colors, SHADE_LIGHT if light else SHADE))
+
+
+# ---- Re-center sticks -----------------------------------------------------------------------
+def _disc(g, cx, cy, r, c, ring=None):
+    for y in range(EN):
+        for x in range(EN):
+            d = ((x - cx) ** 2 + (y - cy) ** 2) ** 0.5
+            if d <= r + 0.45:
+                g[(x, y)] = ring if ring and d > r - 0.55 else c
+
+
+RC_ARROW = [(20, 6), (19, 7), (18, 8), (17, 9), (16, 10),        # from the drifted knob's centre,
+            (17, 10), (18, 10), (16, 9), (16, 8)]                # head pointing down-left
+
+
+def recenter_icon(light=False):
+    colors = dict(COLORS_LIGHT if light else COLORS)
+    colors.update(S=SHADE_LIGHT if light else SHADE, R=COLORS_LIGHT["K"] if light else COLORS["C"],
+                  G=(138, 147, 163) if light else (70, 78, 94))
+    g = {}
+    _disc(g, 13, 13, 12.5, "D", ring="R")              # the stick's well
+    for i in range(2, 25, 2):                          # dotted crosshair
+        g[(i, 13)] = g[(13, i)] = "K"
+    _disc(g, 19, 7, 4, "D", ring="G")                  # the drifted knob: outline only
+    _disc(g, 13, 13, 4.5, "W", ring="S")               # the knob, back in the centre
+    _disc(g, 13, 13, 1, "S")
+    for xy in RC_ARROW:
+        g[xy] = "x"
+    im = Image.new("RGBA", (EN, EN), (0, 0, 0, 0))
+    for xy, c in g.items():
+        im.putpixel(xy, colors[c] + (255,))
     return _tile(im)
 
 
@@ -201,3 +256,5 @@ if __name__ == "__main__":
         theme_icon(light).save(f"{out}/app-theme{sfx}.png")
         external_controller_icon(light).save(f"{out}/app-external-controller{sfx}.png")
         display_icon(light).save(f"{out}/app-display{sfx}.png")
+        ssh_icon(light).save(f"{out}/app-ssh{sfx}.png")
+        recenter_icon(light).save(f"{out}/app-recenter{sfx}.png")

@@ -87,7 +87,7 @@ Selection rule: light apps for 1 GB RAM; Qt apps preferred where equal, since mo
 | Bluetooth | `bluez`, `blueman` | |
 | Audio | `pipewire`, `wireplumber`, `pipewire-pulse`, `pavucontrol` | |
 | Clipboard | `wl-clipboard` | Required by L3/R3 copy/paste |
-| Brightness / volume | `brightnessctl`, `wireplumber` (`wpctl`) | Used by F + Vol and Vol keys |
+| Brightness / volume | `brightnessctl`, `wireplumber` (`wpctl`) | Used by F + Vol and Vol keys; the pop-up bar is Handtop's own `rg35xxh-osd` (`src/osd`: plain C Wayland client, ~2 MB, built by `build/07b-osd.sh`) |
 | Screenshots | `grim`, `slurp` | |
 | Viewers | `imv` (images), `qpdfview` (PDF), `mpv` (video, CPU decode) | |
 | Archives | `xarchiver` | |
@@ -140,4 +140,4 @@ Earlier rounds showed Firefox's rendering path (GPU/CPU WebRender, Wayland/X11),
 
 Your own `~/.config/waybar/style.css` or `~/.config/mako/config` still wins over both themes.
 
-Not themed yet (stay dark): terminal (foot), volume/brightness bars (wob), on-screen keyboard, External Controller status screen (it already draws from `PALETTES`, so light is new palette entries). Possible later: follow the time of day.
+Not themed yet (stay dark): terminal (foot), volume/brightness bar (`rg35xxh-osd`), on-screen keyboard, External Controller status screen (it already draws from `PALETTES`, so light is new palette entries). Possible later: follow the time of day.

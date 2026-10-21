@@ -49,6 +49,11 @@
   </mouse>
 
   <windowRules>
+    <!-- These Handtop apps open on the handheld's screen when a monitor is connected too (no
+         effect when the handheld screen is off, e.g. Monitor only). One rule per app id; the
+         Display picker and the controller status screen pick their screen themselves. -->
+    <windowRule identifier="rg35xxh-theme"><action name="MoveToOutput" output="DSI-1" /></windowRule>
+    <windowRule identifier="rg35xxh-external-controller"><action name="MoveToOutput" output="DSI-1" /></windowRule>
     <!-- Small 640x480 screen: open normal windows maximized; dialogs keep their size. -->
     <windowRule type="normal"><action name="Maximize" /></windowRule>
   </windowRules>

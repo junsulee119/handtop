@@ -31,6 +31,7 @@ Taken unmodified from the official image
 | What | License | Source |
 |---|---|---|
 | Xbox Wireless Controller (model 1914) BLE HID report descriptor, 283 bytes, in `overlay/usr/local/sbin/rg35xxh-btpad` | MIT | [Mystfit/ESP32-BLE-CompositeHID](https://github.com/Mystfit/ESP32-BLE-CompositeHID), `XboxDescriptors.h` (`XboxOneS_1914_HIDDescriptor`), read from a physical controller; matches the BLE dump in [DJm00n/ControllersInfo](https://github.com/DJm00n/ControllersInfo). How Windows picks its driver (PnP ID, product IDs): [WikDra/esp32-hid-gamepad-bridge](https://github.com/WikDra/esp32-hid-gamepad-bridge) (MIT) |
+| wlr-layer-shell protocol description, `src/osd/protocol/wlr-layer-shell-unstable-v1.xml` (used to build `rg35xxh-osd`) | HPND-style (notice inside the file) | [wlroots/wlr-protocols](https://gitlab.freedesktop.org/wlroots/wlr-protocols), Copyright © 2017 Drew DeVault |
 
 Original notice of ESP32-BLE-CompositeHID (MIT):
 

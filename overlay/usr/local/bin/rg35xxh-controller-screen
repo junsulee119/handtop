@@ -91,6 +91,31 @@ STATE_TEXT = {
 }
 
 
+def handheld_monitor():
+    """The handheld's own screen (DSI-1, 640x480) when an external display is connected too, so the
+    status screen does not open on the monitor (a layer surface without an output goes to the one
+    with the pointer). None: only one screen, or the handheld screen is off (Monitor only)."""
+    import json
+    import subprocess
+    try:
+        outs = json.loads(subprocess.run(["wlr-randr", "--json"], capture_output=True, text=True,
+                                         timeout=5).stdout)
+    except (OSError, subprocess.SubprocessError, ValueError):
+        return None
+    if not any(o.get("enabled") and o["name"] != "DSI-1" for o in outs):
+        return None
+    if not any(o.get("enabled") and o["name"] == "DSI-1" for o in outs):
+        return None
+    ext_models = {o.get("model") or "" for o in outs if o["name"] != "DSI-1"}
+    disp = Gdk.Display.get_default()
+    for i in range(disp.get_n_monitors()):
+        mon = disp.get_monitor(i)
+        g = mon.get_geometry()
+        if (g.width, g.height) == (W, H) and (mon.get_model() or "") not in ext_models - {""}:
+            return mon
+    return None
+
+
 class Screen(Gtk.Window):
     def __init__(self, style="detailed"):
         super().__init__()
@@ -104,6 +129,9 @@ class Screen(Gtk.Window):
             GtkLayerShell.set_anchor(self, edge, True)
         GtkLayerShell.set_exclusive_zone(self, -1)
         GtkLayerShell.set_keyboard_mode(self, GtkLayerShell.KeyboardMode.NONE)
+        handheld = handheld_monitor()
+        if handheld is not None:                # with an HDMI display: on the handheld, not the monitor
+            GtkLayerShell.set_monitor(self, handheld)
         self.area = Gtk.DrawingArea()
         self.area.connect("draw", self.on_draw)
         self.add(self.area)

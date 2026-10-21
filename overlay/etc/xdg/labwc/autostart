@@ -2,10 +2,7 @@
 L="$HOME/.local/state/session"; mkdir -p "$L" "$HOME/.cache"
 dbus-update-activation-environment --systemd WAYLAND_DISPLAY XDG_CURRENT_DESKTOP >/dev/null 2>&1
 (while :; do rg35xxh-inputd >>"$L/inputd.log" 2>&1; sleep 2; done) &
-for k in volume brightness; do        # volume / brightness bars (wob)
-  f="$XDG_RUNTIME_DIR/wob-$k.sock"; [ -p "$f" ] || mkfifo "$f"
-  (tail -f "$f" | wob -c "/etc/xdg/wob/$k.ini" >"$L/wob-$k.log" 2>&1) &
-done
+rg35xxh-osd >"$L/osd.log" 2>&1 &     # volume / brightness bar, left edge (src/osd)
 rg35xxh-themed swaybg >"$L/swaybg.log" 2>&1 &     # dark | light: rg35xxh-theme
 kanshi -c /etc/xdg/kanshi/config >"$L/kanshi.log" 2>&1 &
 rg35xxh-themed waybar >"$L/waybar.log" 2>&1 &

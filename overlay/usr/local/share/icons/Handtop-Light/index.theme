@@ -1,0 +1,16 @@
+[Icon Theme]
+Name=Handtop-Light
+Comment=Handtop light theme: taskbar icons drawn for a light background (rg35xxh-theme light)
+Inherits=Adwaita,hicolor
+Hidden=true
+Directories=22x22/apps,24x24/apps
+
+[22x22/apps]
+Size=22
+Context=Applications
+Type=Threshold
+
+[24x24/apps]
+Size=24
+Context=Applications
+Type=Threshold

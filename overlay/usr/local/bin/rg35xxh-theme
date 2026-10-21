@@ -15,7 +15,10 @@ at once:
   - taskbar icons (input mode, battery) and Handtop's app icons (light: per-user copies of their
     .desktop files in ~/.local/share/applications pointing to the -light icons);
   - GTK apps: gsettings color-scheme + gtk-application-prefer-dark-theme (open apps may need a
-    restart to follow).
+    restart to follow);
+  - tray icons drawn by Handtop (Wi-Fi): light makes "Handtop-Light" the GTK icon theme (it holds
+    only those and inherits Adwaita), dark sets Adwaita back. A different icon theme you chose
+    yourself is left alone.
 Not yet themed: terminal (foot), volume/brightness bars, on-screen keyboard, External Controller
 status screen (see docs/desktop.md).
 """
@@ -34,7 +37,8 @@ WAYBAR_SIGNALS = (8, 9)          # image#inputmode, image#battery
 DATA = os.environ.get("XDG_DATA_HOME", os.path.expanduser("~/.local/share"))
 LABWC_USER_THEME = os.path.join(DATA, "themes", "Handtop", "labwc", "themerc")
 LABWC_LIGHT = "/usr/share/themes/Handtop-Light/labwc/themerc"
-APPS = ("rg35xxh-theme.desktop", "rg35xxh-bt-controller.desktop", "rg35xxh-display.desktop")   # have -light icons
+APPS = ("rg35xxh-theme.desktop", "rg35xxh-bt-controller.desktop", "rg35xxh-display.desktop",
+        "rg35xxh-enable-ssh.desktop", "rg35xxh-recenter-sticks.desktop")   # have -light icons
 MARK = "X-Handtop-Theme=light"
 LOG = os.path.expanduser("~/.local/state/session")
 
@@ -68,10 +72,19 @@ def _waybar_refresh():
             pass
 
 
+ICON_THEMES = {"dark": "Adwaita", "light": "Handtop-Light"}
+
+
 def _gtk(theme):
     dark = theme == "dark"
     subprocess.run(["gsettings", "set", "org.gnome.desktop.interface", "color-scheme",
                     "prefer-dark" if dark else "default"], stderr=subprocess.DEVNULL)
+    r = subprocess.run(["gsettings", "get", "org.gnome.desktop.interface", "icon-theme"],
+                       capture_output=True, text=True)
+    own = r.stdout.strip().strip("'") in ICON_THEMES.values()
+    if own:
+        subprocess.run(["gsettings", "set", "org.gnome.desktop.interface", "icon-theme",
+                        ICON_THEMES[theme]], stderr=subprocess.DEVNULL)
     cp = configparser.ConfigParser(interpolation=None)
     cp.optionxform = str
     try:
@@ -81,6 +94,8 @@ def _gtk(theme):
     if not cp.has_section("Settings"):
         cp.add_section("Settings")
     cp.set("Settings", "gtk-application-prefer-dark-theme", "true" if dark else "false")
+    if own and cp.get("Settings", "gtk-icon-theme-name", fallback="Adwaita") in ICON_THEMES.values():
+        cp.set("Settings", "gtk-icon-theme-name", ICON_THEMES[theme])
     os.makedirs(os.path.dirname(GTK_INI), exist_ok=True)
     with open(GTK_INI, "w") as f:
         cp.write(f, space_around_delimiters=False)

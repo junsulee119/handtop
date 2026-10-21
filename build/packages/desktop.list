@@ -22,7 +22,6 @@ wlrctl
 grim
 slurp
 brightnessctl
-wob                      # volume / brightness bars
 swayidle                 # auto-sleep after idle (rg35xxh-autosleep)
 network-manager-gnome
 # polkit agent; without it apt picks hyprpolkitagent from backports

@@ -8,7 +8,7 @@ apt-get install -y -qq --no-install-recommends \
   parted fdisk dosfstools e2fsprogs mtools squashfs-tools device-tree-compiler \
   qemu-system-arm rsync xz-utils cpio lz4 zstd gzip file curl ca-certificates \
   debian-archive-keyring u-boot-tools \
-  gcc-aarch64-linux-gnu pkg-config git \
+  gcc-aarch64-linux-gnu pkg-config git libwayland-bin make \
   bc bison flex libelf-dev libssl-dev kmod   # kernel module build (06b-cedrus.sh)
 
 # Register ARM64 emulation (needed to run package scripts inside the arm64 rootfs).

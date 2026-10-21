@@ -3,6 +3,6 @@ Type=Application
 Name=Enable SSH
 Comment=Set your own password and turn on the SSH server
 Exec=rg35xxh-enable-ssh
-Icon=network-server
+Icon=/usr/local/share/rg35xxh/icons/app-ssh.png
 Terminal=false
 Categories=Network;System;

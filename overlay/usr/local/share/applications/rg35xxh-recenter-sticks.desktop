@@ -3,6 +3,6 @@ Type=Application
 Name=Re-center sticks
 Comment=Fix stick drift: measure the stick centre again (hands off the sticks)
 Exec=rg35xxh-recenter-sticks
-Icon=input-gaming
+Icon=/usr/local/share/rg35xxh/icons/app-recenter.png
 Terminal=false
 Categories=Settings;
