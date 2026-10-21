@@ -27,7 +27,7 @@ from evdev import ff
 from gi.repository import GLib
 
 from . import config
-from .core import PAD_AXES, Core
+from .core import PAD_AXES, Core, PointerLayout
 
 log = logging.getLogger("rg35xxh-inputd")
 
@@ -148,6 +148,8 @@ class Daemon:
     def __init__(self):
         settings, bindings, self.hw, self.config_path = config.load()
         self.core = Core(settings, bindings)
+        self.layout = PointerLayout()   # per-screen pointer speed (rg35xxh-display writes the layout)
+        self.layout_mtime = None
         self.devices = []          # grabbed physical devices
         self.gamepad = None
         self.absinfo = {}
@@ -413,10 +415,41 @@ class Daemon:
         now = time.monotonic()
         if self.ticks % 10 == 0:
             self.core.set_screen_off(os.path.exists(runtime_flag("rg35xxh-screen-off")))
+            self._layout_reload()
             if self.osk:
                 self.core.set_osk_visible(self.osk.visible)
         self._run(self.core.tick(now))
         return True
+
+    def _layout_reload(self):
+        """Screen layout for per-screen pointer speed: JSON written by rg35xxh-display on every
+        layout change ([{"x","y","w","h","scale"}, ...]); none = handheld only, speed 1."""
+        path = runtime_flag("rg35xxh-pointer-layout")
+        try:
+            mtime = os.stat(path).st_mtime
+        except OSError:
+            mtime = None
+        if mtime == self.layout_mtime:
+            return
+        self.layout_mtime = mtime
+        rects = []
+        if mtime is not None:
+            try:
+                import json
+                with open(path) as f:
+                    rects = json.load(f)
+            except (OSError, ValueError):
+                rects = []
+        self.layout.set_rects(rects)
+        if len(self.layout.rects) > 1 and getattr(self, "mouse", None):
+            # Two screens: start from a known point. A long move up-left ends in the layout's
+            # top-left corner (the compositor clamps it), and the estimate starts there too.
+            self.mouse.write(E.EV_REL, E.REL_X, -30000)
+            self.mouse.write(E.EV_REL, E.REL_Y, -30000)
+            self.mouse.syn()
+            self.layout.x, self.layout.y = self.layout._closest(-30000, -30000)
+        self.core.pointer_scale = self.layout.scale(self.core.s["display_speed_scale"])
+        log.info("screen layout for pointer speed: %s -> x%.2f", rects, self.core.pointer_scale)
 
     # ------------------------------------------------------------ actions
     def _run(self, actions):
@@ -427,6 +460,8 @@ class Daemon:
                 self.mouse.write(E.EV_REL, E.REL_X, a[1])
                 self.mouse.write(E.EV_REL, E.REL_Y, a[2])
                 mouse_dirty = True
+                self.layout.move(a[1], a[2])
+                self.core.pointer_scale = self.layout.scale(self.core.s["display_speed_scale"])
             elif kind == "wheel":
                 if a[1]:
                     self.mouse.write(E.EV_REL, E.REL_WHEEL_HI_RES, a[1])

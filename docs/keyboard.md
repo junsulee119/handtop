@@ -47,7 +47,7 @@ The keyboard always lives on the **handheld screen** (found as the GDK monitor n
 | HDMI, extend | Bottom of the handheld screen (right of the monitor), same as handheld-only. |
 | HDMI, mirror | Bottom of the shared 640×480 picture. |
 
-Switching is done by `rg35xxh-display osk on|off` (see `desktop.md` → External display).
+Switching is done by `rg35xxh-display osk on|off` (see `desktop.md` → External display; not while the Display app is open, which keeps the handheld screen on by itself).
 
 ## Visual design
 

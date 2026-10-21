@@ -1,28 +1,57 @@
 #!/usr/bin/python3
-"""Screen layout when an HDMI monitor is connected.
+"""Screen layout when an external (HDMI) display is connected, and the Display app.
 
+  rg35xxh-display                             open the Display app (same as "pick")
+  rg35xxh-display pick                        the layout picker, on the handheld's screen
+  rg35xxh-display connected                   kanshi, on HDMI connect: open the picker with a 5 s
+                                              countdown (restarted by any input); then the saved mode
   rg35xxh-display set monitor|extend|mirror   choose and apply a mode (remembered)
-  rg35xxh-display apply                       re-apply the saved mode (kanshi runs this on hotplug)
+  rg35xxh-display apply                       re-apply the saved mode
   rg35xxh-display osk on|off                  monitor mode: wake the handheld screen for the keyboard
   rg35xxh-display status                      print mode, docked yes/no
+  rg35xxh-display --preview FILE [--light] [--undocked] [--mode M] [--confirm]   picker as PNG
 
-Modes (only matter while HDMI is connected):
+Modes (only matter while an external display is connected):
   monitor  handheld screen off; it turns on as a keyboard panel when X shows the keyboard
-  extend   two screens, handheld to the right of the monitor
+  extend   two screens, handheld below the monitor (centred): move the pointer off its bottom edge
   mirror   monitor switches to 640x480 and shows the same picture as the handheld
+
+While the picker is open only the handheld screen is on (the external display is off), so the
+pointer cannot end up on the monitor (flag file rg35xxh-display-picker in $XDG_RUNTIME_DIR); the
+chosen or saved mode's layout follows when it closes.
+
+Resolution & refresh rate: per monitor (make + model + serial) in ~/.config/rg35xxh/display-modes.json,
+otherwise the monitor's preferred mode. The picker's Resolution / Refresh steppers and Test try a mode
+on the monitor (placed apart from the handheld, so the pointer stays on it) and switch back after
+15 s unless kept. Refresh rates are passed exactly as the monitor lists them (e.g. 239.998 Hz): a
+rounded value is an "unknown mode" to wlr-randr.
 """
 import json
 import os
+import signal
 import subprocess
 import sys
 
 INTERNAL = "DSI-1"
 MODES = ("monitor", "extend", "mirror")
-STATE = os.path.join(os.environ.get("XDG_CONFIG_HOME", os.path.expanduser("~/.config")), "rg35xxh", "display-mode")
-OSK_FLAG = os.path.join(os.environ.get("XDG_RUNTIME_DIR", "/tmp"), "rg35xxh-osk-panel")
+CONF = os.path.join(os.environ.get("XDG_CONFIG_HOME", os.path.expanduser("~/.config")), "rg35xxh")
+STATE = os.path.join(CONF, "display-mode")
+RUN = os.environ.get("XDG_RUNTIME_DIR", "/tmp")
+OSK_FLAG = os.path.join(RUN, "rg35xxh-osk-panel")
+PICKER_FLAG = os.path.join(RUN, "rg35xxh-display-picker")
+PICKER_PID = os.path.join(RUN, "rg35xxh-display-picker.pid")
+POINTER_LAYOUT = os.path.join(RUN, "rg35xxh-pointer-layout")   # for the input daemon's pointer speed
+MODES_FILE = os.path.join(CONF, "display-modes.json")          # resolution/refresh per monitor
+CONFIRM = 15.0                                                 # s before a tested mode switches back
 FAR = "4000,0"   # not adjacent to the monitor, so the pointer cannot wander onto it
+COUNTDOWN = 5.0
+NAMES = {"monitor": "Monitor only", "extend": "Extend", "mirror": "Mirror"}
+TEXTS = {"monitor": "Handheld screen off.\nX wakes it as a keyboard.",
+         "extend": "Two screens. Handheld\nbelow the monitor.",
+         "mirror": "Same picture on both.\nMonitor runs at 640x480."}
 
 
+# ---------------------------------------------------------------------------------- layout
 def mode():
     try:
         with open(STATE) as f:
@@ -32,13 +61,105 @@ def mode():
         return "monitor"
 
 
+def save_mode(m):
+    os.makedirs(CONF, exist_ok=True)
+    with open(STATE, "w") as f:
+        f.write(m + "\n")
+
+
 def outputs():
-    out = subprocess.run(["wlr-randr", "--json"], capture_output=True, text=True, check=True).stdout
-    return {o["name"]: o for o in json.loads(out)}
+    try:
+        out = subprocess.run(["wlr-randr", "--json"], capture_output=True, text=True, check=True, timeout=5).stdout
+        return {o["name"]: o for o in json.loads(out)}
+    except (OSError, subprocess.SubprocessError, ValueError):
+        return {}
 
 
 def external(outs):
     return next((o for n, o in outs.items() if n != INTERNAL), None)
+
+
+def monitor_key(ext):
+    return " ".join(str(ext.get(k) or "") for k in ("make", "model", "serial")).strip() or ext["name"]
+
+
+def mode_spec(md):
+    return f"{md['width']}x{md['height']}@{md['refresh']:.3f}"
+
+
+def parse_spec(spec):
+    try:
+        size, rate = spec.split("@")
+        w, h = size.split("x")
+        return int(w), int(h), float(rate)
+    except (ValueError, AttributeError):
+        return None
+
+
+def spec_text(spec):
+    p = parse_spec(spec)
+    if not p:
+        return ""
+    rate = round(p[2], 2)
+    return f"{p[0]}x{p[1]} @ {int(rate) if rate == int(rate) else rate} Hz"
+
+
+def saved_modes():
+    try:
+        with open(MODES_FILE) as f:
+            d = json.load(f)
+        return d if isinstance(d, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def saved_spec(ext):
+    """The kept mode for this monitor, if it still offers it."""
+    spec = saved_modes().get(monitor_key(ext))
+    p = parse_spec(spec)
+    if p and any((md["width"], md["height"]) == p[:2] and abs(md["refresh"] - p[2]) < 0.01
+                 for md in ext.get("modes", [])):
+        return spec
+    return None
+
+
+def save_spec(ext, spec):
+    d = saved_modes()
+    d[monitor_key(ext)] = spec
+    os.makedirs(CONF, exist_ok=True)
+    with open(MODES_FILE, "w") as f:
+        json.dump(d, f, indent=1)
+
+
+def preferred_spec(ext):
+    md = next((md for md in ext.get("modes", []) if md.get("preferred")), None) or \
+        next(iter(ext.get("modes", [])), None)
+    return mode_spec(md) if md else None
+
+
+def wanted_spec(ext):
+    return saved_spec(ext) or preferred_spec(ext)
+
+
+def mode_args(ext):
+    spec = saved_spec(ext)
+    return ["--mode", spec + "Hz"] if spec else ["--preferred"]
+
+
+def resolutions(ext):
+    """[(w, h, [refresh, ...] high to low, preferred-rate or None)], largest first."""
+    by = {}
+    pref = parse_spec(preferred_spec(ext) or "")
+    for md in ext.get("modes", []):
+        rates = by.setdefault((md["width"], md["height"]), [])
+        if all(abs(r - md["refresh"]) >= 0.01 for r in rates):
+            rates.append(md["refresh"])
+    out = []
+    for (w, h), rates in by.items():
+        rates.sort(reverse=True)
+        out.append((w, h, rates, pref[2] if pref and (w, h) == pref[:2] else None))
+    out.sort(key=lambda r: (r[0] * r[1], r[0]), reverse=True)
+    return out
 
 
 def randr(*args):
@@ -50,6 +171,36 @@ def notify(text):
 
 
 def apply(osk=None):
+    _apply(osk)
+    write_pointer_layout()
+
+
+def write_pointer_layout():
+    """The enabled outputs and a pointer speed factor for each (its diagonal vs. the handheld's
+    640x480), so the input daemon moves the pointer across a big screen in about the same time."""
+    rects = []
+    for name, o in outputs().items():
+        if not o.get("enabled"):
+            continue
+        cur = next((md for md in o.get("modes", []) if md.get("current")), None)
+        if not cur:
+            continue
+        sc = float(o.get("scale") or 1.0)
+        w, h = round(cur["width"] / sc), round(cur["height"] / sc)
+        factor = 1.0 if name == INTERNAL else max(1.0, (w * w + h * h) ** 0.5 / 800.0)
+        pos = o.get("position") or {}
+        rects.append({"name": name, "x": pos.get("x", 0), "y": pos.get("y", 0), "w": w, "h": h,
+                      "scale": round(factor, 3)})
+    tmp = POINTER_LAYOUT + ".tmp"
+    try:
+        with open(tmp, "w") as f:
+            json.dump(rects, f)
+        os.replace(tmp, POINTER_LAYOUT)
+    except OSError:
+        pass
+
+
+def _apply(osk=None):
     outs = outputs()
     ext = external(outs)
     if ext is None:            # handheld only: kanshi already enabled the panel
@@ -59,41 +210,659 @@ def apply(osk=None):
     m = mode()
     if osk is None:
         osk = os.path.exists(OSK_FLAG)
-    if m == "monitor":
-        randr("--output", name, "--on", "--preferred", "--pos", "0,0")
+    if os.path.exists(PICKER_FLAG):
+        # picker open: handheld only, so the pointer stays on it
+        randr("--output", INTERNAL, "--on", "--mode", "640x480", "--pos", "0,0")
+        randr("--output", name, "--off")
+    elif m == "monitor":
+        randr("--output", name, "--on", *mode_args(ext), "--pos", "0,0")
         if osk:
             randr("--output", INTERNAL, "--on", "--pos", FAR)
         else:
             randr("--output", INTERNAL, "--off")
-    elif m == "extend":
-        randr("--output", name, "--on", "--preferred", "--pos", "0,0")
-        width = next((md["width"] for md in outputs()[name]["modes"] if md.get("current")), 1920)
-        randr("--output", INTERNAL, "--on", "--pos", f"{width},0")
+    elif m == "extend":            # handheld below the monitor, centred (how the two usually sit)
+        randr("--output", name, "--on", *mode_args(ext), "--pos", "0,0")
+        cur = next((md for md in outputs().get(name, {}).get("modes", []) if md.get("current")), None)
+        width, height = (cur["width"], cur["height"]) if cur else (1920, 1080)
+        randr("--output", INTERNAL, "--on", "--mode", "640x480", "--pos", f"{max(0, (width - 640) // 2)},{height}")
     else:  # mirror: same 640x480 area on both
         randr("--output", name, "--on", "--mode", "640x480", "--pos", "0,0")
         randr("--output", INTERNAL, "--on", "--pos", "0,0")
 
 
-def main(argv):
-    cmd = argv[1] if len(argv) > 1 else "apply"
-    if cmd == "set" and len(argv) > 2 and argv[2] in MODES:
-        os.makedirs(os.path.dirname(STATE), exist_ok=True)
-        with open(STATE, "w") as f:
-            f.write(argv[2] + "\n")
+def model_name(ext):
+    return " ".join(x for x in (ext.get("make"), ext.get("model")) if x and x.lower() != "unknown").strip() \
+        or ext["name"]
+
+
+def describe(ext):
+    if not ext:
+        return None
+    return "  ·  ".join(x for x in (model_name(ext), spec_text(wanted_spec(ext) or "")) if x)
+
+
+def picker_running():
+    try:
+        with open(PICKER_PID) as f:
+            pid = int(f.read())
+        os.kill(pid, 0)
+        return pid
+    except (OSError, ValueError):
+        return None
+
+
+# ---------------------------------------------------------------------------------- drawing
+PIX = {  # pixel art, '.' = transparent; S = screen
+    "monitor": ["WWWWWWWWWWWWWWWWWWWWW"] + ["W" + "S" * 19 + "W"] * 11 + ["WWWWWWWWWWWWWWWWWWWWW",
+                                                                        "........WWWWW........",
+                                                                        "......WWWWWWWWW......"],
+    "handheld": [".WWWWWWWWWWW.",
+                 "WWWWSSSSSWWWW",
+                 "WKWWSSSSSWWRW",
+                 "WWWWSSSSSWWWW",
+                 "WKWWSSSSSWWKW",
+                 ".WWWWWWWWWWW."],
+}
+PIX["screen"] = PIX["monitor"][:13]          # the monitor without its stand (stacked layouts)
+SCREEN = {"monitor": (1, 1, 19, 11), "screen": (1, 1, 19, 11), "handheld": (4, 1, 5, 4)}
+
+
+def palette(light):
+    if light:
+        return dict(bg=(0.925, 0.937, 0.957), card=(1, 1, 1), card_hi=(0.89, 0.92, 0.97), border=(0.79, 0.81, 0.85),
+                    accent=(0.24, 0.41, 0.69), text=(0.17, 0.19, 0.23), dim=(0.42, 0.45, 0.52), body=(0.17, 0.19, 0.23),
+                    off=(0.10, 0.11, 0.14), desk=(0.36, 0.50, 0.74), bar=(0.09, 0.10, 0.13), win=(0.93, 0.94, 0.96),
+                    sun=(0.94, 0.78, 0.24), track=(0.84, 0.86, 0.90), btn=(0.88, 0.90, 0.94))
+    return dict(bg=(0.10, 0.12, 0.15), card=(0.14, 0.17, 0.22), card_hi=(0.18, 0.22, 0.29), border=(0.23, 0.27, 0.34),
+                accent=(0.56, 0.71, 1.0), text=(0.91, 0.92, 0.93), dim=(0.55, 0.58, 0.64), body=(0.91, 0.92, 0.93),
+                off=(0.04, 0.05, 0.07), desk=(0.24, 0.35, 0.54), bar=(0.08, 0.09, 0.12), win=(0.91, 0.92, 0.93),
+                sun=(0.94, 0.78, 0.24), track=(0.20, 0.23, 0.29), btn=(0.20, 0.24, 0.31))
+
+
+def screen_pixel(content, x, y, w, h, P):
+    """Colour of screen pixel (x, y) of a w x h screen showing `content`."""
+    if content == "off":
+        return P["off"]
+    if y == h - 1:
+        return P["bar"]                                          # taskbar
+    if content == "same":                                        # mirror: one simple picture, any size
+        cx, cy = (w - 1) / 2, (h - 2) / 2
+        if abs(x - cx) <= max(1, w // 8) and abs(y - cy) <= max(1, h // 6):
+            return P["sun"]
+        return P["desk"]
+    if content == "upper":                                       # extend: a window running off the bottom
+        return P["win"] if y >= 6 and 7 <= x <= 12 else P["desk"]
+    if content == "lower":
+        return P["win"] if y <= 1 and 1 <= x <= 3 else P["desk"]
+    return P["desk"]
+
+
+def draw_pix(cr, name, x0, y0, z, content, P):
+    sx, sy, sw, sh = SCREEN[name]
+    for y, row in enumerate(PIX[name]):
+        for x, c in enumerate(row):
+            if c == ".":
+                continue
+            if c == "S":
+                col = screen_pixel(content, x - sx, y - sy, sw, sh, P)
+            elif c == "K":
+                col = P["dim"]
+            elif c == "R":
+                col = (0.89, 0.27, 0.27)
+            else:
+                col = P["body"]
+            cr.set_source_rgb(*col)
+            cr.rectangle(x0 + x * z, y0 + y * z, z, z)
+            cr.fill()
+
+
+def illustration(cr, m, cx, top, P, z=5):
+    mw, mh = 21 * z, 15 * z
+    hw, hh = 13 * z, 6 * z
+    if m == "monitor":
+        draw_pix(cr, "monitor", cx - mw // 2 - 18 * z // 5, top, z, "desk", P)
+        draw_pix(cr, "handheld", cx + mw // 2 - 32 * z // 5, top + mh - hh + 8 * z // 5, z, "off", P)
+    elif m == "extend":
+        z2 = max(2, z - 1)                                       # a little smaller so both fit the card
+        draw_pix(cr, "screen", cx - 21 * z2 // 2, top, z2, "upper", P)
+        draw_pix(cr, "handheld", cx - 13 * z2 // 2, top + 13 * z2 + 2 * z2, z2, "lower", P)
+    else:
+        x = cx - (mw + z + hw) // 2
+        draw_pix(cr, "monitor", x, top, z, "same", P)
+        draw_pix(cr, "handheld", x + mw + z, top + 11 * z - hh + 2 * z, z, "same", P)
+
+
+def rrect(cr, x, y, w, h, r):
+    import math
+    cr.new_sub_path()
+    cr.arc(x + w - r, y + r, r, -math.pi / 2, 0)
+    cr.arc(x + w - r, y + h - r, r, 0, math.pi / 2)
+    cr.arc(x + r, y + h - r, r, math.pi / 2, math.pi)
+    cr.arc(x + r, y + r, r, math.pi, 3 * math.pi / 2)
+    cr.close_path()
+
+
+def text(cr, s, x, y, size, col, bold=False, align="left"):
+    import cairo
+    cr.select_font_face("Noto Sans", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_BOLD if bold else cairo.FONT_WEIGHT_NORMAL)
+    cr.set_font_size(size)
+    for i, line in enumerate(s.split("\n")):
+        ext = cr.text_extents(line)
+        xx = x - ext.x_advance / 2 if align == "center" else x - ext.x_advance if align == "right" else x
+        cr.move_to(xx, y + i * size * 1.35)
+        cr.set_source_rgb(*col)
+        cr.show_text(line)
+
+
+W, H = 640, 480
+CARD_W, CARD_H, CARD_Y, GAP, MARGIN = 188, 150, 84, 14, 24
+CLOSE = (W - MARGIN - 104, 410, 104, 40)
+LIST_Y, ROW_H, ROWS = 262, 28, 5       # resolution / refresh lists (scroll bar when longer)
+SB_W = 12                              # scroll bar width
+RES_LIST = (MARGIN, LIST_Y, 262, ROW_H * ROWS)
+RATE_LIST = (MARGIN + 274, LIST_Y, 196, ROW_H * ROWS)
+TEST = (W - MARGIN - 110, LIST_Y, 110, 40)
+BOX = (100, 136, 440, 208)             # confirm dialog
+KEEP = (BOX[0] + BOX[2] - 24 - 120, BOX[1] + BOX[3] - 24 - 40, 120, 40)
+REVERT = (KEEP[0] - 12 - 136, KEEP[1], 136, 40)
+
+
+def card_rect(i):
+    return MARGIN + i * (CARD_W + GAP), CARD_Y, CARD_W, CARD_H
+
+
+def button(cr, st, tid, rect, label, P, primary=False, enabled=True):
+    x, y, w, h = rect
+    rrect(cr, x, y, w, h, 8)
+    if primary and enabled:
+        cr.set_source_rgb(*P["accent"])
+    else:
+        cr.set_source_rgb(*(P["card_hi"] if st.get("hover") == tid and enabled else P["btn"]))
+    cr.fill()
+    fg = P["bg"] if primary and enabled else (P["text"] if enabled else P["dim"])
+    text(cr, label, x + w / 2, y + h / 2 + 5, 14, fg, bold=True, align="center")
+    if enabled:
+        st["_t"].append((tid, rect))
+
+
+def render(cr, st, P):
+    """st: current, hover, info, remaining, ext (wlr-randr output or None),
+    res_sel, rate_sel, confirm ({"spec", "remaining"} or None). Clickable areas -> st["_t"]."""
+    st["_t"] = []
+    cr.set_source_rgb(*P["bg"])
+    cr.paint()
+    render_main(cr, st, P)
+    if st.get("confirm"):
+        render_confirm(cr, st, P)
+
+
+def render_main(cr, st, P):
+    text(cr, "External display", MARGIN, 46, 22, P["text"], bold=True)
+    text(cr, st["info"] or "Not connected. Your choice applies when one is.", MARGIN, 72, 13, P["dim"])
+    for i, m in enumerate(MODES):
+        x, y, w, h = card_rect(i)
+        hot = st.get("hover") == ("card", i) or st.get("selected") == i
+        rrect(cr, x, y, w, h, 12)
+        cr.set_source_rgb(*(P["card_hi"] if hot else P["card"]))
+        cr.fill_preserve()
+        cur = st["current"] == m
+        cr.set_source_rgb(*(P["accent"] if cur else P["border"]))
+        cr.set_line_width(3 if cur else 1)
+        cr.stroke()
+        illustration(cr, m, x + w // 2, y + 14, P, z=4)
+        text(cr, NAMES[m], x + w / 2, y + 104, 16, P["text"], bold=True, align="center")
+        text(cr, TEXTS[m], x + w / 2, y + 124, 11, P["dim"], align="center")
+        if cur:                                   # tick badge in the corner (drawn: the font may lack U+2713)
+            bx, by = x + w - 26, y + 8
+            cr.arc(bx + 9, by + 9, 9, 0, 6.2832)
+            cr.set_source_rgb(*P["accent"])
+            cr.fill()
+            cr.set_source_rgb(*P["bg"])
+            cr.set_line_width(2.2)
+            cr.move_to(bx + 4.5, by + 9.5)
+            cr.line_to(bx + 7.8, by + 12.8)
+            cr.line_to(bx + 13.5, by + 6)
+            cr.stroke()
+        st["_t"].append((("card", i), (x, y, w, h)))
+    # resolution / refresh lists + Test
+    ext = st.get("ext")
+    text(cr, "Resolution", RES_LIST[0] + 2, LIST_Y - 8, 12, P["dim"], bold=True)
+    text(cr, "Refresh rate", RATE_LIST[0] + 2, LIST_Y - 8, 12, P["dim"], bold=True)
+    if ext and st.get("res_sel") is not None:
+        res = resolutions(ext)
+        w_, h_, rates, pr = res[st["res_sel"]]
+        listbox(cr, st, "res", RES_LIST, [(f"{w} x {h}", "recommended" if p is not None else "")
+                                         for w, h, _r, p in res], st["res_sel"], P)
+        ri = next((i for i, r in enumerate(rates) if abs(r - st["rate_sel"]) < 0.01), 0)
+        rate_items = []
+        for r in rates:
+            rr = round(r, 2)
+            rate_items.append((f"{int(rr) if rr == int(rr) else rr} Hz",
+                               "*" if pr is not None and abs(r - pr) < 0.01 else ""))
+        listbox(cr, st, "rate", RATE_LIST, rate_items, ri, P)
+        chosen = f"{w_}x{h_}@{st['rate_sel']:.3f}"
+        button(cr, st, "test", TEST, "Test", P, primary=True, enabled=chosen != wanted_spec(ext))
+        pref = preferred_spec(ext)
+        if pref:
+            text(cr, "* recommended:\n" + spec_text(pref), TEST[0] + 2, TEST[1] + 66, 11, P["dim"])
+    else:
+        for rect in (RES_LIST, RATE_LIST):
+            rrect(cr, *rect, 8)
+            cr.set_source_rgb(*P["card"])
+            cr.fill()
+        text(cr, "Connect a display", RES_LIST[0] + RES_LIST[2] / 2, LIST_Y + 74, 13, P["dim"], align="center")
+        button(cr, st, "test", TEST, "Test", P, enabled=False)
+    # countdown / hint
+    rem = st.get("remaining")
+    cur_name = NAMES[st["current"]]
+    if rem is not None:
+        text(cr, f"Keeping {cur_name} in {max(0, int(rem + 0.999))} s", MARGIN, 424, 14, P["text"])
+        progress(cr, MARGIN, 438, 360, rem / COUNTDOWN, P)
+    else:
+        text(cr, "Pick a layout. Close keeps " + cur_name + ".", MARGIN, 434, 14, P["dim"])
+    button(cr, st, "close", CLOSE, "Close", P)
+
+
+def progress(cr, x, y, w, frac, P):
+    rrect(cr, x, y, w, 6, 3)
+    cr.set_source_rgb(*P["track"])
+    cr.fill()
+    rrect(cr, x, y, max(6, w * max(0.0, min(1.0, frac))), 6, 3)
+    cr.set_source_rgb(*P["accent"])
+    cr.fill()
+
+
+def listbox(cr, st, tid, rect, items, sel, P):
+    """Rows of (label, note); selected row filled; a scroll bar when there are more than fit.
+    Scroll offset in st[tid + "_scroll"]; rows -> (tid, "row", i); bar -> (tid, "bar")."""
+    x, y, w, h = rect
+    n = len(items)
+    rows = h // ROW_H
+    key = tid + "_scroll"
+    st[key] = max(0, min(st.get(key, 0), max(0, n - rows)))
+    off = st[key]
+    rrect(cr, x, y, w, h, 8)
+    cr.set_source_rgb(*P["card"])
+    cr.fill()
+    rw = w - (SB_W + 4 if n > rows else 0)
+    cr.save()
+    rrect(cr, x, y, w, h, 8)
+    cr.clip()
+    for k in range(rows):
+        i = off + k
+        if i >= n:
+            break
+        label, note = items[i]
+        ry = y + k * ROW_H
+        selected, hov = i == sel, st.get("hover") == (tid, "row", i)
+        if selected or hov:
+            cr.rectangle(x, ry, rw, ROW_H)
+            cr.set_source_rgb(*(P["accent"] if selected else P["card_hi"]))
+            cr.fill()
+        fg = P["bg"] if selected else P["text"]
+        text(cr, label, x + 12, ry + 19, 13.5, fg, bold=selected)
+        if note:
+            text(cr, note, x + rw - 10, ry + 19, 11, P["bg"] if selected else P["dim"], align="right")
+        st["_t"].append(((tid, "row", i), (x, ry, rw, ROW_H)))
+    cr.restore()
+    if n > rows:                                   # scroll bar: track + thumb
+        bx = x + w - SB_W - 2
+        rrect(cr, bx, y + 3, SB_W, h - 6, SB_W / 2)
+        cr.set_source_rgb(*P["track"])
+        cr.fill()
+        th = max(18, (h - 6) * rows / n)
+        ty = y + 3 + (h - 6 - th) * off / (n - rows)
+        rrect(cr, bx + 2, ty, SB_W - 4, th, (SB_W - 4) / 2)
+        cr.set_source_rgb(*(P["accent"] if st.get("drag") == tid or st.get("hover") == (tid, "bar")
+                            else P["dim"]))
+        cr.fill()
+        st["_t"].append(((tid, "bar"), (bx - 2, y, SB_W + 4, h)))
+        st.setdefault("_bars", {})[tid] = (y + 3, h - 6, th, n, rows)
+
+
+def render_confirm(cr, st, P):
+    cr.set_source_rgba(0, 0, 0, 0.55)
+    cr.paint()
+    st["_t"] = []                                   # only the dialog is clickable
+    x, y, w, h = BOX
+    rrect(cr, x, y, w, h, 14)
+    cr.set_source_rgb(*P["card"])
+    cr.fill_preserve()
+    cr.set_source_rgb(*P["accent"])
+    cr.set_line_width(2)
+    cr.stroke()
+    c = st["confirm"]
+    text(cr, "Keep this mode?", x + 24, y + 42, 20, P["text"], bold=True)
+    text(cr, spec_text(c["spec"]) + " on the monitor", x + 24, y + 70, 14, P["text"])
+    text(cr, f"Switching back in {max(0, int(c['remaining'] + 0.999))} s", x + 24, y + 104, 13, P["dim"])
+    progress(cr, x + 24, y + 116, w - 48, c["remaining"] / CONFIRM, P)
+    button(cr, st, "revert", REVERT, "Switch back", P)
+    button(cr, st, "keep", KEEP, "Keep", P, primary=True)
+
+
+def hit(st, px, py):
+    for tid, (x, y, w, h) in reversed(st.get("_t", [])):
+        if x <= px <= x + w and y <= py <= y + h:
+            return tid
+    return None
+
+
+def light_theme():
+    try:
+        with open(os.path.join(CONF, "theme")) as f:
+            return f.read().strip() == "light"
+    except OSError:
+        return False
+
+
+# ---------------------------------------------------------------------------------- picker
+def picker(auto):
+    import gi
+    gi.require_version("Gtk", "3.0")
+    gi.require_version("Gdk", "3.0")
+    gi.require_version("GtkLayerShell", "0.1")
+    from gi.repository import Gdk, GLib, Gtk, GtkLayerShell
+
+    other = picker_running()
+    if other:
+        if not auto:                      # the app again: close the open picker (toggle)
+            os.kill(other, signal.SIGTERM)
+        return 0
+    with open(PICKER_PID, "w") as f:
+        f.write(str(os.getpid()))
+
+    docked = external(outputs()) is not None
+    if docked:
+        open(PICKER_FLAG, "w").close()
         apply()
-        notify({"monitor": "Monitor only", "extend": "Extended screens", "mirror": "Mirrored"}[argv[2]]
-               + ("" if external(outputs()) else " (applies when HDMI is connected)"))
+    P = palette(light_theme())
+    st = {"current": mode(), "selected": None, "hover": None, "ext": external(outputs()),
+          "info": describe(external(outputs())), "remaining": COUNTDOWN if (auto and docked) else None,
+          "res_sel": None, "rate_sel": None, "confirm": None, "_t": []}
+    moved = {"origin": None}
+    done = {"v": False}
+
+    win = Gtk.Window()
+    GtkLayerShell.init_for_window(win)
+    GtkLayerShell.set_layer(win, GtkLayerShell.Layer.OVERLAY)
+    GtkLayerShell.set_namespace(win, "rg35xxh-display-picker")
+    for e in (GtkLayerShell.Edge.TOP, GtkLayerShell.Edge.BOTTOM, GtkLayerShell.Edge.LEFT, GtkLayerShell.Edge.RIGHT):
+        GtkLayerShell.set_anchor(win, e, True)
+    if hasattr(GtkLayerShell, "set_keyboard_mode"):
+        GtkLayerShell.set_keyboard_mode(win, GtkLayerShell.KeyboardMode.ON_DEMAND)
+    else:
+        GtkLayerShell.set_keyboard_interactivity(win, True)
+    # on the handheld's own screen: the 640x480 monitor that is not the external one
+    disp = Gdk.Display.get_default()
+    ext_model = (external(outputs()) or {}).get("model") or ""
+    for i in range(disp.get_n_monitors()):
+        mon = disp.get_monitor(i)
+        g = mon.get_geometry()
+        if (g.width, g.height) == (640, 480) and (not ext_model or mon.get_model() != ext_model):
+            GtkLayerShell.set_monitor(win, mon)
+            break
+    area = Gtk.DrawingArea()
+    area.set_size_request(W, H)
+    area.add_events(Gdk.EventMask.POINTER_MOTION_MASK | Gdk.EventMask.BUTTON_PRESS_MASK |
+                    Gdk.EventMask.BUTTON_RELEASE_MASK | Gdk.EventMask.SCROLL_MASK |
+                    Gdk.EventMask.SMOOTH_SCROLL_MASK)
+    win.add(area)
+
+    def finish(choice=None, reapply=True):
+        if done["v"]:
+            return
+        done["v"] = True
+        if st["confirm"]:                         # a mode test still running: undo it
+            st["confirm"] = None
+            randr("--output", st["ext"]["name"], "--off")
+        if choice:
+            save_mode(choice)
+        for f in (PICKER_FLAG, PICKER_PID):
+            try:
+                os.unlink(f)
+            except FileNotFoundError:
+                pass
+        if reapply and external(outputs()):
+            apply()
+        if choice:
+            notify(NAMES[choice] + ("" if external(outputs()) else " (applies when a display is connected)"))
+        Gtk.main_quit()
+
+    def on_draw(_w, cr):
+        render(cr, st, P)
+
+    def restart_countdown():
+        if st["remaining"] is not None:
+            st["remaining"] = COUNTDOWN
+            area.queue_draw()
+
+    def on_motion(_w, ev):
+        if on_drag(_w, ev):
+            return
+        if moved["origin"] is None:               # the window appears under the pointer: not a touch
+            moved["origin"] = (ev.x, ev.y)
+        elif abs(ev.x - moved["origin"][0]) + abs(ev.y - moved["origin"][1]) > 2:
+            moved["origin"] = (ev.x, ev.y)
+            restart_countdown()
+        h = hit(st, ev.x, ev.y)
+        if h != st["hover"]:
+            st["hover"] = h
+            area.queue_draw()
+
+    def sync_sel():
+        """Steppers show the monitor's kept (or preferred) mode."""
+        ext = st["ext"]
+        if not ext:
+            return
+        res = resolutions(ext)
+        p = parse_spec(wanted_spec(ext) or "")
+        st["res_sel"] = next((i for i, r in enumerate(res) if p and r[:2] == p[:2]), 0) if res else None
+        st["rate_sel"] = p[2] if p else (res[0][2][0] if res else None)
+        if st["res_sel"] is not None:
+            st["res_scroll"] = max(0, st["res_sel"] - 2)
+            rates = res[st["res_sel"]][2]
+            ri = next((i for i, r in enumerate(rates) if abs(r - st["rate_sel"]) < 0.01), 0)
+            st["rate_scroll"] = max(0, ri - 2)
+
+    sync_sel()
+
+    def pick_res(i):
+        res = resolutions(st["ext"])
+        st["res_sel"] = i
+        st["rate_scroll"] = 0
+        w, h, rates, pr = res[i]
+        cur = parse_spec(wanted_spec(st["ext"]) or "")
+        if pr is not None:
+            st["rate_sel"] = pr
+        elif cur and cur[:2] == (w, h):
+            st["rate_sel"] = cur[2]
+        else:                                     # the rate closest to 60 Hz
+            st["rate_sel"] = min(rates, key=lambda r: abs(r - 60))
+
+    def test_mode():
+        res = resolutions(st["ext"])
+        w, h = res[st["res_sel"]][:2]
+        spec = f"{w}x{h}@{st['rate_sel']:.3f}"
+        # The monitor comes on with that mode, apart from the handheld (no shared edge), so the
+        # pointer stays on the handheld where the confirmation is.
+        randr("--output", st["ext"]["name"], "--on", "--mode", spec + "Hz", "--pos", FAR)
+        st["confirm"] = {"spec": spec, "remaining": CONFIRM}
+
+    def end_test(keep):
+        c = st["confirm"]
+        st["confirm"] = None
+        randr("--output", st["ext"]["name"], "--off")   # back to the picker's layout (handheld only)
+        if keep:
+            save_spec(st["ext"], c["spec"])
+            st["info"] = describe(st["ext"])
+            notify("Resolution: " + spec_text(c["spec"]))
+        else:
+            sync_sel()
+
+    def on_press(_w, ev):
+        h = hit(st, ev.x, ev.y)
+        if h is None:
+            return
+        if isinstance(h, tuple) and h[0] == "card":
+            finish(MODES[h[1]])
+            return
+        if h == "close":
+            finish()
+            return
+        st["remaining"] = None                    # choosing a mode: no auto-close
+        if isinstance(h, tuple) and h[1] == "row":
+            if h[0] == "res":
+                pick_res(h[2])
+            else:
+                st["rate_sel"] = resolutions(st["ext"])[st["res_sel"]][2][h[2]]
+        elif isinstance(h, tuple) and h[1] == "bar":
+            bar_press(h[0], ev.y)
+        elif h == "test":
+            test_mode()
+        elif h in ("keep", "revert"):
+            end_test(h == "keep")
+        st["hover"] = None
+        area.queue_draw()
+
+    def bar_press(tid, py):
+        top, length, th, n, rows = st["_bars"][tid]
+        key = tid + "_scroll"
+        ty = top + (length - th) * st.get(key, 0) / max(1, n - rows)
+        if ty <= py <= ty + th:                   # on the thumb: drag it
+            st["drag"] = tid
+            st["drag_from"] = (py, st.get(key, 0))
+        else:                                     # above / below it: one page
+            st[key] = st.get(key, 0) + (rows if py > ty else -rows)
+
+    def on_drag(_w, ev):
+        tid = st.get("drag")
+        if not tid:
+            return False
+        top, length, th, n, rows = st["_bars"][tid]
+        y0, off0 = st["drag_from"]
+        st[tid + "_scroll"] = round(off0 + (ev.y - y0) * (n - rows) / max(1, length - th))
+        area.queue_draw()
+        return True
+
+    def on_release(_w, ev):
+        if st.get("drag"):
+            st["drag"] = None
+            area.queue_draw()
+
+    def on_scroll(_w, ev):
+        tid = None                                # the list under the pointer
+        for t, (x, y, w, h) in (("res", RES_LIST), ("rate", RATE_LIST)):
+            if x <= ev.x <= x + w and y <= ev.y <= y + h:
+                tid = t
+        if not tid or st["confirm"]:
+            return False
+        ok, dx, dy = ev.get_scroll_deltas()
+        step = (1 if dy > 0 else -1) if ok and dy else \
+            (-1 if ev.direction == Gdk.ScrollDirection.UP else 1 if ev.direction == Gdk.ScrollDirection.DOWN else 0)
+        st[tid + "_scroll"] = st.get(tid + "_scroll", 0) + step
+        restart_countdown()
+        area.queue_draw()
+        return True
+
+    def on_key(_w, ev):
+        k = Gdk.keyval_name(ev.keyval)
+        restart_countdown()
+        if st["confirm"]:
+            if k in ("Escape", "BackSpace"):
+                end_test(False)
+            elif k in ("Return", "KP_Enter"):
+                end_test(True)
+        elif k in ("Escape", "BackSpace"):
+            finish()
+        elif k in ("Left", "Right"):
+            s = st["selected"] if st["selected"] is not None else MODES.index(st["current"])
+            st["selected"] = (s + (1 if k == "Right" else -1)) % 3
+        elif k in ("Return", "KP_Enter", "space") and st["selected"] is not None:
+            finish(MODES[st["selected"]])
+            return True
+        area.queue_draw()
+        return True
+
+    ticks = {"n": 0}
+
+    def tick():
+        if done["v"]:
+            return False
+        if st["confirm"]:
+            st["confirm"]["remaining"] -= 0.1
+            if st["confirm"]["remaining"] <= 0:
+                end_test(False)                   # not confirmed: switch back
+            area.queue_draw()
+        elif st["remaining"] is not None:
+            st["remaining"] -= 0.1
+            area.queue_draw()
+            if st["remaining"] <= 0:
+                finish()
+                return False
+        ticks["n"] += 1
+        if docked and ticks["n"] % 10 == 0 and external(outputs()) is None:
+            finish(reapply=False)                 # display unplugged meanwhile
+            return False
+        return True
+
+    area.connect("draw", on_draw)
+    area.connect("motion-notify-event", on_motion)
+    area.connect("button-press-event", on_press)
+    area.connect("button-release-event", on_release)
+    area.connect("scroll-event", on_scroll)
+    win.connect("key-press-event", on_key)
+    win.connect("destroy", lambda *_: finish())
+    GLib.unix_signal_add(GLib.PRIORITY_DEFAULT, signal.SIGTERM, lambda: (finish(), False)[1])
+    GLib.timeout_add(100, tick)
+    win.show_all()
+    Gtk.main()
+    return 0
+
+
+def preview(path, light, docked, m, confirm=False):
+    import cairo
+    rates = {(1920, 1080): [240, 165, 120, 119.88, 60, 59.94, 50], (1680, 1050): [119.99, 84.94, 74.89, 59.88],
+             (1600, 900): [60], (1440, 900): [119.85, 59.9], (1366, 768): [59.79], (1280, 1024): [75.03, 60.02],
+             (1280, 720): [60, 59.94, 50], (1024, 768): [75.03, 60], (800, 600): [60.32], (640, 480): [60]}
+    ext = {"name": "HDMI-A-1", "make": "Hansung Co., Ltd", "model": "TFG24F24P", "serial": "0",
+           "modes": [{"width": w, "height": h, "refresh": r, "preferred": (w, h, r) == (1920, 1080, 60)}
+                     for (w, h), rs in rates.items() for r in rs]} if docked else None
+    surf = cairo.ImageSurface(cairo.FORMAT_RGB24, W, H)
+    st = {"current": m, "selected": None, "hover": ("res", "row", 2) if docked else None,
+          "info": describe(ext), "remaining": 3.4 if docked and not confirm else None, "ext": ext,
+          "res_sel": 0, "rate_sel": 120.0 if confirm else 60.0, "_t": [], "rate_scroll": 2,
+          "confirm": {"spec": "1920x1080@120.000", "remaining": 11.2} if confirm else None}
+    render(cairo.Context(surf), st, palette(light))
+    surf.write_to_png(path)
+
+
+# ---------------------------------------------------------------------------------- main
+def main(argv):
+    cmd = argv[1] if len(argv) > 1 else "pick"
+    if cmd == "set" and len(argv) > 2 and argv[2] in MODES:
+        save_mode(argv[2])
+        apply()
+        notify(NAMES[argv[2]] + ("" if external(outputs()) else " (applies when a display is connected)"))
     elif cmd == "apply":
         apply()
+    elif cmd == "connected":                      # kanshi: HDMI connected
+        if not picker_running():
+            subprocess.Popen([sys.argv[0], "pick", "--auto"], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                             stderr=subprocess.DEVNULL, start_new_session=True)
+    elif cmd == "pick":
+        return picker("--auto" in argv)
     elif cmd == "osk" and len(argv) > 2 and argv[2] in ("on", "off"):
         if argv[2] == "on":
             open(OSK_FLAG, "w").close()
         elif os.path.exists(OSK_FLAG):
             os.unlink(OSK_FLAG)
-        if mode() == "monitor" and external(outputs()):
+        if mode() == "monitor" and external(outputs()) and not os.path.exists(PICKER_FLAG):
             apply(osk=argv[2] == "on")
     elif cmd == "status":
         print(mode(), "docked" if external(outputs()) else "handheld")
+    elif cmd == "--preview" and len(argv) > 2:
+        m = argv[argv.index("--mode") + 1] if "--mode" in argv else "monitor"
+        preview(argv[2], "--light" in argv, "--undocked" not in argv, m, "--confirm" in argv)
     else:
         print(__doc__.strip())
         return 2

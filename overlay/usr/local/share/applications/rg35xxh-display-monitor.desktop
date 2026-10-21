@@ -1,8 +1,0 @@
-[Desktop Entry]
-Type=Application
-Name=Display: Monitor only
-Comment=Screen layout while an HDMI monitor is connected
-Exec=rg35xxh-display set monitor
-Icon=video-display
-Terminal=false
-Categories=Settings;

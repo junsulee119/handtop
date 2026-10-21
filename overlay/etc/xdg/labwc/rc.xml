@@ -52,4 +52,13 @@
     <!-- Small 640x480 screen: open normal windows maximized; dialogs keep their size. -->
     <windowRule type="normal"><action name="Maximize" /></windowRule>
   </windowRules>
+  <!-- The input daemon's pointer (stick / D-pad) moves exactly as sent: no libinput acceleration.
+       Its speed is set in /etc/rg35xxh/input.conf, and it follows the pointer across screens to
+       pick the speed of the one it is on (display_speed_scale), which needs 1:1 motion. -->
+  <libinput>
+    <device category="rg35xxh virtual mouse">
+      <accelProfile>flat</accelProfile>
+      <pointerSpeed>0</pointerSpeed>
+    </device>
+  </libinput>
 </labwc_config>

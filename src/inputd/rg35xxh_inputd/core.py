@@ -31,13 +31,15 @@ DEFAULT_SETTINGS = {
     "deadzone": 0.12,              # fraction of stick travel ignored (drift)
     "pointer_max_speed": 450.0,    # px/s at full tilt
     "pointer_curve": 2.0,          # 1 = linear, 2 = slow near centre, fast at the edge
-    "dpad_speed": 286.0,           # px/s while a D-pad direction is held
+    "dpad_speed_ratio": 0.5,       # D-pad pointer speed as a fraction of pointer_max_speed
     "scroll_speed": 8.4,          # notches/s at full tilt
     "scroll_log_k": 9.0,           # scroll curve: log(1+k*x)/log(1+k); 0 = linear
     "power_hold_seconds": 3.0,
     "power_tap_max_seconds": 1.0,
     "start_hold_seconds": 1.0,
     "haptic_strength": 1.0,        # mode-change vibration: 0 = off, 1 = as designed
+    "display_speed_scale": 1.0,    # pointer speed on a bigger screen: 1 = scaled by its size vs. the
+                                   # handheld's (1080p: ~2.75x), 0 = same px/s everywhere
     "osk_repeat_delay": 0.40,
     "osk_repeat_interval": 0.09,
     "vol_repeat_delay": 0.40,      # hold Vol (or F+Vol): repeat after this
@@ -78,6 +80,8 @@ class Core:
     def __init__(self, settings=None, bindings=None):
         self.s = dict(DEFAULT_SETTINGS)
         self.s.update(settings or {})
+        if "dpad_speed" in self.s and "dpad_speed_ratio" not in (settings or {}):   # older configs: px/s
+            self.s["dpad_speed_ratio"] = self.s["dpad_speed"] / max(1.0, self.s["pointer_max_speed"])
         self.bind = dict(DEFAULT_BINDINGS)
         self.bind.update(bindings or {})
         self.mode = "desktop"
@@ -85,6 +89,7 @@ class Core:
         self.osk_visible = False
         self.screen_off = False
         self.axes = {"lx": 0.0, "ly": 0.0, "rx": 0.0, "ry": 0.0}
+        self.pointer_scale = 1.0    # speed factor of the screen the pointer is on (set by the daemon)
         self.held = {}              # name -> press time
         self.swallowed = set()      # buttons whose press was consumed (e.g. screen wake)
         self.power_fired = False
@@ -233,10 +238,11 @@ class Core:
                     ddx, ddy = _dpad_vector(d)
                     dx += ddx
                     dy += ddy
-            vx += dx * self.s["dpad_speed"]
-            vy += dy * self.s["dpad_speed"]
-        self.acc[0] += vx * dt
-        self.acc[1] += vy * dt
+            dpad = self.s["dpad_speed_ratio"] * self.s["pointer_max_speed"]
+            vx += dx * dpad
+            vy += dy * dpad
+        self.acc[0] += vx * self.pointer_scale * dt
+        self.acc[1] += vy * self.pointer_scale * dt
         mx, my = int(self.acc[0]), int(self.acc[1])
         if mx or my:
             self.acc[0] -= mx
@@ -366,3 +372,55 @@ class Core:
 
 def _dpad_vector(name):
     return {"up": (0, -1), "down": (0, 1), "left": (-1, 0), "right": (1, 0)}[name]
+
+
+class PointerLayout:
+    """Where the pointer probably is, for per-screen pointer speed.
+
+    The daemon only sends relative motion, and the compositor does not tell clients where the
+    cursor is, so this follows the daemon's own motion over the output layout (written by
+    rg35xxh-display: [{"x","y","w","h","scale"}, ...]) and clamps it the way wlroots does: a move
+    that would leave every output ends at the closest point of the layout. Motion from other mice
+    is not seen; the estimate then only picks the wrong speed until it reaches an edge."""
+
+    def __init__(self, rects=None):
+        self.rects = []
+        self.x = self.y = 0.0
+        self.placed = False
+        self.set_rects(rects or [])
+
+    def set_rects(self, rects):
+        self.rects = [dict(r) for r in rects if r.get("w", 0) > 0 and r.get("h", 0) > 0]
+        if not self.rects:
+            return
+        if not self.placed:                  # first layout: start in the middle of the first output
+            r = self.rects[0]
+            self.x, self.y = r["x"] + r["w"] / 2, r["y"] + r["h"] / 2
+            self.placed = True
+        elif not self._inside(self.x, self.y):
+            self.x, self.y = self._closest(self.x, self.y)
+
+    def _inside(self, x, y):
+        return any(r["x"] <= x < r["x"] + r["w"] and r["y"] <= y < r["y"] + r["h"] for r in self.rects)
+
+    def _closest(self, x, y):
+        best, bd = (x, y), None
+        for r in self.rects:
+            cx = min(max(x, r["x"]), r["x"] + r["w"] - 1)
+            cy = min(max(y, r["y"]), r["y"] + r["h"] - 1)
+            d = (cx - x) ** 2 + (cy - y) ** 2
+            if bd is None or d < bd:
+                best, bd = (cx, cy), d
+        return best
+
+    def move(self, dx, dy):
+        if not self.rects:
+            return
+        nx, ny = self.x + dx, self.y + dy
+        self.x, self.y = (nx, ny) if self._inside(nx, ny) else self._closest(nx, ny)
+
+    def scale(self, strength=1.0):
+        for r in self.rects:
+            if r["x"] <= self.x < r["x"] + r["w"] and r["y"] <= self.y < r["y"] + r["h"]:
+                return 1.0 + (float(r.get("scale", 1.0)) - 1.0) * strength
+        return 1.0

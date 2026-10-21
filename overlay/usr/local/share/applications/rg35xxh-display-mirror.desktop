@@ -1,8 +1,0 @@
-[Desktop Entry]
-Type=Application
-Name=Display: Mirror screens
-Comment=Screen layout while an HDMI monitor is connected
-Exec=rg35xxh-display set mirror
-Icon=video-display
-Terminal=false
-Categories=Settings;

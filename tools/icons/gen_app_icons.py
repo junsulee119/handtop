@@ -4,6 +4,7 @@ sharp in the app drawer).
   app-theme.png                Theme app: a circle split into a dark and a light half (27x27 art).
   app-external-controller.png  External Controller: the input-mode glass (BT blue / wired brown split
                                diagonally, rainbow stripes) with BT waves, a USB plug and an RG35XX H.
+  app-display.png              Display: a monitor with an HDMI cable to an RG35XX H, on teal glass.
   All are 27x27 art x2 + 1 px margin = exactly 56x56, the app drawer's icon size.
   Each also gets a -light variant (dark drawing, pastel glass, deeper ring) for the light theme.
 
@@ -139,8 +140,64 @@ def external_controller_icon(light=False):
     return _tile(im)
 
 
+# ---- Display ------------------------------------------------------------------------------
+DISP_MONITOR = ["W" * 19] + ["W" + "S" * 17 + "W"] * 9 + ["W" * 19]   # screen filled in below
+DISP_STAND = ["........WWW........", "......WWWWWWW......"]
+DISP_HANDHELD = [".WWWWWWWWWWWWW.",
+                 "WWKWWDDDDDWWxWW",
+                 "WKKKWDDDDDWyWaW",
+                 "WWKWWDDDDDWWbWW",
+                 "WWWWWDDDDDWWWWW",
+                 ".WWWWWWWWWWWWW."]
+DISP_CABLE = [(15, 21), (16, 21), (17, 21), (18, 21), (19, 21), (20, 21), (21, 21), (22, 20), (23, 19),
+              (23, 18), (23, 17), (23, 16), (23, 15), (23, 14)]       # handheld -> monitor stand
+DISP_DESK, DISP_BAR, DISP_WIN = (61, 90, 138), (20, 24, 32), (232, 234, 238)
+TEAL_BG, TEAL_RING = (47, 111, 122), (79, 163, 176)
+LTEAL_BG, LTEAL_RING = (159, 212, 220), (63, 143, 156)
+
+
+def display_icon(light=False):
+    colors = dict(COLORS_LIGHT if light else COLORS)
+    colors.update(S=DISP_DESK, T=DISP_BAR, V=DISP_WIN, C=(79, 88, 105) if light else (170, 179, 194))
+    shade = SHADE_LIGHT if light else SHADE
+    g = {}
+
+    def put(art, x0, y0):
+        for y, row in enumerate(art):
+            for x, c in enumerate(row):
+                if c != ".":
+                    g[(x0 + x, y0 + y)] = c
+    put(DISP_MONITOR, 6, 3)
+    for y in range(9):                                  # desktop with a window and a taskbar
+        for x in range(17):
+            g[(7 + x, 4 + y)] = "T" if y == 8 else "V" if 2 <= y <= 5 and 3 <= x <= 9 else "S"
+    put(DISP_STAND, 6, 14)
+    put(DISP_HANDHELD, 1, 19)
+    for xy in DISP_CABLE:
+        g[xy] = "C"
+    bg, ring = (LTEAL_BG, LTEAL_RING) if light else (TEAL_BG, TEAL_RING)
+    im = Image.new("RGBA", (EN, EN), (0, 0, 0, 0))
+    for y in range(EN):                                  # plain (unstriped) glass
+        for x in range(EN):
+            outer, inner = _coverage(x, y, 0, 5.5), _coverage(x, y, 1, 4.5)
+            fa = inner * (0.55 if light else 0.45)
+            ra = outer - inner
+            a = fa + ra
+            if a > 0:
+                col = tuple(round((bg[i] * fa + ring[i] * ra) / a) for i in range(3))
+                im.putpixel((x, y), col + (round(min(a, 1) * 255),))
+    low = {}
+    for (x, y), c in g.items():
+        if c == "W":
+            low[x] = max(low.get(x, -1), y)
+    for (x, y), c in g.items():
+        im.putpixel((x, y), (shade if c == "W" and low[x] == y else colors[c]) + (255,))
+    return _tile(im)
+
+
 if __name__ == "__main__":
     out = sys.argv[1] if len(sys.argv) > 1 else "."
     for light, sfx in ((False, ""), (True, "-light")):
         theme_icon(light).save(f"{out}/app-theme{sfx}.png")
         external_controller_icon(light).save(f"{out}/app-external-controller{sfx}.png")
+        display_icon(light).save(f"{out}/app-display{sfx}.png")

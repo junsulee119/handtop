@@ -12,4 +12,4 @@ and shown by Waybar's `image#inputmode` module (`rg35xxh-inputmode`).
 - `gen_battery.py` — taskbar battery icons (`battery[-charging][-low]-<bars>[-light].png`, 20x11): shell always white/ink, 5 bars of 20 %, red bars at 0-20 %, a yellow bolt (1 px clear outline) while charging. Run with the icon folder as the argument. `rg35xxh-battery --animate` steps the charging animation (bars from the current level up to full).
 
 Run in a scratch folder (they write preview PNGs next to themselves): `python3 gen_rainbow.py && python3 gen_light.py && python3 gen_shake.py`. Needs Pillow.
-- `gen_app_icons.py <icon folder>` — app drawer icons: `app-theme.png`, and `app-external-controller.png` (27x27 art doubled + 1 px margin = exactly 56 px, the drawer's icon size).
+- `gen_app_icons.py <icon folder>` — app drawer icons: `app-theme.png`, `app-external-controller.png` and `app-display.png` (monitor + HDMI cable + RG35XX H, teal glass), each with a `-light` variant (27x27 art doubled + 1 px margin = exactly 56 px, the drawer's icon size).

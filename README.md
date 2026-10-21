@@ -50,19 +50,15 @@ Details: [docs/flashing.md](docs/flashing.md).
 
 ## External display
 
-Plug a monitor into the mini HDMI port at any time (hot-plug). Choose what happens from the Apps menu:
+Plug a monitor into the mini HDMI port at any time (hot-plug). The **Display** app opens on the handheld by itself (the monitor stays dark meanwhile, so the pointer is on the handheld): pick a layout, or leave it for 5 s to keep the last one. Open it again any time from **Apps → Display**.
 
 - **Monitor only:** the desktop moves to the monitor; the handheld screen becomes a full-size on-screen keyboard
-- **Extend:** the monitor and the handheld screen form one desktop
+- **Extend:** the monitor and the handheld screen form one desktop, the handheld below the monitor (move the pointer off the monitor's bottom edge, in its middle)
 - **Mirror:** both show the same picture
 
-Resolution: **tested at 1920×1080 60 Hz**. The HDMI driver allows pixel clocks up to 594 MHz, so higher modes (e.g. 1440p60, 1080p120, up to 4K60 on paper) may work but are untested, and the desktop gets slower at high resolutions. The monitor's preferred mode is used automatically; to change it (in a terminal):
+**Resolution and refresh rate** are chosen in the same app, from the monitor's own list, and remembered per monitor. **Test** tries a mode and switches back after 15 s unless you press Keep, so a mode the screen can't show never leaves you stuck. Tested up to **1920×1080 at 240 Hz** (a real 570 MHz signal). The pointer moves faster on the monitor, in proportion to its size (`display_speed_scale` in the input config).
 
-```sh
-wlr-randr                                        # list modes
-wlr-randr --output HDMI-A-1 --mode 1920x1080@60  # pick one
-wlr-randr --output HDMI-A-1 --scale 2            # bigger UI on 4K screens
-```
+For a bigger UI on a 4K screen (in a terminal): `wlr-randr --output HDMI-A-1 --scale 2`.
 
 There is no HDMI audio.
 

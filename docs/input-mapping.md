@@ -39,7 +39,7 @@ Implemented by a custom input daemon that grabs the "H700 Gamepad" exclusively a
 
 - **Left stick:** dead zone against drift; power curve — slow/precise on small tilt, fast at the edge. Max 450 px/s (halved from 900 after device testing).
 - **Right stick:** logarithmic curve (`log(1+9x)/log(10)`) — a small push already scrolls at a useful rate, levelling off at 8.4 notches/s at full tilt (0.7× of the original 12 after device testing).
-- **D-pad pointer:** digital, fixed speed 286 px/s (raised 1.3× from 220 after device testing).
+- **D-pad pointer:** digital, half of the left stick's top speed (`dpad_speed_ratio = 0.5`, so 225 px/s with the default 450); it follows if `pointer_max_speed` is changed. The pointer has no libinput acceleration (labwc `rc.xml`), so these are real px/s. On an HDMI display both are scaled by its size (`display_speed_scale`).
 - **Vol / F + Vol held:** repeats after 0.4 s, then every 0.12 s (works in desktop and gamepad mode). A pop-up bar (wob) shows the level: blue for volume, amber for brightness. Brightness steps 10% and never goes below 5%.
 - **On-screen keyboard:** custom, part of the input daemon, so the daemon always knows whether it is open. Left stick still moves the pointer while it is open.
 - **Copy/paste:** daemon checks the focused app. Terminals get Ctrl+Shift+C / Ctrl+Shift+V; other apps Ctrl+C / Ctrl+V (Ctrl+C in a terminal would kill the running program). Bash bracketed paste must stay enabled so an accidental R3 paste cannot execute a command. Hold-to-paste can be added later if accidental stick clicks are a problem.

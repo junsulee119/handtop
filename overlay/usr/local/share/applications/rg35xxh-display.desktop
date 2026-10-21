@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Display
+Comment=Screen layout with an external (HDMI) display: monitor only, extend or mirror
+Exec=rg35xxh-display pick
+Icon=/usr/local/share/rg35xxh/icons/app-display.png
+Terminal=false
+Categories=Settings;

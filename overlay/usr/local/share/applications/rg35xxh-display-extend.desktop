@@ -1,8 +1,0 @@
-[Desktop Entry]
-Type=Application
-Name=Display: Extend screens
-Comment=Screen layout while an HDMI monitor is connected
-Exec=rg35xxh-display set extend
-Icon=video-display
-Terminal=false
-Categories=Settings;

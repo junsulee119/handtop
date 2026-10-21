@@ -4,6 +4,11 @@
 
 - **BT Controller mode is now an Xbox controller.** Over Bluetooth the handheld presents itself as an Xbox Wireless Controller (Series X|S, BLE): Windows loads its own Xbox driver, XInput-only games work directly, and **game vibration now works over Bluetooth** too (played on the handheld's motor through the vibration safety gate). Tested on Windows 11. **After updating, remove "Handtop Gamepad" on the PC and pair it again once** (Windows caches the old description). For this, bluetoothd runs with the Xbox controller's device ID while the mode is on and gets its own back afterwards. The v0.2.0 generic gamepad stays available (`RG35XXH_BTPAD_PROFILE=generic`). Details in `docs/bt-controller.md`.
 - External Controller app waits a little longer for BT mode to start (bluetoothd restarts).
+- **Display app** (Apps → Display) replaces the three "Display: …" entries. It **opens by itself when a monitor is plugged in**, on the handheld (the monitor stays dark meanwhile so the pointer can't get lost on it): pick Monitor only / Extend / Mirror, or leave it for 5 s (restarted by any input) to keep the last layout. Pixel-art pictures of each layout, dark/light theme, its own app icon (monitor + HDMI cable + RG35XX H).
+- **Resolution and refresh rate** in the Display app: full lists of the monitor's modes, **Test** with a 15 s "Keep this mode?" that switches back by itself, remembered per monitor. Verified: 1080p at 240 Hz works (real 570 MHz signal).
+- **Extend** puts the handheld **below** the monitor (centred) instead of to its right.
+- **Pointer speed follows the screen:** on a monitor the stick / D-pad pointer moves faster in proportion to its size (1080p ≈ 2.75×; `display_speed_scale`, 0 = off). The handheld's pointer no longer gets libinput acceleration, so its speed is exactly what `input.conf` says.
+- D-pad pointer speed is now **half of the stick's** top speed (`dpad_speed_ratio = 0.5`, 225 px/s; it was a fixed 286 px/s) and follows `pointer_max_speed`. An older `dpad_speed` (px/s) in your own config is still understood.
 
 ## v0.2.0
 

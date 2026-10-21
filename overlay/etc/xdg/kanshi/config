@@ -1,12 +1,14 @@
 # Per-output layout (output names confirmed on the device: DSI-1 = handheld, HDMI-A-1 = mini HDMI).
-# With HDMI connected, rg35xxh-display applies the chosen mode (monitor only / extend / mirror).
+# With HDMI connected, rg35xxh-display applies the chosen mode (monitor only / extend / mirror)
+# and opens the Display picker on the handheld for 10 s.
 profile handheld {
   output DSI-1 enable scale 1 position 0,0
+  exec /usr/local/bin/rg35xxh-display apply
 }
 profile docked {
   output HDMI-A-1 enable scale 1 position 0,0
   output DSI-1 enable scale 1 position 1920,0
-  exec /usr/local/bin/rg35xxh-display apply
+  exec /usr/local/bin/rg35xxh-display connected
 }
 profile fallback {
   output * enable scale 1

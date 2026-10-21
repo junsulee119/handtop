@@ -3,7 +3,7 @@ import os
 import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
-from rg35xxh_inputd.core import Core  # noqa: E402
+from rg35xxh_inputd.core import Core, PointerLayout  # noqa: E402
 
 
 def kinds(actions):
@@ -60,7 +60,7 @@ def test_dpad_pointer_and_osk_navigation():
     c.tick(0.0)
     c.button("right", True, 0.0)
     out, t = run_ticks(c, 0.0, 1.0)
-    assert 275 <= sum(a[1] for a in out if a[0] == "rel") <= 295  # 286 px/s
+    assert 215 <= sum(a[1] for a in out if a[0] == "rel") <= 235  # 0.5 x 450 = 225 px/s
     c.button("right", False, t)
     # Keyboard open: D-pad moves the key highlight, with auto-repeat.
     c.set_osk_visible(True)
@@ -264,6 +264,54 @@ def test_bt_mode_exits_with_combo_not_start_hold():
     assert not c.combo_exit
     for b in ("r1", "l1", "select", "start"):             # releases do nothing in desktop mode
         assert c.button(b, False, 3.5) == []
+
+
+
+EXTEND = [{"x": 0, "y": 0, "w": 1920, "h": 1080, "scale": 2.754},     # monitor
+          {"x": 640, "y": 1080, "w": 640, "h": 480, "scale": 1.0}]     # handheld below, centred
+
+
+def test_pointer_scale_speeds_up_pointer():
+    c = Core()
+    c.axis("lx", 1.0, 0.0)
+    out1, _ = run_ticks(c, 0.0, 1.0)
+    c2 = Core()
+    c2.pointer_scale = 2.0
+    c2.axis("lx", 1.0, 0.0)
+    out2, _ = run_ticks(c2, 0.0, 1.0)
+    d1 = sum(a[1] for a in out1 if a[0] == "rel")
+    d2 = sum(a[1] for a in out2 if a[0] == "rel")
+    assert abs(d2 - 2 * d1) <= 2, (d1, d2)
+
+
+def test_layout_starts_on_first_output_and_picks_its_speed():
+    lay = PointerLayout(EXTEND)
+    assert (lay.x, lay.y) == (960, 540)
+    assert abs(lay.scale() - 2.754) < 1e-6
+    assert lay.scale(0.0) == 1.0              # display_speed_scale = 0: off
+    assert abs(lay.scale(0.5) - 1.877) < 1e-6
+
+
+def test_layout_crosses_to_handheld_only_where_it_touches():
+    lay = PointerLayout(EXTEND)
+    for _ in range(100):                       # straight down from the middle: onto the handheld
+        lay.move(0, 10)
+    assert lay.y >= 1080 and lay.scale() == 1.0, (lay.x, lay.y)
+    lay2 = PointerLayout(EXTEND)
+    lay2.move(-860, 0)                         # to the left part of the monitor (x 100) ...
+    for _ in range(100):                       # ... then down: no handheld below, stays on the monitor
+        lay2.move(0, 10)
+    assert (lay2.x, lay2.y) == (100, 1079) and abs(lay2.scale() - 2.754) < 1e-6, (lay2.x, lay2.y)
+
+
+def test_layout_change_keeps_or_clamps_position():
+    lay = PointerLayout([{"x": 0, "y": 0, "w": 640, "h": 480, "scale": 1.0}])   # handheld only
+    lay.move(-1000, -1000)
+    assert (lay.x, lay.y) == (0, 0)
+    lay.set_rects([{"x": 0, "y": 0, "w": 1920, "h": 1080, "scale": 2.754}])     # monitor only
+    assert (lay.x, lay.y) == (0, 0) and abs(lay.scale() - 2.754) < 1e-6
+    lay.set_rects([])                          # no layout: speed 1
+    assert lay.scale() == 1.0
 
 
 if __name__ == "__main__":
