@@ -35,15 +35,11 @@ blueman
 # Apps
 foot
 thunar
-tumbler                   # thumbnail service Thunar needs; without it opening a
-                          # video fails with a missing-exec error (exo-open crash)
 mousepad
 chromium                  # browser: about half Firefox's CPU when scrolling on this device (docs/desktop.md)
 imv
 qpdfview
 mpv
-bemenu                  # fast text app launcher (goblin-run); ~6x quicker than the icon drawer
-python3-textual          # modern TUI framework (goblin-tui); mouse support, neon styling
 xarchiver
 # Themes / fonts
 adwaita-icon-theme
