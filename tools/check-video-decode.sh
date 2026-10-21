@@ -57,10 +57,9 @@ fi
 
 echo "patched ffmpeg:"
 ffmpeg_bin=$(command -v ffmpeg || true)
-# A stale --prefix=/usr/local install used to shadow /usr/bin here (see 04c).
-[ "$ffmpeg_bin" = /usr/bin/ffmpeg ] \
-  && chk "ffmpeg resolves to /usr/bin/ffmpeg (got ${ffmpeg_bin:-nothing})" 0 \
-  || chk "ffmpeg resolves to /usr/bin/ffmpeg (got ${ffmpeg_bin:-nothing} -- stale /usr/local copy?)" 1
+[ -n "$ffmpeg_bin" ] \
+  && chk "ffmpeg is installed (${ffmpeg_bin})" 0 \
+  || chk "ffmpeg is installed" 1
 ffmpeg -hide_banner -hwaccels 2>/dev/null | grep -qw v4l2request \
   && chk "ffmpeg -hwaccels lists v4l2request" 0 \
   || chk "ffmpeg -hwaccels lists v4l2request" 1

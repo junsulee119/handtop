@@ -2,8 +2,8 @@
 
 ## Status
 
-**Working.** The Cedrus VPU decodes H.264 and HEVC (and MPEG-2/VP8/VP9 via the
-same hwaccel) both in Moonlight and in the system FFmpeg and mpv.
+**Working.** The Cedrus VPU decodes H.264 and HEVC (and MPEG-2/VP8 — see the
+`hwdec-codecs` note below) both in Moonlight and in the system FFmpeg and mpv.
 
 - **Moonlight** always worked: it links its own FFmpeg with the V4L2 request-API
   patchset and picks the VPU automatically (Settings → video decoder: Automatic).
@@ -40,8 +40,23 @@ Using hardware decoding (v4l2request-copy).
 ```
 
 `--hwdec=v4l2request[-copy]` and `--hwdec=drm[-copy]` are offered for H.264,
-HEVC, MPEG-2, VP8, VP9 and AV1 (AV1/VP9 have no Cedrus support in this kernel,
-so they fall back).
+HEVC, MPEG-2, VP8, VP9 and AV1, but mpv only tries the codecs on its hwdec
+whitelist, which by default leaves MPEG-2 and VP8 on the CPU
+(`[vd] Not trying to use hardware decoding: codec mpeg2video is not on
+whitelist`, with any `--hwdec` spelling). `/etc/mpv/mpv.conf` therefore sets
+`hwdec-codecs=h264,hevc,mpeg2video,vp8` — that option *replaces* the default
+list, so the codecs that matter have to be in it — and all four formats this
+kernel's Cedrus has reach the VPU. The whitelist line is worth its keep on
+battery: MPEG-2 1080i drops from 88.8 % to 45.6 % CPU and VP8 720p from 92.1 % to
+48.1 %, at the same fps.
+
+VP9 and AV1 are deliberately not in the list. This kernel's Cedrus has no
+decoder for them, and mpv's attempt at them does not fail cleanly: it reports
+`Error while decoding frame (hardware decoding)!` for every frame before it
+gives up. Leaving them out of the whitelist means they are never attempted and
+decode in software right away — VP9 in FFmpeg's native decoder, AV1 in dav1d
+(this build enables it: with the hardware devices advertised, the native av1
+decoder picks no pixel format and renders black).
 
 ### Throughput: zero-copy vs copy
 
@@ -59,8 +74,6 @@ ratios, not the digits:
 
 | Path | 540p HEVC | 1080p HEVC | 1080p H.264 |
 |---|---|---|---|
-| zero-copy, `vo=null` (decode only) | 233 fps | 99 fps | 51 fps |
-| copy, `vo=null` | 142 fps | 48 fps | 24 fps |
 | zero-copy, `vo=gpu` `--profile=fast` | 79 fps | 51 fps | 43 fps |
 | zero-copy, `vo=dmabuf-wayland` | 94 fps | 62 fps | 50 fps |
 | zero-copy, `vo=gpu` (default scaler) | 79 fps | 23 fps | 18 fps |
@@ -98,6 +111,63 @@ decoding via hevc-drm`) and skips it when the VO has no usable interop.
 subtitles — so it remains an option rather than the default. The software path is
 unchanged and still the unstable one (next section).
 
+### Versus the software path (what an image without this PR does)
+
+Without `04c` mpv has only software decoding, so that is the honest before/after
+baseline. Same harness, 120 frames, `vo=gpu --profile=fast`, measured 2026-10-21
+on the device (mpv 0.40; `--hwdec=no` on the patched build — its software path is
+the same decoders Debian ships):
+
+| 120 frames, `vo=gpu --profile=fast` | software | `hwdec=drm` (zero-copy) |
+|---|---|---|
+| 540p HEVC | 35.9 fps, 120 % CPU | 36.7 fps, 69 % CPU |
+| 1080p HEVC | 30.3 fps, 266 % CPU | 36.1 fps, 75 % CPU |
+| 1080p H.264 | 29.0 fps, 271 % CPU | 35.5 fps, 76 % CPU |
+
+CPU is `(user+sys)/wall` for the whole process. The saving is the point: roughly
+3.5 CPUs at 1080p, whichever codec. The fps column saturates near 36 fps in this
+harness because the `vo=gpu`/panfrost path, not the decoder, is the limit — the
+gain there is headroom (audio, subtitles, the desktop, thermals), not raw decode
+rate. Decode-only runs show the same from the other side: with `vo=null`
+`--hwdec=drm-copy` (VPU plus a download per frame) does 94 / 32 / 23 fps against
+software's 154 / 68 / 48 fps, at about a third of the CPU — which is why
+zero-copy, not the VPU alone, is what turns the saving into a playback win.
+`vo=null` cannot present `drm_prime` frames, so `--hwdec=drm` falls back to
+software there and is not a valid way to measure the zero-copy path.
+
+The power draw could not be compared directly: the AXP2202 fuel gauge on this
+board reports the same ~423 mA with the SoC idle and with four cores pegged, so
+CPU time is the only usable proxy.
+
+### The blue video: panfrost cannot import every dmabuf
+
+Zero-copy (`--hwdec=drm`) renders a **flat blue rectangle** for streams whose
+width is not a multiple of 64 pixels. The picture is not a decode failure: the
+decoder produces correct frames, and `MESA: panfrost: rejecting image due to
+unsupported offset or stride alignment` is logged for every frame. Panfrost
+refuses the dmabuf import, the VO keeps its clear colour, and nothing else is
+drawn.
+
+Measured 2026-10-21 on the device (`--hwdec=drm`, 24 frames each, "Mesa
+errors" counted from the mpv log):
+
+| width | Mesa rejections | picture |
+|---|---|---|
+| 416 (416x234 / 416x236 / 416x238) | 26-62 per frame | blue |
+| 544 (544x306) | 26 | blue |
+| 720 (720x404) | 26 | blue |
+| 512, 640, 704, 960, 1280 | 0 | correct |
+
+Height does not matter (1280x536 is fine, 416x240 is fine), only the width —
+i.e. the NV12 stride. 640 = 10x64, 704 = 11x64, 960 = 15x64, 1280 = 20x64 all
+work; 416 = 6.5x64, 544 = 8.5x64 and 720 = 11.25x64 do not. Common widths
+(1280, 1920, 640, 512) are fine; odd ones (854, 1366, 720) are not.
+
+`--hwdec=drm-copy` renders every width — the frames are downloaded to system
+memory, so Mesa never imports a dmabuf — and at 720p it drops no frames at all
+(0 dropped over 15 s, measured). The copy path at 1080p does drop frames
+(21-40 over 15 s), which is why 1080p files prefer zero-copy.
+
 ### The Mesa crash on the software path (pre-existing)
 
 `--hwdec=no` with a GPU VO segfaults intermittently, and it is *not* caused by
@@ -115,17 +185,8 @@ The same loop crashes 1/5 with Debian's **stock** libavcodec installed, and
 `gdb` puts the fault in Mesa's panfrost driver on mpv's `vo` thread
 (`libgallium-25.0.7-2+deb13u1.so`), not in any `libav*`/`libsw*` library.
 Software decoding produces `yuv420p` frames; the hardware copy path produces
-`nv12`, which Mesa handles fine. That is why `/etc/mpv/mpv.conf` defaults to
-`hwdec=v4l2request-copy`.
-
-### Fixed: a stale second ffmpeg under /usr/local
-
-An earlier revision of `build/04c` installed with `--prefix=/usr/local`. Images
-built since kept that copy, and because `/usr/local/bin` precedes `/usr/bin` in
-`PATH`, the `ffmpeg` a user ran from a terminal was that old build (`6dbf87a`,
-no `v4l2request`), even though mpv — whose loader picks `/usr/lib` first — used
-the new one. `04c` now deletes it, and `tools/check-video-decode.sh` fails if
-`ffmpeg` does not resolve to `/usr/bin/ffmpeg`.
+`nv12`, which Mesa handles fine. That is why `/etc/mpv/mpv.conf` defaults to `hwdec=auto-safe`: zero-copy
+`drm` first, `v4l2request-copy` only when the VO has no usable interop.
 
 ## Zero-copy
 
@@ -226,7 +287,7 @@ rejected today); it is kept as a local patch until that is settled upstream.
 | Device tree | ROCKNIX DTB + overlay adding the video-engine node | `/boot/firmware/dtb.img` (original kept as `dtb-rocknix.img`) |
 | Memory | Decoder buffers come from CMA: `cma=256M` on the kernel command line (ROCKNIX default is 32 MB). Unused CMA stays available to normal programs. 1080p streaming uses ~140 MB. | `extlinux/extlinux.conf` |
 | Heap access | dma-buf heaps are `root:root 0600` in the kernel; the overlay's `72-rg35xxh-dma-heap.rules` gives group `video` access, otherwise ffmpeg logs `Unable to open any dma_heap device` and no dmabuf path can allocate. | `overlay/etc/udev/rules.d/` |
-| Userspace | `build/04c-v4l2-ffmpeg.sh` installs Kwiboo's FFmpeg (`v4l2request` hwdevice + per-codec hwaccels) over the Debian libs; `/etc/mpv/mpv.conf` sets `hwdec=auto-safe`, which lands on zero-copy `drm`. Moonlight uses its own bundled FFmpeg. | `build/`, `overlay/etc/mpv/` |
+| Userspace | `build/04c-v4l2-ffmpeg.sh` installs Kwiboo's FFmpeg (`v4l2request` hwdevice + per-codec hwaccels) over the Debian libs, with the same external libraries the distro build has (gnutls for https, x264/lame/opus/vorbis/vpx encoders, libass for subtitles, dav1d for AV1); the replaced `libav*` packages are held with `apt-mark` so an upgrade cannot overwrite them. `/etc/mpv/mpv.conf` sets `hwdec=auto-safe`, which lands on zero-copy `drm`, and `hwdec-codecs=h264,hevc,mpeg2video,vp8`. Moonlight uses its own bundled FFmpeg. | `build/`, `overlay/etc/mpv/` |
 
 Players:
 
