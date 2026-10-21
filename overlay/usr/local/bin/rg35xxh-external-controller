@@ -42,7 +42,8 @@ def start(mode):
         notify(NAMES[mode], "Could not start" + (" (is Bluetooth on?)" if mode == "bt" else ""), 6000)
         return 1
     ready = False
-    for _ in range(80):                        # wait until the service accepts connections
+    for _ in range(150):                       # wait until the service accepts connections (BT: up to
+                                               # ~3 s more while bluetoothd restarts with the Xbox identity)
         try:                                   # (probe the status socket: the pad socket takes
             with socket.socket(socket.AF_UNIX) as c:   # a single client, the input daemon)
                 c.connect(STATUS)

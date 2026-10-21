@@ -1,6 +1,6 @@
 # BT Controller mode
 
-Use the handheld as a **Bluetooth gamepad** for a PC or phone (v0.2.0).
+Use the handheld as a **Bluetooth gamepad** for a PC or phone (v0.2.0; shows up as an Xbox Wireless Controller since the next release).
 
 ## Use
 
@@ -15,19 +15,15 @@ Next time, just open BT Controller again: the paired device reconnects by itself
 
 **Re-pairing:** remove "Handtop Gamepad" on the other device **and** on the handheld (Bluetooth tray → Devices), then pair again. If only one side forgets the pairing, the other refuses it.
 
+**Updating from v0.2.0:** the handheld now presents itself as an Xbox controller, and Windows remembers the old (generic) description per pairing. Remove "Handtop Gamepad" on the PC once and pair it again. Windows may also list a second "Handtop Gamepad" with a phone icon: that is the handheld's normal Bluetooth identity; ignore or remove it.
+
 ## What the other device sees
 
-A standard **Bluetooth LE HID gamepad** (HID over GATT), like a modern Xbox controller over BLE:
+An **Xbox Wireless Controller** (Series X|S, model 1914) over Bluetooth LE. Windows loads its own Xbox driver for it (Device Manager: "Bluetooth LE XINPUT compatible input device"), so XInput-only games work directly, and **game vibration plays on the handheld's motor** (through the same safety gate as Wired Controller mode, see "Vibration safety"). Buttons go by position, Xbox layout: the handheld's bottom button is Xbox A, the right one B, left X, top Y; Select = View, Start = Menu. Battery level is reported too.
 
-| Handheld | HID | Windows `joy.cpl` |
-|---|---|---|
-| A, B, X, Y, L1, R1, Select, Start, L3, R3 | buttons 1–10 (by position, Xbox layout) | buttons |
-| D-pad | hat switch | POV |
-| Left stick | X / Y | X axis / Y axis |
-| Right stick | Z / Rz | Z axis / Z rotation |
-| L2 / R2 | Rx / Ry | X rotation / Y rotation |
+Tested on Windows 11 (2026-10-21): driver, all controls, vibration. Android and Linux have drivers for this controller too (not tested yet).
 
-It is a *generic* gamepad, not an Xbox controller: Steam, emulators and most PC games accept it; games that only accept XInput (Xbox) controllers need Steam Input or a similar mapper. Battery level is reported to the other device. Rumble is not forwarded.
+Fallback: `RG35XXH_BTPAD_PROFILE=generic` in the service's environment (`systemctl edit rg35xxh-btpad`) gives the v0.2.0 behaviour, a generic BLE gamepad (buttons 1–10, hat, X/Y, Z/Rz, Rx/Ry for the triggers) with no vibration; re-pair after switching.
 
 ## Trade-off: classic Bluetooth pauses
 
@@ -37,13 +33,15 @@ Why: with classic Bluetooth on, Windows also derives a classic pairing key from 
 
 ## How it works
 
-- `rg35xxh-btpad` (root, `rg35xxh-btpad.service`, not started at boot) registers a GATT application with BlueZ over D-Bus: HID service 0x1812 (report map, report with notifications, HID information, control point, protocol mode) and battery service 0x180F; a BLE advertisement (gamepad appearance 0x03C4, 30–60 ms interval); and a just-works pairing agent. Newly paired devices are marked trusted.
-- Input: it listens on `/run/rg35xxh-extpad.sock` (Unix seqpacket, root:input 0660). In BT Controller mode the input daemon uses its gamepad mapping but sends each pad event there (one evdev event per packet, `struct "<HHi"`: type, code, value) instead of creating the local virtual Xbox pad. btpad sends 9-byte HID reports (≤ 125/s).
+- `rg35xxh-btpad` (root, `rg35xxh-btpad.service`, not started at boot) registers a GATT application with BlueZ over D-Bus: HID service 0x1812 (report map, input report with notifications, output report, HID information, control point, protocol mode) and battery service 0x180F; a BLE advertisement (gamepad appearance 0x03C4, 30–60 ms interval); and a just-works pairing agent. Newly paired devices are marked trusted.
+- **Xbox identity.** Windows picks its Xbox BLE driver (`xinputhid.inf`) by the PnP ID in the Device Information service, and only for product 0x0B13 or 0x0B20–0x0B27 from vendor 0x045E. BlueZ publishes that service itself (default `1d6b:0246`, from `DeviceID` in `main.conf`), so on start btpad writes a copy of `/etc/bluetooth/main.conf` with `DeviceID = usb:045e:0b13:0509` to `/run/rg35xxh-btpad/main.conf`, adds a runtime drop-in (`/run/systemd/system/bluetooth.service.d/50-rg35xxh-btpad.conf`, `bluetoothd -f` that file) and restarts bluetoothd; on exit it removes both and restarts it again (`ExecStopPost=rg35xxh-btpad --restore` does the same after a crash). The unit only `Wants=` bluetooth.service, so the restart does not stop it.
+- **Report map**: the real controller's descriptor, byte for byte (283 bytes; from Mystfit/ESP32-BLE-CompositeHID, MIT, identical to the BLE dump in DJm00n/ControllersInfo). Input report 1, 16 bytes: X Y Z Rz as unsigned 16 bit (centre 32768), brake/accelerator 10 bit, hat 1–8 (0 = centred), 15 button bits (A 0, B 1, X 3, Y 4, LB 6, RB 7, View 10, Menu 11, Guide 12, LS 13, RS 14), Record. Output report 3, 8 bytes, written by Windows for vibration: enable bits, magnitudes 0–100 (left trigger, right trigger, strong, weak), duration and start delay in 10 ms, loop count. btpad turns it into `rumble <big> <small>` for the input daemon (≤ 20/s) and ends it after duration × loops by itself. Windows caches the report map per pairing.
+- Input: it listens on `/run/rg35xxh-extpad.sock` (Unix seqpacket, root:input 0660). In BT Controller mode the input daemon uses its gamepad mapping but sends each pad event there (one evdev event per packet, `struct "<HHi"`: type, code, value) instead of creating the local virtual Xbox pad. btpad sends 16-byte HID reports (≤ 125/s); the status screen still gets the 9-byte generic layout.
 - The **External Controller** app (`rg35xxh-bt-controller`) starts the service (allowed without a password by `/etc/polkit-1/rules.d/50-rg35xxh-btpad.rules`) waits for the socket and sends `SIGUSR2` to the input daemon, which connects to it and switches to BT Controller mode (flag file `$XDG_RUNTIME_DIR/rg35xxh-bt-mode`, read by autosleep and the taskbar indicator).
 - Classic Bluetooth is switched off with `btmgmt` on start and back on (with SSP) on exit. The service stops by itself when the daemon disconnects (Select + Start + L1 + R1) or never connects (60 s); if the service stops first, the daemon returns to desktop mode.
 - Logs: `journalctl -u rg35xxh-btpad`.
 
-Tested 2026-10-21 with Windows 11: pairing, all controls in `joy.cpl`, automatic reconnection after leaving and re-entering the mode.
+Tested 2026-10-21 with Windows 11: pairing, all controls in `joy.cpl`, automatic reconnection after leaving and re-entering the mode; with the Xbox identity: Xbox driver, vibration, identity restored when the mode ends.
 
 ## Status screen
 
@@ -89,4 +87,4 @@ Tested: 1, 10 and 100 requests/s (100/s for 20 s, ~2000 requests) with the handh
 
 ## Planned
 
-- Bluetooth vibration: a generic BLE gamepad gets no vibration from XInput games. Would need the handheld to present itself as an Xbox Wireless Controller over BLE (its HID report map includes a rumble output report); to investigate.
+- Test the Xbox identity on Android, Linux, macOS/iOS.

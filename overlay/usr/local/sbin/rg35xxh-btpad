@@ -3,6 +3,20 @@
 for another device (PC, phone). Uses BLE, so Bluetooth devices connected *to* the handheld
 (keyboards, mice, controllers over classic Bluetooth) keep working at the same time.
 
+Profile "xbox" (default): the handheld presents itself as an Xbox Wireless Controller (Series X|S,
+model 1914) over BLE, so Windows loads its own Xbox driver (xinputhid, "Bluetooth LE XINPUT
+compatible input device"): XInput games see it, and they can make it vibrate (output report 3,
+forwarded to the input daemon like Wired Controller mode). That needs two things:
+  - the device identity: BlueZ publishes its own Device Information service, whose PnP ID comes
+    from DeviceID in its config. For the time of the mode bluetoothd is restarted with a copy of
+    /etc/bluetooth/main.conf that sets DeviceID = usb:045e:0b13:0509 (a runtime drop-in in /run;
+    the original is restored when the mode ends, also by ExecStopPost after a crash). Windows'
+    driver binds only to product 0x0B13 and 0x0B20-0x0B27;
+  - the real controller's HID report descriptor, byte for byte (below).
+Windows caches the descriptor per pairing: after switching profiles, remove "Handtop Gamepad" on
+the PC and pair again. Profile "generic" (RG35XXH_BTPAD_PROFILE=generic): the earlier plain HID
+gamepad, no identity change.
+
 Classic Bluetooth (BR/EDR) is switched off while the mode is on: otherwise Windows derives a
 classic key during pairing and later reconnects over classic Bluetooth, where there is no gamepad.
 BLE accessories connected to the handheld keep working; classic ones pause until the mode ends.
@@ -18,6 +32,7 @@ Runs as root (registers a GATT application, an advertisement and a pairing agent
 import grp
 import json
 import os
+import re
 import signal
 import socket
 import struct
@@ -52,6 +67,30 @@ LAST_HOST = "/var/lib/rg35xxh/btpad-last-host"     # "address<TAB>name" of the l
 HID_UUIDS = ("00001124-", "00001812-")              # remote is an input device (keyboard, pad)
 EVENT = struct.Struct("<HHi")
 APPEARANCE_GAMEPAD = 0x03C4
+PROFILE = os.environ.get("RG35XXH_BTPAD_PROFILE", "xbox")   # "xbox" or "generic"
+XBOX_DEVICE_ID = "usb:045e:0b13:0509"        # Microsoft, Xbox Wireless Controller (model 1914), fw 5.9
+BT_CONF = "/etc/bluetooth/main.conf"
+RUN_DIR = "/run/rg35xxh-btpad"
+DROPIN = "/run/systemd/system/bluetooth.service.d/50-rg35xxh-btpad.conf"
+BLUETOOTHD = "/usr/libexec/bluetooth/bluetoothd"
+
+# Xbox Wireless Controller (model 1914) BLE report descriptor, 283 bytes, as read from a real pad.
+# Source: Mystfit/ESP32-BLE-CompositeHID, XboxDescriptors.h, XboxOneS_1914_HIDDescriptor (MIT);
+# identical to the BLE dump in DJm00n/ControllersInfo. Report 1: input, 16 bytes
+# (X Y Z Rz u16, brake + accelerator 10 bit, hat 1-8 / 0 = centred, 15 buttons, Record).
+# Report 3: output (rumble), 8 bytes (enable bits, 4 magnitudes 0-100, duration, delay, loops).
+XBOX_REPORT_MAP = bytes.fromhex(
+    "05010905a10185010901a10009300931150027ffff0000950275108102c00901a10009320935150027ffff0000950275"
+    "108102c0050209c5150026ff039501750a810215002500750695018103050209c4150026ff039501750a810215002500"
+    "75069501810305010939150125083500463b016614007504950181427504950115002500350045006500810305091901"
+    "290f150025017501950f810215002500750195018103050c0ab200150025019501750181021500250075079501810305"
+    "0f09218503a102099715002501750495019102150025007504950191030970150025647508950491020950660110550e"
+    "150026ff0075089501910209a7150026ff0075089501910265005500097c150026ff00750895019102c0c0")
+assert len(XBOX_REPORT_MAP) == 283
+XBOX_BUTTONS = {E.BTN_A: 0x0001, E.BTN_B: 0x0002, E.BTN_X: 0x0008, E.BTN_Y: 0x0010, E.BTN_TL: 0x0040,
+                E.BTN_TR: 0x0080, E.BTN_SELECT: 0x0400, E.BTN_START: 0x0800, E.BTN_MODE: 0x1000,
+                E.BTN_THUMBL: 0x2000, E.BTN_THUMBR: 0x4000}
+XBOX_HAT = {(0, -1): 1, (1, -1): 2, (1, 0): 3, (1, 1): 4, (0, 1): 5, (-1, 1): 6, (-1, 0): 7, (-1, -1): 8}
 
 # HID report descriptor: report ID 1 = 16 buttons, hat, 4 stick axes, 2 triggers (9 bytes)
 REPORT_MAP = bytes([
@@ -168,6 +207,19 @@ class Characteristic(dbus.service.Object):
         return self.get_properties()[CHR_IFACE]
 
 
+class OutputReport(Characteristic):
+    """HID output report written by the host (Xbox profile: rumble, report 3)."""
+
+    def __init__(self, service, index, on_write):
+        super().__init__(service, index, "2a4d", ["encrypt-read", "encrypt-write", "write-without-response"], bytes(8))
+        self.on_write = on_write
+
+    @dbus.service.method(CHR_IFACE, in_signature="aya{sv}")
+    def WriteValue(self, value, options):
+        self.value = bytes(value)
+        self.on_write(self.value)
+
+
 class Descriptor(dbus.service.Object):
     def __init__(self, chrc, index, uuid, flags, value):
         self.path = f"{chrc.path}/desc{index}"
@@ -241,12 +293,16 @@ class Pad:
         self.chr = report_chr
         self.status = status
         self.on_exit = on_exit      # called when the daemon disconnects
-        self.buttons = 0
+        self.buttons = set()        # pressed evdev button codes
         self.hat = [0, 0]
-        self.axes = {E.ABS_X: 128, E.ABS_Y: 128, E.ABS_RX: 128, E.ABS_RY: 128, E.ABS_Z: 0, E.ABS_RZ: 0}
+        self.axes = dict.fromkeys((E.ABS_X, E.ABS_Y, E.ABS_RX, E.ABS_RY, E.ABS_Z, E.ABS_RZ), 0)  # raw
         self.conn = None
         self.pending = False
         self.last = None
+        self.rumble_want = self.rumble_sent = (0, 0)
+        self.rumble_scheduled = False
+        self.rumble_stop = None
+        self.rumble_logged = 0
         self.server = unix_server(SOCKET, socket.SOCK_SEQPACKET)
         GLib.io_add_watch(self.server.fileno(), GLib.IO_IN, self.on_accept)
 
@@ -260,19 +316,87 @@ class Pad:
             pass
 
     def report(self):
+        """Generic profile report (9 bytes); also what the status screen reads."""
+        b = 0
+        for code in self.buttons:
+            if code in BUTTON_BITS:
+                b |= 1 << BUTTON_BITS[code]
         h = HAT.get(tuple(self.hat), 8)
         a = self.axes
-        return bytes([self.buttons & 0xFF, self.buttons >> 8, h,
-                      a[E.ABS_X], a[E.ABS_Y], a[E.ABS_RX], a[E.ABS_RY], a[E.ABS_Z], a[E.ABS_RZ]])
+        stick = lambda v: (max(-32768, min(32767, v)) + 32768) >> 8
+        trig = lambda v: max(0, min(255, v))
+        return bytes([b & 0xFF, b >> 8, h, stick(a[E.ABS_X]), stick(a[E.ABS_Y]), stick(a[E.ABS_RX]),
+                      stick(a[E.ABS_RY]), trig(a[E.ABS_Z]), trig(a[E.ABS_RZ])])
+
+    def xbox_report(self):
+        """Xbox Wireless Controller input report 1 (16 bytes, little-endian)."""
+        b = 0
+        for code in self.buttons:
+            b |= XBOX_BUTTONS.get(code, 0)
+        a = self.axes
+        stick = lambda v: max(-32768, min(32767, v)) + 32768                # 0..65535, centre 32768
+        trig = lambda v: max(0, min(255, v)) * 1023 // 255                  # 10 bit
+        return struct.pack("<HHHHHHBH", stick(a[E.ABS_X]), stick(a[E.ABS_Y]), stick(a[E.ABS_RX]),
+                           stick(a[E.ABS_RY]), trig(a[E.ABS_Z]), trig(a[E.ABS_RZ]),
+                           XBOX_HAT.get(tuple(self.hat), 0), b & 0x7FFF) + b"\x00"   # last byte: Share
 
     def flush(self):
         self.pending = False
-        r = self.report()
+        r = self.xbox_report() if PROFILE == "xbox" else self.report()
         if r != self.last:
             self.last = r
             self.chr.notify(r)
             if self.status:
-                self.status.report(r)
+                self.status.report(self.report())
+        return False
+
+    # ---- vibration requested by the host (Xbox profile)
+    RUMBLE_HZ = 20
+
+    def rumble(self, data):
+        """Output report 3: enable bits, magnitudes 0-100 (left trigger, right trigger, strong, weak),
+        duration and start delay (10 ms units), loop count. One motor here: the strongest wins."""
+        if self.rumble_logged < 12:
+            self.rumble_logged += 1
+            log("rumble report:", data.hex(" "))
+        if len(data) < 8:
+            return
+        enable, lt, rt, strong, weak, duration, _delay, loops = data[:8]
+        if not enable & 0x0F:
+            lt = rt = strong = weak = 0
+        big = min(100, max(lt, rt, strong)) * 255 // 100
+        small = min(100, weak) * 255 // 100
+        if self.rumble_stop:
+            GLib.source_remove(self.rumble_stop)
+            self.rumble_stop = None
+        if (big or small) and duration:       # the effect ends by itself after duration x loops
+            self.rumble_stop = GLib.timeout_add(duration * 10 * (loops + 1), self._rumble_end)
+        self._rumble_set(big, small)
+
+    def _rumble_end(self):
+        self.rumble_stop = None
+        self._rumble_set(0, 0)
+        return False
+
+    def _rumble_set(self, big, small):
+        self.rumble_want = (big, small)
+        if not self.rumble_scheduled:
+            self.rumble_scheduled = True
+            GLib.idle_add(self._rumble_forward)
+
+    def _rumble_forward(self):
+        """To the input daemon (which drives the motor through its safety gate), at most RUMBLE_HZ/s."""
+        want = self.rumble_want
+        if want != self.rumble_sent and self.conn:
+            try:
+                self.conn.send(f"rumble {want[0]} {want[1]}".encode(), socket.MSG_DONTWAIT)
+                self.rumble_sent = want
+            except OSError:
+                pass
+        if self.rumble_want != self.rumble_sent and self.conn:
+            GLib.timeout_add(1000 // self.RUMBLE_HZ, self._rumble_forward)
+            return False
+        self.rumble_scheduled = False
         return False
 
     def on_accept(self, fd, cond):
@@ -290,8 +414,9 @@ class Pad:
         log("input daemon disconnected: stopping BT Controller mode")
         self.conn.close()
         self.conn = None
-        self.buttons, self.hat = 0, [0, 0]
-        self.axes.update({E.ABS_X: 128, E.ABS_Y: 128, E.ABS_RX: 128, E.ABS_RY: 128, E.ABS_Z: 0, E.ABS_RZ: 0})
+        self.buttons, self.hat = set(), [0, 0]
+        self.axes.update(dict.fromkeys(self.axes, 0))
+        self.rumble_want = self.rumble_sent = (0, 0)
         self.flush()          # all buttons released on the other device
         GLib.timeout_add(300, self.on_exit)
 
@@ -304,18 +429,18 @@ class Pad:
             self.lost()
             return False
         etype, code, value = EVENT.unpack(data)
-        if etype == E.EV_KEY and code in BUTTON_BITS:
-            bit = 1 << BUTTON_BITS[code]
-            self.buttons = (self.buttons | bit) if value else (self.buttons & ~bit)
+        if etype == E.EV_KEY and (code in BUTTON_BITS or code in XBOX_BUTTONS):
+            if value:
+                self.buttons.add(code)
+            else:
+                self.buttons.discard(code)
         elif etype == E.EV_ABS:
             if code == E.ABS_HAT0X:
                 self.hat[0] = value
             elif code == E.ABS_HAT0Y:
                 self.hat[1] = value
-            elif code in (E.ABS_X, E.ABS_Y, E.ABS_RX, E.ABS_RY):
-                self.axes[code] = (max(-32768, min(32767, value)) + 32768) >> 8
-            elif code in (E.ABS_Z, E.ABS_RZ):
-                self.axes[code] = max(0, min(255, value))
+            elif code in self.axes:
+                self.axes[code] = value
         if not self.pending:
             self.pending = True
             GLib.timeout_add(8, self.flush)       # at most ~125 reports/s
@@ -511,7 +636,66 @@ def set_bredr(on):
     log("classic Bluetooth", "on" if on else "off (BLE only while BT Controller mode is on)")
 
 
+def xbox_identity(on):
+    """Restart bluetoothd with DeviceID = the Xbox controller's PnP ID (on) or with the original
+    config again (off). Returns False if there was nothing to do."""
+    if on:
+        try:
+            with open(BT_CONF) as f:
+                lines = f.read().splitlines()
+        except OSError:
+            lines = []
+        lines = [ln for ln in lines if not re.match(r"\s*DeviceID\s*=", ln)]
+        out, done = [], False
+        for ln in lines:
+            out.append(ln)
+            if not done and ln.strip() == "[General]":
+                out.append(f"DeviceID = {XBOX_DEVICE_ID}")
+                done = True
+        if not done:
+            out = ["[General]", f"DeviceID = {XBOX_DEVICE_ID}", ""] + out
+        os.makedirs(RUN_DIR, exist_ok=True)
+        with open(f"{RUN_DIR}/main.conf", "w") as f:
+            f.write("# Written by rg35xxh-btpad for BT Controller mode (Xbox profile); removed afterwards.\n"
+                    + "\n".join(out) + "\n")
+        os.makedirs(os.path.dirname(DROPIN), exist_ok=True)
+        with open(DROPIN, "w") as f:
+            f.write(f"# BT Controller mode (rg35xxh-btpad): Xbox controller identity. Removed when it ends.\n"
+                    f"[Service]\nExecStart=\nExecStart={BLUETOOTHD} -f {RUN_DIR}/main.conf\n")
+        log("bluetoothd: Xbox controller identity", XBOX_DEVICE_ID)
+    else:
+        if not os.path.exists(DROPIN):
+            return False
+        for f in (DROPIN, f"{RUN_DIR}/main.conf"):
+            try:
+                os.remove(f)
+            except FileNotFoundError:
+                pass
+        log("bluetoothd: original identity")
+    subprocess.run(["systemctl", "daemon-reload"])
+    subprocess.run(["systemctl", "restart", "bluetooth.service"])
+    if on:                       # let bluetoothd bring the adapter up before we change its settings
+        for _ in range(50):
+            out = subprocess.run(["bluetoothctl", "show"], capture_output=True, text=True, timeout=5).stdout
+            if "Powered: yes" in out:
+                break
+            time.sleep(0.2)
+        time.sleep(1)
+    return True
+
+
 def main():
+    xbox = PROFILE == "xbox"
+    if xbox:
+        xbox_identity(True)
+    try:
+        bredr_main()
+    finally:
+        if xbox:
+            xbox_identity(False)
+
+
+def bredr_main():
     restore_bredr = bredr_enabled()
     if restore_bredr:
         set_bredr(False)
@@ -525,8 +709,19 @@ def main():
 def run():
     dbus.mainloop.glib.DBusGMainLoop(set_as_default=True)
     bus = dbus.SystemBus()
-    om = dbus.Interface(bus.get_object(BLUEZ, "/"), OM_IFACE)
-    adapter_path = next(p for p, ifs in om.GetManagedObjects().items() if GATT_MGR in ifs)
+    adapter_path = None
+    for _ in range(100):                 # bluetoothd may just have been restarted (Xbox identity)
+        try:
+            om = dbus.Interface(bus.get_object(BLUEZ, "/"), OM_IFACE)
+            adapter_path = next((p for p, ifs in om.GetManagedObjects().items() if GATT_MGR in ifs), None)
+        except dbus.exceptions.DBusException:
+            adapter_path = None
+        if adapter_path:
+            break
+        time.sleep(0.1)
+    if not adapter_path:
+        log("no Bluetooth adapter: stopping")
+        return
     adapter = bus.get_object(BLUEZ, adapter_path)
     props = dbus.Interface(adapter, PROP_IFACE)
     old_alias = props.Get(ADAPTER_IFACE, "Alias")
@@ -538,11 +733,16 @@ def run():
     hid = Service(bus, app, 0, "1812")
     app.services.append(hid)
     Characteristic(hid, 0, "2a4a", ["read"], bytes([0x11, 0x01, 0x00, 0x02]))   # HID Information
-    Characteristic(hid, 1, "2a4b", ["encrypt-read"], REPORT_MAP)                 # Report Map
+    Characteristic(hid, 1, "2a4b", ["encrypt-read"],                              # Report Map
+                   XBOX_REPORT_MAP if PROFILE == "xbox" else REPORT_MAP)
     Characteristic(hid, 2, "2a4c", ["write-without-response"], b"\x00")         # HID Control Point
     Characteristic(hid, 3, "2a4e", ["read", "write-without-response"], b"\x01") # Protocol Mode: report
-    report = Characteristic(hid, 4, "2a4d", ["encrypt-read", "notify"], bytes(9))
+    report = Characteristic(hid, 4, "2a4d", ["encrypt-read", "notify"], bytes(16 if PROFILE == "xbox" else 9))
     Descriptor(report, 0, "2908", ["read"], bytes([0x01, 0x01]))               # Report ID 1, input
+    pad_ref = []
+    if PROFILE == "xbox":                                                       # Report ID 3, output: rumble
+        out = OutputReport(hid, 5, lambda v: pad_ref and pad_ref[0].rumble(v))
+        Descriptor(out, 0, "2908", ["read"], bytes([0x03, 0x02]))
     bat = Service(bus, app, 1, "180f")
     app.services.append(bat)
     level = Characteristic(bat, 0, "2a19", ["read", "notify"], bytes([battery()]))
@@ -561,8 +761,21 @@ def run():
         return lambda e: (log(f"{what} failed: {e}"), loop.quit())
     gatt.RegisterApplication(app.path, {}, reply_handler=lambda: log("GATT gamepad service registered"),
                              error_handler=fail("GATT registration"))
-    advm.RegisterAdvertisement(adv.path, {}, reply_handler=lambda: log(f"advertising as '{NAME}'"),
-                               error_handler=fail("advertising"))
+    tries = [0]
+
+    def advertise():
+        advm.RegisterAdvertisement(adv.path, {}, reply_handler=lambda: log(f"advertising as '{NAME}'"),
+                                   error_handler=adv_failed)
+        return False
+
+    def adv_failed(e):           # right after a bluetoothd restart the adapter can still be busy
+        tries[0] += 1
+        if tries[0] >= 6:
+            fail("advertising")(e)
+        else:
+            log(f"advertising not ready ({e}), retrying")
+            GLib.timeout_add(1000, advertise)
+    advertise()
 
     def trust(interface, changed, invalidated, path=None):
         # Mark newly paired devices as trusted so they reconnect without asking.
@@ -578,6 +791,7 @@ def run():
     status = Status()
     Hosts(bus, adapter_path, status)
     pad = Pad(report, lambda: (loop.quit(), False)[1], status)
+    pad_ref.append(pad)
 
     def no_pad():
         if pad.conn is None:
@@ -601,10 +815,13 @@ def run():
             call()
         except dbus.exceptions.DBusException:
             pass
-    log("stopped")
+    log(f"stopped ({PROFILE} profile)")
 
 
 if __name__ == "__main__":
     if os.geteuid() != 0:
         sys.exit("rg35xxh-btpad: must run as root")
+    if sys.argv[1:] == ["--restore"]:      # ExecStopPost: undo the Xbox identity after a crash
+        xbox_identity(False)
+        sys.exit(0)
     main()

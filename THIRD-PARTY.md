@@ -26,6 +26,38 @@ Taken unmodified from the official image
 | Video-engine device-tree overlay | GPL-2.0 / MIT (as upstream sunxi DTs) | `build/dts/rg35xxh-video-engine.dtso`, based on patch 7/7 of the same series |
 | nwg-drawer v0.7.5 | MIT | https://github.com/nwg-piotr/nwg-drawer, built by `build/04b-nwg-drawer.sh` |
 
+## Data from other projects
+
+| What | License | Source |
+|---|---|---|
+| Xbox Wireless Controller (model 1914) BLE HID report descriptor, 283 bytes, in `overlay/usr/local/sbin/rg35xxh-btpad` | MIT | [Mystfit/ESP32-BLE-CompositeHID](https://github.com/Mystfit/ESP32-BLE-CompositeHID), `XboxDescriptors.h` (`XboxOneS_1914_HIDDescriptor`), read from a physical controller; matches the BLE dump in [DJm00n/ControllersInfo](https://github.com/DJm00n/ControllersInfo). How Windows picks its driver (PnP ID, product IDs): [WikDra/esp32-hid-gamepad-bridge](https://github.com/WikDra/esp32-hid-gamepad-bridge) (MIT) |
+
+Original notice of ESP32-BLE-CompositeHID (MIT):
+
+```
+Software License Agreement (MIT License)
+
+Copyright (c) 2021 lemmingDev - https://github.com/lemmingDev
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+```
+
 ## Packages
 
 - **Debian 13 "trixie"** packages, unmodified from deb.debian.org; licenses in `/usr/share/doc/*/copyright` on the device.

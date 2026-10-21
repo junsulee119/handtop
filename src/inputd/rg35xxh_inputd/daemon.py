@@ -835,7 +835,7 @@ class Daemon:
         return False
 
     def _ext_rumble(self, big, small):
-        """Vibration requested by the PC (wired mode): the stronger of the two motors' values, on the
+        """Vibration requested by the PC (Wired, or BT with the Xbox profile): the stronger of the two motors' values, on the
         handheld's single motor, through the motor gate. Runs until the PC sends 0 0 / the mode ends."""
         self.motor_ext_want = round(max(big, small) / 255 * MOTOR_LEVELS)
         self._motor_kick()
@@ -894,7 +894,7 @@ class Daemon:
                     else:
                         self.motor_game_active.discard(vid)
             self.motor_pending_play.clear()
-            # PC (wired mode): switch between the pre-uploaded level effects
+            # PC (external modes): switch between the pre-uploaded level effects
             want = self.motor_ext_want
             if want != self.motor_ext_applied:
                 if self.motor_ext_applied and self.motor_ext_applied in self.motor_ext_ids:

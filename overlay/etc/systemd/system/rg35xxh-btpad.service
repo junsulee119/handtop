@@ -1,6 +1,8 @@
 [Unit]
 Description=Handtop BT Controller mode (handheld as a Bluetooth LE gamepad)
-Requires=bluetooth.service
+# Wants, not Requires: the service restarts bluetoothd itself (Xbox controller identity),
+# which must not stop it.
+Wants=bluetooth.service
 After=bluetooth.service
 # One external controller connection at a time.
 Conflicts=rg35xxh-usbpad.service
@@ -8,5 +10,7 @@ Conflicts=rg35xxh-usbpad.service
 [Service]
 Type=simple
 ExecStart=/usr/local/sbin/rg35xxh-btpad
+# Put bluetoothd's own identity back even if the service crashed.
+ExecStopPost=/usr/local/sbin/rg35xxh-btpad --restore
 # Stops by itself when gamepad mode is left; not started at boot.
 Restart=no
