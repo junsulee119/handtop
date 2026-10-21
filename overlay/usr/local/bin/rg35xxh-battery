@@ -1,0 +1,65 @@
+#!/bin/sh
+# Taskbar battery icon (Waybar image#battery; the percentage is Waybar's own battery module).
+#   rg35xxh-battery            print the icon path and a tooltip (run by Waybar on SIGRTMIN+9)
+#   rg35xxh-battery --animate  background loop (labwc autostart): while the charger is plugged in,
+#                              step the charging animation (bars from the current level up to
+#                              full, ~0.45 s each); otherwise refresh Waybar when the level or the
+#                              charger state changes.
+# Icons: /usr/local/share/rg35xxh/icons/battery-*.png (tools/icons/gen_battery.py). Light set
+# with the light theme (rg35xxh-theme).
+BAT=/sys/class/power_supply/battery
+USB=/sys/class/power_supply/axp20x-usb
+ICONS=/usr/local/share/rg35xxh/icons
+FRAME="${XDG_RUNTIME_DIR:-/tmp}/rg35xxh-battery-frame"     # bar count shown while animating
+SIG=9                                                     # image#battery "signal" in Waybar
+
+read_state() {
+  cap=$(cat "$BAT/capacity" 2>/dev/null || echo 0)
+  plugged=$(cat "$USB/online" 2>/dev/null || echo 0)
+  bars=$(( (cap + 19) / 20 )); [ "$bars" -gt 5 ] && bars=5
+}
+
+# Signal Waybar to re-run this script. Only a Waybar that has been up for >= 3 s: a real-time
+# signal that arrives before Waybar has installed its handlers (startup, restart) would kill it.
+refresh() {
+  pid=$(pidof -s waybar) || return 0
+  age=$(ps -o etimes= -p "$pid" 2>/dev/null | tr -d ' ')
+  [ "${age:-0}" -ge 3 ] && env kill -RTMIN+$SIG "$pid" 2>/dev/null
+  return 0
+}
+
+if [ "$1" = --animate ]; then
+  last=
+  while :; do
+    read_state
+    if [ "$plugged" = 1 ] && [ "$bars" -lt 5 ]; then
+      b=$bars
+      while [ "$b" -le 5 ]; do
+        echo "$b" > "$FRAME"; refresh
+        if [ "$b" -eq 5 ]; then sleep 0.9; else sleep 0.45; fi
+        b=$((b + 1))
+      done
+      last=
+    else
+      rm -f "$FRAME"
+      now="$bars:$plugged:$cap"
+      [ "$now" != "$last" ] && { refresh; last=$now; }
+      sleep 5
+    fi
+  done
+fi
+
+read_state
+suffix=
+c="${XDG_CONFIG_HOME:-$HOME/.config}/rg35xxh"        # theme (rg35xxh-theme); old inputmode-icons too
+[ "$(cat "$c/theme" 2>/dev/null)" = light ] || [ "$(cat "$c/inputmode-icons" 2>/dev/null)" = light ] && suffix=-light
+shown=$bars
+if [ "$plugged" = 1 ]; then
+  f=$(cat "$FRAME" 2>/dev/null); case "$f" in [0-5]) shown=$f ;; esac
+fi
+name=battery
+[ "$plugged" = 1 ] && name=$name-charging
+[ "$cap" -le 20 ] && name=$name-low
+tip="Battery $cap %"
+[ "$plugged" = 1 ] && tip="$tip, charging"
+printf '%s\n%s\n' "$ICONS/$name-$shown$suffix.png" "$tip"

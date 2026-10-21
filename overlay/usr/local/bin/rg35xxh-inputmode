@@ -1,0 +1,32 @@
+#!/bin/sh
+# Waybar image#inputmode: prints the icon for the input daemon's current mode (flag files it
+# writes) and a tooltip. rg35xxh-inputd signals Waybar (SIGRTMIN+8) on each change and drives the
+# shake: while $XDG_RUNTIME_DIR/rg35xxh-inputmode-frame exists it holds "<old mode> <dx>", and the
+# old icon is shown with its drawing shifted dx px (pre-drawn frames, one damped-spring swing each).
+# Light-taskbar icons: theme "light" (rg35xxh-theme, ~/.config/rg35xxh/theme).
+d="${XDG_RUNTIME_DIR:-/tmp}"
+icons=/usr/local/share/rg35xxh/icons
+suffix=
+c="${XDG_CONFIG_HOME:-$HOME/.config}/rg35xxh"        # theme (rg35xxh-theme); old inputmode-icons too
+[ "$(cat "$c/theme" 2>/dev/null)" = light ] || [ "$(cat "$c/inputmode-icons" 2>/dev/null)" = light ] && suffix=-light
+
+if [ -e "$d/rg35xxh-bt-mode" ]; then mode=bt
+elif [ -e "$d/rg35xxh-wired-mode" ]; then mode=wired
+elif [ -e "$d/rg35xxh-gamepad-mode" ]; then mode=gamepad
+else mode=desktop
+fi
+dx=
+if [ -r "$d/rg35xxh-inputmode-frame" ]; then
+  read -r fmode fdx < "$d/rg35xxh-inputmode-frame" 2>/dev/null
+  case "$fmode:$fdx" in
+    desktop:*|gamepad:*|bt:*|wired:*) case "$fdx" in -2|-1|1|2) mode=$fmode dx=$fdx ;; esac ;;
+  esac
+fi
+
+case $mode in
+  bt) tip="BT Controller mode: the controls go to the paired PC/phone. Select + Start + L1 + R1 to stop." ;;
+  wired) tip="Wired Controller mode: the controls go to the PC over the USB cable. Select + Start + L1 + R1 to stop." ;;
+  gamepad) tip="Gamepad mode. Hold Start 1 s for desktop mode." ;;
+  *) tip="Desktop mode (mouse and keyboard). Press Start for gamepad mode." ;;
+esac
+printf '%s\n%s\n' "$icons/inputmode-$mode$suffix${dx:+-shake$dx}.png" "$tip"

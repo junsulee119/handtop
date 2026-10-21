@@ -1,0 +1,13 @@
+/* Light theme (rg35xxh-theme light). wlogout's icons are white, so the buttons stay mid-blue. */
+* { background-image: none; box-shadow: none; font-family: "Noto Sans"; }
+window { background-color: rgba(236, 239, 244, 0.92); }
+button {
+  color: #ffffff; font-size: 20px;
+  background-color: #6b7a96; border: 2px solid #56637d; border-radius: 12px;
+  background-repeat: no-repeat; background-position: center 30%; background-size: 30%;
+}
+button:focus, button:hover { background-color: #3d5a8a; border-color: #2b4a80; outline-style: none; }
+#shutdown  { background-image: image(url("/usr/share/wlogout/icons/shutdown.png")); }
+#reboot    { background-image: image(url("/usr/share/wlogout/icons/reboot.png")); }
+#logout    { background-image: image(url("/usr/share/wlogout/icons/logout.png")); }
+#sleep     { background-image: image(url("/usr/share/wlogout/icons/suspend.png")); }

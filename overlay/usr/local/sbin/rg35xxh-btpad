@@ -1,0 +1,610 @@
+#!/usr/bin/python3
+"""Handtop BT Controller mode: the handheld becomes a Bluetooth LE gamepad (HID over GATT)
+for another device (PC, phone). Uses BLE, so Bluetooth devices connected *to* the handheld
+(keyboards, mice, controllers over classic Bluetooth) keep working at the same time.
+
+Classic Bluetooth (BR/EDR) is switched off while the mode is on: otherwise Windows derives a
+classic key during pairing and later reconnects over classic Bluetooth, where there is no gamepad.
+BLE accessories connected to the handheld keep working; classic ones pause until the mode ends.
+
+Input comes from the input daemon (rg35xxh-inputd) over a Unix socket, /run/rg35xxh-extpad.sock:
+in BT Controller mode the daemon sends its gamepad events here instead of creating the local
+virtual Xbox pad, so apps on the handheld don't see them. Each packet is one evdev event
+(struct "<HHi": type, code, value).
+Started by the "BT Controller" app (rg35xxh-bt-controller) as rg35xxh-btpad.service; it stops
+by itself when the daemon disconnects (Select + Start + L1 + R1), or if it never connects.
+Runs as root (registers a GATT application, an advertisement and a pairing agent with BlueZ).
+"""
+import grp
+import json
+import os
+import signal
+import socket
+import struct
+import subprocess
+import sys
+import threading
+import time
+
+import dbus
+import dbus.mainloop.glib
+import dbus.service
+from evdev import ecodes as E
+from gi.repository import GLib
+
+BLUEZ = "org.bluez"
+ADAPTER_IFACE = "org.bluez.Adapter1"
+GATT_MGR = "org.bluez.GattManager1"
+ADV_MGR = "org.bluez.LEAdvertisingManager1"
+AGENT_MGR = "org.bluez.AgentManager1"
+OM_IFACE = "org.freedesktop.DBus.ObjectManager"
+PROP_IFACE = "org.freedesktop.DBus.Properties"
+SVC_IFACE = "org.bluez.GattService1"
+CHR_IFACE = "org.bluez.GattCharacteristic1"
+DSC_IFACE = "org.bluez.GattDescriptor1"
+ADV_IFACE = "org.bluez.LEAdvertisement1"
+AGENT_IFACE = "org.bluez.Agent1"
+
+NAME = "Handtop Gamepad"
+SOCKET = "/run/rg35xxh-extpad.sock"                 # shared with rg35xxh-usbpad (one runs at a time)
+STATUS_SOCKET = "/run/rg35xxh-extpad-status.sock"   # JSON lines for the status screen
+LAST_HOST = "/var/lib/rg35xxh/btpad-last-host"     # "address<TAB>name" of the last connected host
+HID_UUIDS = ("00001124-", "00001812-")              # remote is an input device (keyboard, pad)
+EVENT = struct.Struct("<HHi")
+APPEARANCE_GAMEPAD = 0x03C4
+
+# HID report descriptor: report ID 1 = 16 buttons, hat, 4 stick axes, 2 triggers (9 bytes)
+REPORT_MAP = bytes([
+    0x05, 0x01, 0x09, 0x05, 0xA1, 0x01,             # Generic Desktop / Game Pad / Application
+    0x85, 0x01,                                     #   Report ID 1
+    0x05, 0x09, 0x19, 0x01, 0x29, 0x10,             #   Buttons 1..16
+    0x15, 0x00, 0x25, 0x01, 0x75, 0x01, 0x95, 0x10, 0x81, 0x02,
+    0x05, 0x01, 0x09, 0x39,                         #   Hat switch (0..7, 8 = centred)
+    0x15, 0x00, 0x25, 0x07, 0x35, 0x00, 0x46, 0x3B, 0x01, 0x65, 0x14,
+    0x75, 0x04, 0x95, 0x01, 0x81, 0x42,
+    0x75, 0x04, 0x95, 0x01, 0x81, 0x03, 0x65, 0x00, #   padding
+    0x09, 0x30, 0x09, 0x31, 0x09, 0x32, 0x09, 0x35, #   X, Y (left stick), Z, Rz (right stick)
+    0x15, 0x00, 0x26, 0xFF, 0x00, 0x75, 0x08, 0x95, 0x04, 0x81, 0x02,
+    0x09, 0x33, 0x09, 0x34,                         #   Rx, Ry (left/right trigger)
+    0x15, 0x00, 0x26, 0xFF, 0x00, 0x75, 0x08, 0x95, 0x02, 0x81, 0x02,
+    0xC0,
+])
+BUTTON_BITS = {E.BTN_A: 0, E.BTN_B: 1, E.BTN_X: 2, E.BTN_Y: 3, E.BTN_TL: 4, E.BTN_TR: 5,
+               E.BTN_SELECT: 6, E.BTN_START: 7, E.BTN_THUMBL: 8, E.BTN_THUMBR: 9, E.BTN_MODE: 10}
+HAT = {(0, -1): 0, (1, -1): 1, (1, 0): 2, (1, 1): 3, (0, 1): 4, (-1, 1): 5, (-1, 0): 6, (-1, -1): 7}
+
+
+def log(*a):
+    print("rg35xxh-btpad:", *a, flush=True)
+
+
+class InvalidArgs(dbus.exceptions.DBusException):
+    _dbus_error_name = "org.freedesktop.DBus.Error.InvalidArgs"
+
+
+# ------------------------------------------------------------------ GATT objects
+class Application(dbus.service.Object):
+    def __init__(self, bus):
+        self.path = "/org/handtop/btpad"
+        self.services = []
+        super().__init__(bus, self.path)
+
+    @dbus.service.method(OM_IFACE, out_signature="a{oa{sa{sv}}}")
+    def GetManagedObjects(self):
+        out = {}
+        for s in self.services:
+            out[s.get_path()] = s.get_properties()
+            for c in s.chars:
+                out[c.get_path()] = c.get_properties()
+                for d in c.descs:
+                    out[d.get_path()] = d.get_properties()
+        return out
+
+
+class Service(dbus.service.Object):
+    def __init__(self, bus, app, index, uuid):
+        self.path = f"{app.path}/service{index}"
+        self.uuid, self.chars, self.bus = uuid, [], bus
+        super().__init__(bus, self.path)
+
+    def get_path(self):
+        return dbus.ObjectPath(self.path)
+
+    def get_properties(self):
+        return {SVC_IFACE: {"UUID": self.uuid, "Primary": True,
+                            "Characteristics": dbus.Array([c.get_path() for c in self.chars], signature="o")}}
+
+
+class Characteristic(dbus.service.Object):
+    def __init__(self, service, index, uuid, flags, value=b""):
+        self.path = f"{service.path}/char{index}"
+        self.service, self.uuid, self.flags, self.descs = service, uuid, flags, []
+        self.value = bytes(value)
+        self.notifying = False
+        super().__init__(service.bus, self.path)
+        service.chars.append(self)
+
+    def get_path(self):
+        return dbus.ObjectPath(self.path)
+
+    def get_properties(self):
+        return {CHR_IFACE: {"Service": self.service.get_path(), "UUID": self.uuid, "Flags": self.flags,
+                            "Descriptors": dbus.Array([d.get_path() for d in self.descs], signature="o")}}
+
+    @dbus.service.method(CHR_IFACE, in_signature="a{sv}", out_signature="ay")
+    def ReadValue(self, options):
+        off = int(options.get("offset", 0))
+        return dbus.Array(self.value[off:], signature="y")
+
+    @dbus.service.method(CHR_IFACE, in_signature="aya{sv}")
+    def WriteValue(self, value, options):
+        self.value = bytes(value)
+
+    @dbus.service.method(CHR_IFACE)
+    def StartNotify(self):
+        self.notifying = True
+        log(f"notify on: {self.uuid}")
+
+    @dbus.service.method(CHR_IFACE)
+    def StopNotify(self):
+        self.notifying = False
+        log(f"notify off: {self.uuid}")
+
+    @dbus.service.signal(PROP_IFACE, signature="sa{sv}as")
+    def PropertiesChanged(self, interface, changed, invalidated):
+        pass
+
+    def notify(self, value):
+        # Always emit: BlueZ delivers it to every client that enabled notifications, including
+        # bonded clients whose subscription it remembered from an earlier session (Windows does
+        # not subscribe again after reconnecting).
+        self.value = bytes(value)
+        self.PropertiesChanged(CHR_IFACE, {"Value": dbus.Array(self.value, signature="y")}, [])
+
+    @dbus.service.method(PROP_IFACE, in_signature="s", out_signature="a{sv}")
+    def GetAll(self, interface):
+        if interface != CHR_IFACE:
+            raise InvalidArgs()
+        return self.get_properties()[CHR_IFACE]
+
+
+class Descriptor(dbus.service.Object):
+    def __init__(self, chrc, index, uuid, flags, value):
+        self.path = f"{chrc.path}/desc{index}"
+        self.chrc, self.uuid, self.flags, self.value = chrc, uuid, flags, bytes(value)
+        super().__init__(chrc.service.bus, self.path)
+        chrc.descs.append(self)
+
+    def get_path(self):
+        return dbus.ObjectPath(self.path)
+
+    def get_properties(self):
+        return {DSC_IFACE: {"Characteristic": self.chrc.get_path(), "UUID": self.uuid, "Flags": self.flags}}
+
+    @dbus.service.method(DSC_IFACE, in_signature="a{sv}", out_signature="ay")
+    def ReadValue(self, options):
+        return dbus.Array(self.value, signature="y")
+
+
+# ------------------------------------------------------------------ advertisement + agent
+class Advertisement(dbus.service.Object):
+    def __init__(self, bus):
+        self.path = "/org/handtop/btpad/adv0"
+        super().__init__(bus, self.path)
+
+    @dbus.service.method(PROP_IFACE, in_signature="s", out_signature="a{sv}")
+    def GetAll(self, interface):
+        return {"Type": "peripheral",
+                "ServiceUUIDs": dbus.Array(["1812", "180f"], signature="s"),
+                "Appearance": dbus.UInt16(APPEARANCE_GAMEPAD),
+                "LocalName": NAME,
+                "Discoverable": True,
+                # Fast advertising (30-60 ms) so the PC finds and reconnects quickly (BlueZ default ~1.28 s).
+                "MinInterval": dbus.UInt32(30),
+                "MaxInterval": dbus.UInt32(60)}
+
+    @dbus.service.method(ADV_IFACE)
+    def Release(self):
+        log("advertisement released")
+
+
+class Agent(dbus.service.Object):
+    """Just-works pairing: accept everything (the user starts pairing from the other device)."""
+    path = "/org/handtop/btpad/agent"
+
+    @dbus.service.method(AGENT_IFACE)
+    def Release(self):
+        pass
+
+    @dbus.service.method(AGENT_IFACE, in_signature="os")
+    def AuthorizeService(self, device, uuid):
+        log("authorize service", device, uuid)
+
+    @dbus.service.method(AGENT_IFACE, in_signature="o")
+    def RequestAuthorization(self, device):
+        log("pairing accepted:", device)
+
+    @dbus.service.method(AGENT_IFACE, in_signature="ou")
+    def RequestConfirmation(self, device, passkey):
+        log("pairing confirmed:", device, passkey)
+
+    @dbus.service.method(AGENT_IFACE)
+    def Cancel(self):
+        log("pairing cancelled")
+
+
+# ------------------------------------------------------------------ gamepad state
+class Pad:
+    """Receives the input daemon's gamepad events on SOCKET and sends them as HID reports."""
+
+    def __init__(self, report_chr, on_exit, status=None):
+        self.chr = report_chr
+        self.status = status
+        self.on_exit = on_exit      # called when the daemon disconnects
+        self.buttons = 0
+        self.hat = [0, 0]
+        self.axes = {E.ABS_X: 128, E.ABS_Y: 128, E.ABS_RX: 128, E.ABS_RY: 128, E.ABS_Z: 0, E.ABS_RZ: 0}
+        self.conn = None
+        self.pending = False
+        self.last = None
+        self.server = unix_server(SOCKET, socket.SOCK_SEQPACKET)
+        GLib.io_add_watch(self.server.fileno(), GLib.IO_IN, self.on_accept)
+
+    def close(self):
+        for s in (self.conn, self.server):
+            if s:
+                s.close()
+        try:
+            os.unlink(SOCKET)
+        except FileNotFoundError:
+            pass
+
+    def report(self):
+        h = HAT.get(tuple(self.hat), 8)
+        a = self.axes
+        return bytes([self.buttons & 0xFF, self.buttons >> 8, h,
+                      a[E.ABS_X], a[E.ABS_Y], a[E.ABS_RX], a[E.ABS_RY], a[E.ABS_Z], a[E.ABS_RZ]])
+
+    def flush(self):
+        self.pending = False
+        r = self.report()
+        if r != self.last:
+            self.last = r
+            self.chr.notify(r)
+            if self.status:
+                self.status.report(r)
+        return False
+
+    def on_accept(self, fd, cond):
+        conn, _ = self.server.accept()
+        if self.conn:                 # only one input daemon at a time
+            conn.close()
+            return True
+        self.conn = conn
+        conn.send(b"hello bt")            # tells the input daemon which external mode this is
+        GLib.io_add_watch(conn.fileno(), GLib.IO_IN | GLib.IO_HUP | GLib.IO_ERR, self.on_events)
+        log("input daemon connected (BT Controller mode)")
+        return True
+
+    def lost(self):
+        log("input daemon disconnected: stopping BT Controller mode")
+        self.conn.close()
+        self.conn = None
+        self.buttons, self.hat = 0, [0, 0]
+        self.axes.update({E.ABS_X: 128, E.ABS_Y: 128, E.ABS_RX: 128, E.ABS_RY: 128, E.ABS_Z: 0, E.ABS_RZ: 0})
+        self.flush()          # all buttons released on the other device
+        GLib.timeout_add(300, self.on_exit)
+
+    def on_events(self, fd, cond):
+        try:
+            data = self.conn.recv(EVENT.size)
+        except OSError:
+            data = b""
+        if len(data) != EVENT.size:          # EOF: the daemon left BT Controller mode
+            self.lost()
+            return False
+        etype, code, value = EVENT.unpack(data)
+        if etype == E.EV_KEY and code in BUTTON_BITS:
+            bit = 1 << BUTTON_BITS[code]
+            self.buttons = (self.buttons | bit) if value else (self.buttons & ~bit)
+        elif etype == E.EV_ABS:
+            if code == E.ABS_HAT0X:
+                self.hat[0] = value
+            elif code == E.ABS_HAT0Y:
+                self.hat[1] = value
+            elif code in (E.ABS_X, E.ABS_Y, E.ABS_RX, E.ABS_RY):
+                self.axes[code] = (max(-32768, min(32767, value)) + 32768) >> 8
+            elif code in (E.ABS_Z, E.ABS_RZ):
+                self.axes[code] = max(0, min(255, value))
+        if not self.pending:
+            self.pending = True
+            GLib.timeout_add(8, self.flush)       # at most ~125 reports/s
+        return True
+
+
+def unix_server(path, kind):
+    try:
+        os.unlink(path)
+    except FileNotFoundError:
+        pass
+    srv = socket.socket(socket.AF_UNIX, kind)
+    srv.bind(path)
+    try:
+        os.chown(path, 0, grp.getgrnam("input").gr_gid)   # the desktop user is in "input"
+    except KeyError:
+        pass
+    os.chmod(path, 0o660)
+    srv.listen(4)
+    return srv
+
+
+class Status:
+    """Publishes BT Controller state as JSON lines on STATUS_SOCKET (read by the status screen):
+    {"transport": "bt", "state": "pairing"|"waiting"|"connected", "device": name, "rssi": dBm,
+     "rate": reports/s, "report": [9 HID report bytes]}. Input is sent at most ~30 times/s."""
+
+    def __init__(self):
+        self.clients = []
+        self.st = {"transport": "bt", "state": "pairing", "device": None, "rssi": None,
+                   "rate": 0, "report": [0, 0, 8, 128, 128, 128, 128, 0, 0]}
+        self.sent_reports = 0
+        self.pending = False
+        self.server = unix_server(STATUS_SOCKET, socket.SOCK_STREAM)
+        GLib.io_add_watch(self.server.fileno(), GLib.IO_IN, self.on_accept)
+        GLib.timeout_add_seconds(1, self.tick)
+
+    def on_accept(self, fd, cond):
+        c, _ = self.server.accept()
+        c.setblocking(False)
+        self.clients.append(c)
+        self.send(c)
+        return True
+
+    def send(self, only=None):
+        line = (json.dumps(self.st) + "\n").encode()
+        for c in ([only] if only else list(self.clients)):
+            try:
+                c.send(line)
+            except OSError:          # gone, or not reading: drop it
+                c.close()
+                self.clients.remove(c)
+
+    def update(self, **kw):
+        if any(self.st.get(k) != v for k, v in kw.items()):
+            self.st.update(kw)
+            self.send()
+
+    def report(self, r):
+        self.sent_reports += 1
+        self.st["report"] = list(r)
+        if not self.pending:
+            self.pending = True
+            GLib.timeout_add(33, self._flush)
+
+    def _flush(self):
+        self.pending = False
+        self.send()
+        return False
+
+    def tick(self):
+        self.update(rate=self.sent_reports)
+        self.sent_reports = 0
+        return True
+
+    def close(self):
+        for c in self.clients + [self.server]:
+            c.close()
+        try:
+            os.unlink(STATUS_SOCKET)
+        except FileNotFoundError:
+            pass
+
+
+class Hosts:
+    """Tracks which PC/phone (a paired device that is not itself an input device) is connected."""
+
+    def __init__(self, bus, adapter_path, status):
+        self.bus, self.adapter_path, self.status = bus, adapter_path, status
+        self.om = dbus.Interface(bus.get_object(BLUEZ, "/"), OM_IFACE)
+        self.connected = None        # (address, name, address type)
+        self.rssi_busy = False
+        bus.add_signal_receiver(lambda *a, **k: self.refresh(), signal_name="PropertiesChanged",
+                                dbus_interface=PROP_IFACE, bus_name=BLUEZ, arg0="org.bluez.Device1")
+        bus.add_signal_receiver(lambda *a: self.refresh(), signal_name="InterfacesRemoved",
+                                dbus_interface=OM_IFACE, bus_name=BLUEZ)
+        GLib.timeout_add_seconds(2, self.poll)
+        self.refresh()
+
+    @staticmethod
+    def is_host(p):
+        return (not str(p.get("Icon", "")).startswith("input-")
+                and not any(str(u).startswith(HID_UUIDS) for u in p.get("UUIDs", [])))
+
+    def refresh(self):
+        try:
+            objs = self.om.GetManagedObjects()
+        except dbus.exceptions.DBusException:
+            return
+        hosts = [ifs["org.bluez.Device1"] for path, ifs in objs.items()
+                 if str(path).startswith(self.adapter_path + "/") and "org.bluez.Device1" in ifs
+                 and self.is_host(ifs["org.bluez.Device1"])]
+        conn = next((h for h in hosts if h.get("Connected") and h.get("Paired")), None)
+        if conn:
+            name = str(conn.get("Alias") or conn.get("Name") or conn["Address"])
+            self.connected = (str(conn["Address"]), name, str(conn.get("AddressType", "public")))
+            try:
+                os.makedirs(os.path.dirname(LAST_HOST), exist_ok=True)
+                with open(LAST_HOST, "w") as f:
+                    f.write(f"{conn['Address']}\t{name}\n")
+            except OSError:
+                pass
+            self.status.update(state="connected", device=name)
+            return
+        self.connected = None
+        paired = [h for h in hosts if h.get("Paired")]
+        if paired:
+            last = None
+            try:
+                with open(LAST_HOST) as f:
+                    addr, last = f.read().rstrip("\n").split("\t", 1)
+                if not any(str(h["Address"]) == addr for h in paired):
+                    last = None
+            except (OSError, ValueError):
+                pass
+            name = last or str(paired[0].get("Alias") or paired[0].get("Name") or paired[0]["Address"])
+            self.status.update(state="waiting", device=name, rssi=None)
+        else:
+            self.status.update(state="pairing", device=None, rssi=None)
+
+    def poll(self):
+        self.refresh()
+        if self.connected and not self.rssi_busy:
+            self.rssi_busy = True
+            threading.Thread(target=self._rssi, args=(self.connected,), daemon=True).start()
+        return True
+
+    def _rssi(self, host):
+        addr, _name, atype = host
+        t = {"public": "1", "random": "2"}.get(atype, "1")   # btmgmt address types: 1 LE public, 2 LE random
+        rssi = None
+        try:
+            out = btmgmt("conn-info", "-t", t, addr)
+            parts = out.replace(",", " ").split()
+            if "RSSI" in parts:
+                rssi = int(parts[parts.index("RSSI") + 1])
+        except (OSError, ValueError, IndexError, subprocess.SubprocessError):
+            pass
+        GLib.idle_add(self._set_rssi, rssi)
+
+    def _set_rssi(self, rssi):
+        self.rssi_busy = False
+        if self.connected:
+            self.status.update(rssi=rssi)
+        return False
+
+
+def battery():
+    try:
+        with open("/sys/class/power_supply/battery/capacity") as f:
+            return int(f.read().strip())
+    except (OSError, ValueError):
+        return 100
+
+
+def btmgmt(*args):
+    # btmgmt waits for shell input when started by systemd; "quit" on stdin makes it exit.
+    return subprocess.run(["btmgmt", *args], input="quit\n", capture_output=True, text=True, timeout=10).stdout
+
+
+def bredr_enabled():
+    out = btmgmt("info")
+    cur = [l for l in out.splitlines() if "current settings" in l]
+    return bool(cur) and "br/edr" in cur[0].split()
+
+
+def set_bredr(on):
+    btmgmt("power", "off")
+    btmgmt("bredr", "on" if on else "off")
+    if on:
+        btmgmt("ssp", "on")          # dropped by switching BR/EDR off and on
+    btmgmt("power", "on")
+    log("classic Bluetooth", "on" if on else "off (BLE only while BT Controller mode is on)")
+
+
+def main():
+    restore_bredr = bredr_enabled()
+    if restore_bredr:
+        set_bredr(False)
+    try:
+        run()
+    finally:
+        if restore_bredr:
+            set_bredr(True)
+
+
+def run():
+    dbus.mainloop.glib.DBusGMainLoop(set_as_default=True)
+    bus = dbus.SystemBus()
+    om = dbus.Interface(bus.get_object(BLUEZ, "/"), OM_IFACE)
+    adapter_path = next(p for p, ifs in om.GetManagedObjects().items() if GATT_MGR in ifs)
+    adapter = bus.get_object(BLUEZ, adapter_path)
+    props = dbus.Interface(adapter, PROP_IFACE)
+    old_alias = props.Get(ADAPTER_IFACE, "Alias")
+    props.Set(ADAPTER_IFACE, "Powered", True)
+    props.Set(ADAPTER_IFACE, "Pairable", True)
+    props.Set(ADAPTER_IFACE, "Alias", NAME)
+
+    app = Application(bus)
+    hid = Service(bus, app, 0, "1812")
+    app.services.append(hid)
+    Characteristic(hid, 0, "2a4a", ["read"], bytes([0x11, 0x01, 0x00, 0x02]))   # HID Information
+    Characteristic(hid, 1, "2a4b", ["encrypt-read"], REPORT_MAP)                 # Report Map
+    Characteristic(hid, 2, "2a4c", ["write-without-response"], b"\x00")         # HID Control Point
+    Characteristic(hid, 3, "2a4e", ["read", "write-without-response"], b"\x01") # Protocol Mode: report
+    report = Characteristic(hid, 4, "2a4d", ["encrypt-read", "notify"], bytes(9))
+    Descriptor(report, 0, "2908", ["read"], bytes([0x01, 0x01]))               # Report ID 1, input
+    bat = Service(bus, app, 1, "180f")
+    app.services.append(bat)
+    level = Characteristic(bat, 0, "2a19", ["read", "notify"], bytes([battery()]))
+
+    agent = Agent(bus, Agent.path)
+    agents = dbus.Interface(bus.get_object(BLUEZ, "/org/bluez"), AGENT_MGR)
+    agents.RegisterAgent(Agent.path, "NoInputNoOutput")
+    agents.RequestDefaultAgent(Agent.path)
+
+    adv = Advertisement(bus)
+    gatt = dbus.Interface(adapter, GATT_MGR)
+    advm = dbus.Interface(adapter, ADV_MGR)
+    loop = GLib.MainLoop()
+
+    def fail(what):
+        return lambda e: (log(f"{what} failed: {e}"), loop.quit())
+    gatt.RegisterApplication(app.path, {}, reply_handler=lambda: log("GATT gamepad service registered"),
+                             error_handler=fail("GATT registration"))
+    advm.RegisterAdvertisement(adv.path, {}, reply_handler=lambda: log(f"advertising as '{NAME}'"),
+                               error_handler=fail("advertising"))
+
+    def trust(interface, changed, invalidated, path=None):
+        # Mark newly paired devices as trusted so they reconnect without asking.
+        if interface == "org.bluez.Device1" and changed.get("Paired"):
+            try:
+                dbus.Interface(bus.get_object(BLUEZ, path), PROP_IFACE).Set("org.bluez.Device1", "Trusted", True)
+                log("paired and trusted:", path)
+            except dbus.exceptions.DBusException as e:
+                log("could not trust", path, e)
+    bus.add_signal_receiver(trust, signal_name="PropertiesChanged", dbus_interface=PROP_IFACE,
+                            bus_name=BLUEZ, path_keyword="path")
+
+    status = Status()
+    Hosts(bus, adapter_path, status)
+    pad = Pad(report, lambda: (loop.quit(), False)[1], status)
+
+    def no_pad():
+        if pad.conn is None:
+            log("input daemon did not connect within 60 s: stopping")
+            loop.quit()
+        return False
+    GLib.timeout_add_seconds(60, no_pad)
+    GLib.timeout_add_seconds(60, lambda: (level.notify(bytes([battery()])), True)[1])
+
+    def stop(*_):
+        loop.quit()
+    GLib.unix_signal_add(GLib.PRIORITY_DEFAULT, signal.SIGTERM, stop)
+    GLib.unix_signal_add(GLib.PRIORITY_DEFAULT, signal.SIGINT, stop)
+    loop.run()
+    pad.close()
+    status.close()
+
+    for call in (lambda: advm.UnregisterAdvertisement(adv.path), lambda: gatt.UnregisterApplication(app.path),
+                 lambda: agents.UnregisterAgent(Agent.path), lambda: props.Set(ADAPTER_IFACE, "Alias", old_alias)):
+        try:
+            call()
+        except dbus.exceptions.DBusException:
+            pass
+    log("stopped")
+
+
+if __name__ == "__main__":
+    if os.geteuid() != 0:
+        sys.exit("rg35xxh-btpad: must run as root")
+    main()

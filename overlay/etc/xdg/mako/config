@@ -10,3 +10,5 @@ text-color=#e8eaee
 border-color=#3d5a8a
 default-timeout=5000
 anchor=top-right
+# Above everything, including the power menu (wlogout) and fullscreen apps.
+layer=overlay

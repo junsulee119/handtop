@@ -1,0 +1,7 @@
+# Handtop window decorations, light theme.
+window.active.title.bg.color: #c9d6ee
+window.inactive.title.bg.color: #e3e6eb
+window.active.label.text.color: #1d2330
+window.inactive.label.text.color: #6b7385
+window.active.button.unpressed.image.color: #1d2330
+window.inactive.button.unpressed.image.color: #6b7385

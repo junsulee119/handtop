@@ -14,5 +14,6 @@ external display over mini HDMI.
 | [keyboard.md](keyboard.md) | On-screen keyboard: layout, controls, placement |
 | [video-decode.md](video-decode.md) | Hardware video decoding (Cedrus) for Moonlight |
 | [power-and-sleep.md](power-and-sleep.md) | Power button, shutdown, sleep, charging while off |
+| [bt-controller.md](bt-controller.md) | BT Controller mode: the handheld as a Bluetooth LE gamepad |
 | [flashing.md](flashing.md) | Flashing the SD card and first boot |
 | [building.md](building.md) | Building the image, testing and debugging |

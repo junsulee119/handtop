@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=External Controller
+Comment=Use the handheld as a game controller for a PC or phone (Bluetooth or USB cable)
+Exec=rg35xxh-external-controller
+Icon=/usr/local/share/rg35xxh/icons/app-external-controller.png
+Terminal=false
+Categories=Game;Utility;

@@ -1,0 +1,262 @@
+#!/usr/bin/python3
+"""Handtop theme: dark (default) or light.
+
+  rg35xxh-theme              open the Theme app (pick with the D-pad/pointer, A to choose)
+  rg35xxh-theme dark|light   switch without the app
+  rg35xxh-theme --get        print the current theme
+
+The choice is stored in ~/.config/rg35xxh/theme and read by Handtop's components. A switch applies
+at once:
+  - taskbar (Waybar style), notifications (mako), wallpaper colour (swaybg): restarted through
+    rg35xxh-themed, which the session autostart also uses;
+  - window decorations: labwc theme "Handtop"; light links /usr/share/themes/Handtop-Light over it
+    as ~/.local/share/themes/Handtop/labwc/themerc, then labwc --reconfigure;
+  - app drawer and power menu: picked when they open (rg35xxh-drawer, rg35xxh-power-menu);
+  - taskbar icons (input mode, battery) and Handtop's app icons (light: per-user copies of their
+    .desktop files in ~/.local/share/applications pointing to the -light icons);
+  - GTK apps: gsettings color-scheme + gtk-application-prefer-dark-theme (open apps may need a
+    restart to follow).
+Not yet themed: terminal (foot), volume/brightness bars, on-screen keyboard, External Controller
+status screen (see docs/desktop.md).
+"""
+import configparser
+import os
+import signal
+import subprocess
+import sys
+import time
+
+CONF = os.path.join(os.environ.get("XDG_CONFIG_HOME", os.path.expanduser("~/.config")), "rg35xxh")
+THEME_FILE = os.path.join(CONF, "theme")
+GTK_INI = os.path.join(os.environ.get("XDG_CONFIG_HOME", os.path.expanduser("~/.config")), "gtk-3.0", "settings.ini")
+ICONS = "/usr/local/share/rg35xxh/icons"
+WAYBAR_SIGNALS = (8, 9)          # image#inputmode, image#battery
+DATA = os.environ.get("XDG_DATA_HOME", os.path.expanduser("~/.local/share"))
+LABWC_USER_THEME = os.path.join(DATA, "themes", "Handtop", "labwc", "themerc")
+LABWC_LIGHT = "/usr/share/themes/Handtop-Light/labwc/themerc"
+APPS = ("rg35xxh-theme.desktop", "rg35xxh-bt-controller.desktop")   # have -light icons
+MARK = "X-Handtop-Theme=light"
+LOG = os.path.expanduser("~/.local/state/session")
+
+
+def current():
+    try:
+        with open(THEME_FILE) as f:
+            return "light" if f.read().strip() == "light" else "dark"
+    except OSError:
+        return "dark"
+
+
+def _waybar_refresh():
+    """Re-run the icon scripts. Only signal a Waybar that has been up >= 3 s (a real-time signal
+    during its start-up would kill it)."""
+    for d in os.listdir("/proc"):
+        if not d.isdigit():
+            continue
+        try:
+            with open(f"/proc/{d}/comm") as f:
+                if f.read().strip() != "waybar":
+                    continue
+            with open(f"/proc/{d}/stat") as f:
+                start = int(f.read().rsplit(")", 1)[1].split()[19]) / os.sysconf("SC_CLK_TCK")
+            with open("/proc/uptime") as f:
+                age = float(f.read().split()[0]) - start
+            if age >= 3:
+                for n in WAYBAR_SIGNALS:
+                    os.kill(int(d), signal.SIGRTMIN + n)
+        except (OSError, ValueError, IndexError):
+            pass
+
+
+def _gtk(theme):
+    dark = theme == "dark"
+    subprocess.run(["gsettings", "set", "org.gnome.desktop.interface", "color-scheme",
+                    "prefer-dark" if dark else "default"], stderr=subprocess.DEVNULL)
+    cp = configparser.ConfigParser(interpolation=None)
+    cp.optionxform = str
+    try:
+        cp.read(GTK_INI)
+    except configparser.Error:
+        pass
+    if not cp.has_section("Settings"):
+        cp.add_section("Settings")
+    cp.set("Settings", "gtk-application-prefer-dark-theme", "true" if dark else "false")
+    os.makedirs(os.path.dirname(GTK_INI), exist_ok=True)
+    with open(GTK_INI, "w") as f:
+        cp.write(f, space_around_delimiters=False)
+
+
+def _pids(name):
+    out = []
+    for d in os.listdir("/proc"):
+        if d.isdigit():
+            try:
+                with open(f"/proc/{d}/comm") as f:
+                    if f.read().strip() == name:
+                        out.append(int(d))
+            except OSError:
+                pass
+    return out
+
+
+def _restart(name):
+    """Stop the running component and start it again through rg35xxh-themed (new theme)."""
+    pids = _pids(name)
+    for p in pids:
+        try:
+            os.kill(p, signal.SIGTERM)
+        except OSError:
+            pass
+    for _ in range(30):                            # wait up to 3 s for it to go (Waybar must
+        if not any(os.path.exists(f"/proc/{p}") for p in pids):   # release the tray first)
+            break
+        time.sleep(0.1)
+    os.makedirs(LOG, exist_ok=True)
+    with open(os.path.join(LOG, f"{name}.log"), "a") as log:
+        subprocess.Popen(["rg35xxh-themed", name], stdin=subprocess.DEVNULL, stdout=log, stderr=log,
+                         start_new_session=True)
+
+
+def _labwc(theme):
+    try:
+        if os.path.islink(LABWC_USER_THEME) or os.path.exists(LABWC_USER_THEME):
+            if os.path.islink(LABWC_USER_THEME) and os.readlink(LABWC_USER_THEME) == LABWC_LIGHT:
+                os.remove(LABWC_USER_THEME)       # only ever remove our own link
+        if theme == "light" and not os.path.exists(LABWC_USER_THEME):
+            os.makedirs(os.path.dirname(LABWC_USER_THEME), exist_ok=True)
+            os.symlink(LABWC_LIGHT, LABWC_USER_THEME)
+    except OSError:
+        pass
+    subprocess.run(["labwc", "--reconfigure"], stderr=subprocess.DEVNULL)
+
+
+def _app_icons(theme):
+    """Light: per-user copies of Handtop's .desktop files with the -light icon. Dark: remove them
+    (only files carrying our marker)."""
+    user = os.path.join(DATA, "applications")
+    for name in APPS:
+        mine = os.path.join(user, name)
+        try:
+            with open(mine) as f:
+                if MARK in f.read():
+                    os.remove(mine)
+        except OSError:
+            pass
+        if theme != "light" or os.path.exists(mine):
+            continue
+        try:
+            with open(f"/usr/local/share/applications/{name}") as f:
+                lines = f.read().splitlines()
+        except OSError:
+            continue
+        lines = [ln.replace(".png", "-light.png") if ln.startswith("Icon=") else ln for ln in lines]
+        os.makedirs(user, exist_ok=True)
+        with open(mine, "w") as f:
+            f.write("\n".join(lines + [MARK]) + "\n")
+
+
+def apply(theme):
+    os.makedirs(CONF, exist_ok=True)
+    with open(THEME_FILE, "w") as f:
+        f.write(theme + "\n")
+    _gtk(theme)
+    _app_icons(theme)
+    _labwc(theme)
+    _waybar_refresh()                             # (a Waybar < 3 s old is skipped: it is new anyway)
+    for name in ("swaybg", "mako", "waybar"):     # the new Waybar draws the new icons at start
+        if _pids(name):
+            _restart(name)
+
+
+def gui():
+    import cairo
+    import gi
+    gi.require_version("Gdk", "3.0")
+    gi.require_version("Gtk", "3.0")
+    from gi.repository import Gdk, Gtk
+
+    def preview(theme):
+        """A strip of taskbar icons at 2x on that theme's taskbar colour (fits half of 640 px)."""
+        sfx = "" if theme == "dark" else "-light"
+        bg = (0.10, 0.12, 0.15) if theme == "dark" else (0.93, 0.94, 0.96)
+        names = [f"inputmode-desktop{sfx}", f"inputmode-gamepad{sfx}", f"inputmode-bt{sfx}", f"battery-4{sfx}"]
+        PW, PH, Z = 236, 64, 2
+        surf = cairo.ImageSurface(cairo.FORMAT_ARGB32, PW, PH)
+        cr = cairo.Context(surf)
+        cr.set_source_rgb(*bg)
+        cr.paint()
+        widths = []
+        imgs = []
+        for n in names:
+            try:
+                imgs.append(cairo.ImageSurface.create_from_png(f"{ICONS}/{n}.png"))
+            except (OSError, cairo.Error):
+                pass
+        gap = 8
+        x = (PW - sum(Z * i.get_width() for i in imgs) - gap * (len(imgs) - 1)) // 2
+        for img in imgs:
+            cr.save()
+            cr.translate(x, (PH - Z * img.get_height()) // 2)
+            cr.scale(Z, Z)
+            cr.set_source_surface(img, 0, 0)
+            cr.get_source().set_filter(cairo.FILTER_NEAREST)
+            cr.paint()
+            cr.restore()
+            x += Z * img.get_width() + gap
+        return Gtk.Image.new_from_pixbuf(Gdk.pixbuf_get_from_surface(surf, 0, 0, PW, PH))
+
+    win = Gtk.Window(title="Theme")
+    win.set_default_size(640, 440)
+    win.connect("destroy", Gtk.main_quit)
+    box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12, margin=14)
+    win.add(box)
+    head = Gtk.Label(xalign=0)
+    head.set_markup("<span size='x-large' weight='bold'>Theme</span>")
+    box.pack_start(head, False, False, 0)
+    row = Gtk.Box(spacing=12, homogeneous=True)
+    box.pack_start(row, True, True, 0)
+    note = Gtk.Label(xalign=0, wrap=True, max_width_chars=60)
+    note.set_markup("<small>Changes the taskbar, app drawer, power menu, notifications, window title bars "
+                    "and apps (open apps may need a restart). Terminal, volume bars and on-screen keyboard "
+                    "stay dark for now.</small>")
+    box.pack_start(note, False, False, 0)
+
+    buttons = {}
+
+    def refresh():
+        cur = current()
+        for t, (b, lab) in buttons.items():
+            lab.set_markup(f"<span size='large' weight='bold'>{t.capitalize()}</span>"
+                           + ("   <span foreground='#8bd99e'>✓ current</span>" if t == cur else ""))
+
+    def choose(_b, theme):
+        apply(theme)
+        refresh()
+
+    for t in ("dark", "light"):
+        b = Gtk.Button()
+        v = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10, margin=10)
+        v.pack_start(preview(t), True, True, 0)
+        lab = Gtk.Label()
+        v.pack_start(lab, False, False, 0)
+        b.add(v)
+        b.connect("clicked", choose, t)
+        row.pack_start(b, True, True, 0)
+        buttons[t] = (b, lab)
+    refresh()
+    win.connect("focus-in-event", lambda *a: refresh())
+    win.show_all()
+    buttons[current()][0].grab_focus()
+    Gtk.main()
+
+
+if __name__ == "__main__":
+    arg = sys.argv[1] if len(sys.argv) > 1 else ""
+    if arg == "--get":
+        print(current())
+    elif arg in ("dark", "light"):
+        apply(arg)
+    elif not arg:
+        gui()
+    else:
+        sys.exit("usage: rg35xxh-theme [dark|light|--get]")

@@ -1,0 +1,49 @@
+/* App drawer, light theme. rg35xxh-drawer copies it to ~/.config/nwg-drawer. */
+window {
+    background-color: rgba(236, 239, 244, 0.96);
+    color: #2b303b
+}
+
+/* search entry */
+entry {
+    background-color: rgba(0, 0, 0, 0.06);
+    color: #2b303b
+}
+
+/* app names and the close button: dark, without the light GTK theme's white text shadow */
+label, button, button label, entry {
+    color: #2b303b;
+    text-shadow: none;
+    -gtk-icon-shadow: none
+}
+
+button, image {
+    background: none;
+    border: none
+}
+
+button:hover {
+    background-color: rgba(0, 0, 0, 0.08)
+}
+
+/* in case you wanted to give category buttons a different look */
+#category-button {
+    margin: 0 10px 0 10px
+}
+
+#pinned-box {
+    padding-bottom: 5px;
+    border-bottom: 1px dotted gray
+}
+
+#files-box {
+    padding: 5px;
+    border: 1px dotted gray;
+    border-radius: 15px
+}
+
+/* math operation result label */
+#math-label {
+    font-weight: bold;
+    font-size: 16px
+}

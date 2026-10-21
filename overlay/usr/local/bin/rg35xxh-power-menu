@@ -1,4 +1,6 @@
 #!/bin/sh
 # Power menu (opened by Power tap and the panel button); toggles if already open.
 pgrep -x wlogout >/dev/null && exec pkill -x wlogout
-exec wlogout -l /etc/wlogout/layout -C /etc/wlogout/style.css -b 2 -c 12 -r 12 -m 24 -p layer-shell
+S=/etc/wlogout/style.css     # light theme: style-light.css (rg35xxh-theme)
+[ "$(cat "${XDG_CONFIG_HOME:-$HOME/.config}/rg35xxh/theme" 2>/dev/null)" = light ] && S=/etc/wlogout/style-light.css
+exec wlogout -l /etc/wlogout/layout -C "$S" -b 2 -c 12 -r 12 -m 24 -p layer-shell

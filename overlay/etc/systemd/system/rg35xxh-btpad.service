@@ -1,0 +1,12 @@
+[Unit]
+Description=Handtop BT Controller mode (handheld as a Bluetooth LE gamepad)
+Requires=bluetooth.service
+After=bluetooth.service
+# One external controller connection at a time.
+Conflicts=rg35xxh-usbpad.service
+
+[Service]
+Type=simple
+ExecStart=/usr/local/sbin/rg35xxh-btpad
+# Stops by itself when gamepad mode is left; not started at boot.
+Restart=no

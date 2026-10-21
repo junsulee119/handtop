@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Theme
+Comment=Choose the dark or light theme
+Exec=rg35xxh-theme
+Icon=/usr/local/share/rg35xxh/icons/app-theme.png
+Terminal=false
+Categories=Settings;

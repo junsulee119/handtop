@@ -11,6 +11,7 @@ bash ./04b-nwg-drawer.sh
 bash ./05-configure-base.sh
 bash ./06-hardware.sh
 bash ./06b-cedrus.sh
+bash ./06c-ffs-xinput.sh
 bash ./07-desktop.sh
 bash ./08-input.sh
 bash ./09-services.sh

@@ -7,7 +7,7 @@
   </core>
 
   <theme>
-    <name></name>
+    <name>Handtop</name>
     <cornerRadius>4</cornerRadius>
     <font place="ActiveWindow"><name>Noto Sans</name><size>9</size><weight>bold</weight></font>
     <font place="InactiveWindow"><name>Noto Sans</name><size>9</size></font>

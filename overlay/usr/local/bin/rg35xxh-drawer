@@ -1,5 +1,10 @@
 #!/bin/sh
 # App launcher: full-screen icon grid sized for 640x480 (toggles if already open).
+# -spacing 4: with the default spacing (20) the 4th column ran past the right screen edge.
 mkdir -p "${XDG_CACHE_HOME:-$HOME/.cache}"
 pgrep -x nwg-drawer >/dev/null && exec nwg-drawer -close
-exec nwg-drawer -c 4 -is 56 -nofs -nocats -closebtn right -fm thunar -term foot -ovl
+# Style by theme (rg35xxh-theme): nwg-drawer only takes a file name inside ~/.config/nwg-drawer.
+T=$(cat "${XDG_CONFIG_HOME:-$HOME/.config}/rg35xxh/theme" 2>/dev/null); [ "$T" = light ] || T=dark
+D="${XDG_CONFIG_HOME:-$HOME/.config}/nwg-drawer"; mkdir -p "$D"
+cmp -s "/etc/xdg/nwg-drawer/handtop-$T.css" "$D/handtop-$T.css" || cp "/etc/xdg/nwg-drawer/handtop-$T.css" "$D/"
+exec nwg-drawer -s "handtop-$T.css" -c 4 -is 56 -spacing 4 -nofs -nocats -closebtn right -fm thunar -term foot -ovl

@@ -1,0 +1,426 @@
+#!/usr/bin/python3
+"""Handtop wired controller mode: the handheld becomes a wired Xbox 360 controller for a PC.
+
+USB device mode exists only on the right USB-C port (OTG2/DC; the H700's single device-capable
+controller, MUSB). The left port (OTG1) is host-only. The handheld charges from the PC meanwhile.
+
+How: a USB gadget (configfs) with VID/PID 045e:028e and a vendor interface (class ff/5d/01, the
+Xbox 360 0x21 descriptor, interrupt IN 0x81 + OUT 0x01) served through FunctionFS. The 0x21
+descriptor is refused by the kernel's built-in FunctionFS, so this uses usb_f_fs_xinput.ko, a
+renamed copy that accepts it (build/06c-ffs-xinput.sh). Windows then binds its built-in Xbox 360
+driver: XInput games work as with a real wired pad, at ~1000 reports/s.
+
+Input comes from the input daemon over /run/rg35xxh-extpad.sock (one evdev event per packet,
+struct "<HHi"), exactly as for rg35xxh-btpad; vibration requested by the PC (OUT report
+00 08 00 <big> <small>) is sent back to it as b"rumble <big> <small>" for the handheld's motor.
+Status for the screen: JSON lines on /run/rg35xxh-extpad-status.sock (same format as btpad).
+Started by the External Controller app as rg35xxh-usbpad.service; stops when the input daemon
+disconnects (Select + Start + L1 + R1) or never connects (60 s); removes the gadget on exit.
+"""
+import grp
+import json
+import os
+import signal
+import socket
+import struct
+import subprocess
+import sys
+import threading
+import time
+
+from evdev import ecodes as E
+from gi.repository import GLib
+
+G = "/sys/kernel/config/usb_gadget/handtop-pad"
+FUNC = "ffsxi.pad"
+FFS = "/run/rg35xxh-ffs-pad"
+SOCKET = "/run/rg35xxh-extpad.sock"
+STATUS_SOCKET = "/run/rg35xxh-extpad-status.sock"
+EVENT = struct.Struct("<HHi")
+HOST_NAME = "PC (USB)"
+
+# Xbox 360 wButtons bits
+X_BITS = {E.BTN_START: 4, E.BTN_SELECT: 5, E.BTN_THUMBL: 6, E.BTN_THUMBR: 7, E.BTN_TL: 8, E.BTN_TR: 9,
+          E.BTN_MODE: 10, E.BTN_A: 12, E.BTN_B: 13, E.BTN_X: 14, E.BTN_Y: 15}
+# status-screen report (same 9-byte layout as rg35xxh-btpad's HID report)
+S_BITS = {E.BTN_A: 0, E.BTN_B: 1, E.BTN_X: 2, E.BTN_Y: 3, E.BTN_TL: 4, E.BTN_TR: 5,
+          E.BTN_SELECT: 6, E.BTN_START: 7, E.BTN_THUMBL: 8, E.BTN_THUMBR: 9, E.BTN_MODE: 10}
+HAT = {(0, -1): 0, (1, -1): 1, (1, 0): 2, (1, 1): 3, (0, 1): 4, (-1, 1): 5, (-1, 0): 6, (-1, -1): 7}
+
+
+def log(*a):
+    print("rg35xxh-usbpad:", *a, flush=True)
+
+
+def w(path, val):
+    with open(path, "w") as f:
+        f.write(val)
+
+
+def unix_server(path, kind):
+    try:
+        os.unlink(path)
+    except FileNotFoundError:
+        pass
+    srv = socket.socket(socket.AF_UNIX, kind)
+    srv.bind(path)
+    try:
+        os.chown(path, 0, grp.getgrnam("input").gr_gid)       # the desktop user is in "input"
+    except KeyError:
+        pass
+    os.chmod(path, 0o660)
+    srv.listen(4)
+    return srv
+
+
+# ------------------------------------------------------------------ USB gadget
+def descriptors():
+    intf = bytes([9, 4, 0, 0, 2, 0xFF, 0x5D, 0x01, 0])
+    xdesc = bytes([0x11, 0x21, 0x00, 0x01, 0x01, 0x25, 0x81, 0x14, 0, 0, 0, 0, 0x13, 0x01, 0x08, 0, 0])
+    ep_in = bytes([7, 5, 0x81, 3]) + struct.pack("<H", 32) + bytes([4])
+    ep_out = bytes([7, 5, 0x01, 3]) + struct.pack("<H", 32) + bytes([8])
+    one = intf + xdesc + ep_in + ep_out          # endpoint numbers as assigned by the MUSB controller
+    body = struct.pack("<II", 4, 4) + one + one   # full- and high-speed
+    return struct.pack("<III", 3, 12 + len(body), 1 | 2) + body   # FUNCTIONFS_DESCRIPTORS_MAGIC_V2
+
+
+def gadget_clean():
+    """Remove this gadget and its FunctionFS mount if present (also leftovers of an earlier run)."""
+    if os.path.exists(f"{G}/UDC"):
+        try:
+            w(f"{G}/UDC", "")
+        except OSError:
+            pass
+    for _ in range(10):
+        if subprocess.run(["mountpoint", "-q", FFS], stderr=subprocess.DEVNULL).returncode:
+            break
+        subprocess.run(["umount", FFS], stderr=subprocess.DEVNULL)
+        time.sleep(0.2)
+    else:
+        subprocess.run(["umount", "-l", FFS])      # still busy (a blocked thread): detach it
+    if os.path.islink(f"{G}/configs/c.1/{FUNC}"):
+        os.unlink(f"{G}/configs/c.1/{FUNC}")
+    for d in (f"{G}/configs/c.1/strings/0x409", f"{G}/configs/c.1", f"{G}/functions/{FUNC}",
+              f"{G}/strings/0x409", G, FFS):
+        try:
+            os.rmdir(d)
+        except OSError:
+            pass
+
+
+def gadget_up():
+    gadget_clean()
+    subprocess.run(["modprobe", "usb_f_fs_xinput"], check=True)
+    os.makedirs(G, exist_ok=True)
+    for k, v in (("idVendor", "0x045e"), ("idProduct", "0x028e"), ("bcdDevice", "0x0114"), ("bcdUSB", "0x0200"),
+                 ("bDeviceClass", "0xff"), ("bDeviceSubClass", "0xff"), ("bDeviceProtocol", "0xff"),
+                 ("bMaxPacketSize0", "0x40")):
+        w(f"{G}/{k}", v)
+    os.makedirs(f"{G}/strings/0x409", exist_ok=True)
+    w(f"{G}/strings/0x409/manufacturer", "Handtop")
+    w(f"{G}/strings/0x409/product", "Handtop Controller")
+    w(f"{G}/strings/0x409/serialnumber", "HANDTOP0001")
+    os.makedirs(f"{G}/configs/c.1/strings/0x409", exist_ok=True)
+    w(f"{G}/configs/c.1/MaxPower", "500")
+    w(f"{G}/configs/c.1/bmAttributes", "0x80")
+    os.makedirs(f"{G}/functions/{FUNC}", exist_ok=True)
+    if not os.path.islink(f"{G}/configs/c.1/{FUNC}"):
+        os.symlink(f"{G}/functions/{FUNC}", f"{G}/configs/c.1/{FUNC}")
+    os.makedirs(FFS, exist_ok=True)
+    if subprocess.run(["mountpoint", "-q", FFS]).returncode:
+        subprocess.run(["mount", "-t", "functionfs_xinput", FUNC.split(".", 1)[1], FFS], check=True)
+
+
+def gadget_down(fds):
+    try:
+        w(f"{G}/UDC", "")              # unbind first: wakes the threads blocked on the endpoints
+    except OSError:
+        pass
+    time.sleep(0.3)
+    for fd in fds:
+        try:
+            os.close(fd)
+        except OSError:
+            pass
+    gadget_clean()
+    log("gadget removed")
+
+
+# ------------------------------------------------------------------ status (for the screen)
+class Status:
+    def __init__(self):
+        self.clients = []
+        self.st = {"transport": "usb", "state": "cable", "device": None, "rssi": None,
+                   "rate": 0, "report": [0, 0, 8, 128, 128, 128, 128, 0, 0]}
+        self.server = unix_server(STATUS_SOCKET, socket.SOCK_STREAM)
+        GLib.io_add_watch(self.server.fileno(), GLib.IO_IN, self.on_accept)
+        self.pending = False
+
+    def on_accept(self, fd, cond):
+        c, _ = self.server.accept()
+        c.setblocking(False)
+        self.clients.append(c)
+        self.send(c)
+        return True
+
+    def send(self, only=None):
+        line = (json.dumps(self.st) + "\n").encode()
+        for c in ([only] if only else list(self.clients)):
+            try:
+                c.send(line)
+            except OSError:
+                c.close()
+                self.clients.remove(c)
+
+    def update(self, **kw):
+        if any(self.st.get(k) != v for k, v in kw.items()):
+            self.st.update(kw)
+            self.send()
+
+    def report(self, r):
+        self.st["report"] = r
+        if not self.pending:
+            self.pending = True
+            GLib.timeout_add(33, self._flush)
+
+    def _flush(self):
+        self.pending = False
+        self.send()
+        return False
+
+    def close(self):
+        for c in self.clients + [self.server]:
+            c.close()
+        try:
+            os.unlink(STATUS_SOCKET)
+        except FileNotFoundError:
+            pass
+
+
+# ------------------------------------------------------------------ the pad
+class Pad:
+    def __init__(self, status, on_exit):
+        self.status, self.on_exit = status, on_exit
+        self.buttons = set()
+        self.hat = [0, 0]
+        self.axes = {E.ABS_X: 0, E.ABS_Y: 0, E.ABS_RX: 0, E.ABS_RY: 0, E.ABS_Z: 0, E.ABS_RZ: 0}
+        self.cond = threading.Condition()
+        self.dirty = True
+        self.sent = 0
+        self.conn = None
+        self.rumble_want = self.rumble_sent = (0, 0)
+        self.rumble_scheduled = False
+        self.server = unix_server(SOCKET, socket.SOCK_SEQPACKET)
+        GLib.io_add_watch(self.server.fileno(), GLib.IO_IN, self.on_accept)
+
+    # Xbox 360 input report (20 bytes)
+    def x360_report(self):
+        b = 0
+        for code in self.buttons:
+            if code in X_BITS:
+                b |= 1 << X_BITS[code]
+        hx, hy = self.hat
+        b |= (hy < 0) << 0 | (hy > 0) << 1 | (hx < 0) << 2 | (hx > 0) << 3
+        a = self.axes
+        clamp = lambda v: max(-32768, min(32767, v))
+        return struct.pack("<BBHBBhhhh6x", 0x00, 0x14, b, max(0, min(255, a[E.ABS_Z])), max(0, min(255, a[E.ABS_RZ])),
+                           clamp(a[E.ABS_X]), clamp(-a[E.ABS_Y]), clamp(a[E.ABS_RX]), clamp(-a[E.ABS_RY]))
+
+    def screen_report(self):
+        b = 0
+        for code in self.buttons:
+            if code in S_BITS:
+                b |= 1 << S_BITS[code]
+        a = self.axes
+        to8 = lambda v: (max(-32768, min(32767, v)) + 32768) >> 8
+        return [b & 0xFF, b >> 8, HAT.get(tuple(self.hat), 8), to8(a[E.ABS_X]), to8(a[E.ABS_Y]),
+                to8(a[E.ABS_RX]), to8(a[E.ABS_RY]), max(0, min(255, a[E.ABS_Z])), max(0, min(255, a[E.ABS_RZ]))]
+
+    def writer(self, ep_in):
+        """Send a report whenever the state changes (the write returns when the PC has read it)."""
+        while True:
+            with self.cond:
+                while not self.dirty:
+                    self.cond.wait()
+                self.dirty = False
+                r = self.x360_report()
+            try:
+                os.write(ep_in, r)
+                self.sent += 1
+            except OSError:
+                time.sleep(0.2)           # not connected (cable out / PC asleep): keep the latest state
+                with self.cond:
+                    self.dirty = True
+
+    def on_accept(self, fd, cond):
+        conn, _ = self.server.accept()
+        if self.conn:
+            conn.close()
+            return True
+        self.conn = conn
+        conn.send(b"hello usb")
+        GLib.io_add_watch(conn.fileno(), GLib.IO_IN | GLib.IO_HUP | GLib.IO_ERR, self.on_events)
+        log("input daemon connected (wired controller mode)")
+        return True
+
+    def on_events(self, fd, cond):
+        try:
+            data = self.conn.recv(EVENT.size)
+        except OSError:
+            data = b""
+        if len(data) != EVENT.size:
+            log("input daemon disconnected: stopping wired controller mode")
+            self.conn.close()
+            self.conn = None
+            with self.cond:
+                self.buttons.clear()
+                self.hat = [0, 0]
+                self.axes.update({k: 0 for k in self.axes})
+                self.dirty = True
+                self.cond.notify()
+            GLib.timeout_add(300, self.on_exit)
+            return False
+        etype, code, value = EVENT.unpack(data)
+        with self.cond:
+            if etype == E.EV_KEY:
+                (self.buttons.add if value else self.buttons.discard)(code)
+            elif etype == E.EV_ABS:
+                if code == E.ABS_HAT0X:
+                    self.hat[0] = value
+                elif code == E.ABS_HAT0Y:
+                    self.hat[1] = value
+                elif code in self.axes:
+                    self.axes[code] = value
+            self.dirty = True
+            self.cond.notify()
+        self.status.report(self.screen_report())
+        return True
+
+    # Vibration from the PC. Games / test pages can send these continuously; forwarding every one
+    # once flooded the input daemon and (with a callback queued per packet) ran the system out of
+    # memory. So: keep only the latest request, forward it when it changes, at most RUMBLE_HZ times
+    # a second, and never block on the socket (a dropped message is replaced by the next one).
+    RUMBLE_HZ = 20
+
+    def rumble_request(self, big, small):
+        """Called from the USB reader thread for every OUT report."""
+        with self.cond:
+            self.rumble_want = (big, small)
+            if self.rumble_scheduled:
+                return
+            self.rumble_scheduled = True
+        GLib.idle_add(self.rumble_forward)
+
+    def rumble_forward(self):
+        with self.cond:
+            want = self.rumble_want
+        if want != self.rumble_sent and self.conn:
+            try:
+                self.conn.send(f"rumble {want[0]} {want[1]}".encode(), socket.MSG_DONTWAIT)
+                self.rumble_sent = want
+            except OSError:
+                pass                        # busy: retried below with the then-latest value
+        # stay scheduled while a change is still pending, at most RUMBLE_HZ times a second
+        with self.cond:
+            if self.rumble_want != self.rumble_sent and self.conn:
+                GLib.timeout_add(1000 // self.RUMBLE_HZ, self.rumble_forward)
+                return False
+            self.rumble_scheduled = False
+        return False
+
+    def close(self):
+        for s in (self.conn, self.server):
+            if s:
+                s.close()
+        try:
+            os.unlink(SOCKET)
+        except FileNotFoundError:
+            pass
+
+
+def main():
+    loop = GLib.MainLoop()
+    status = Status()
+    pad = Pad(status, lambda: (loop.quit(), False)[1])
+    fds = []
+    gadget_up()
+    ep0 = os.open(f"{FFS}/ep0", os.O_RDWR)
+    fds.append(ep0)
+    os.write(ep0, descriptors())
+    os.write(ep0, struct.pack("<IIII", 2, 16, 0, 0))     # no strings
+    udc = os.listdir("/sys/class/udc")[0]
+    w(f"{G}/UDC", udc)
+    log("USB gadget on", udc, "(right USB-C port, OTG2/DC)")
+    ep_in = os.open(f"{FFS}/ep1", os.O_RDWR)
+    ep_out = os.open(f"{FFS}/ep2", os.O_RDWR)
+    fds += [ep_in, ep_out]
+
+    def ep0_events():
+        while True:
+            try:
+                ev = os.read(ep0, 12 * 4)
+            except OSError:
+                return
+            for i in range(0, len(ev), 12):
+                setup, etype = ev[i:i + 8], ev[i + 8]
+                if etype == 2:                                   # ENABLE: PC configured us
+                    GLib.idle_add(lambda: status.update(state="connected", device=HOST_NAME) and False)
+                    log("connected to a PC")
+                elif etype in (1, 3, 5):                         # UNBIND / DISABLE / SUSPEND
+                    GLib.idle_add(lambda: status.update(state="cable", device=None) and False)
+                elif etype == 6:                                 # RESUME
+                    GLib.idle_add(lambda: status.update(state="connected", device=HOST_NAME) and False)
+                elif etype == 4:                                 # vendor requests: not needed, stall
+                    try:
+                        os.read(ep0, 0) if setup[0] & 0x80 else os.write(ep0, b"")
+                    except OSError:
+                        pass
+
+    def ep_out_reader():
+        while True:
+            try:
+                d = os.read(ep_out, 64)
+            except OSError:
+                time.sleep(0.5)
+                continue
+            if len(d) >= 5 and d[0] == 0x00 and d[1] == 0x08:    # rumble: 00 08 00 big small ...
+                pad.rumble_request(d[3], d[4])
+
+    for fn, args in ((ep0_events, ()), (ep_out_reader, ()), (pad.writer, (ep_in,))):
+        threading.Thread(target=fn, args=args, daemon=True).start()
+
+    def no_pad():
+        if pad.conn is None:
+            log("input daemon did not connect within 60 s: stopping")
+            loop.quit()
+        return False
+    GLib.timeout_add_seconds(60, no_pad)
+
+    def rate():
+        status.update(rate=pad.sent)
+        pad.sent = 0
+        return True
+    GLib.timeout_add_seconds(1, rate)
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        GLib.unix_signal_add(GLib.PRIORITY_DEFAULT, sig, lambda *a: (loop.quit(), False)[1])
+    try:
+        loop.run()
+    finally:
+        pad.close()
+        status.close()
+        gadget_down(fds)
+
+
+if __name__ == "__main__":
+    if os.geteuid() != 0:
+        sys.exit("rg35xxh-usbpad: must run as root")
+    code = 0
+    try:
+        main()
+    except Exception:
+        import traceback
+        traceback.print_exc()
+        code = 1
+    sys.stdout.flush()
+    sys.stderr.flush()
+    os._exit(code)           # daemon threads may be blocked in FunctionFS reads/writes

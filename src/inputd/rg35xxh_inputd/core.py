@@ -37,6 +37,7 @@ DEFAULT_SETTINGS = {
     "power_hold_seconds": 3.0,
     "power_tap_max_seconds": 1.0,
     "start_hold_seconds": 1.0,
+    "haptic_strength": 1.0,        # mode-change vibration: 0 = off, 1 = as designed
     "osk_repeat_delay": 0.40,
     "osk_repeat_interval": 0.09,
     "vol_repeat_delay": 0.40,      # hold Vol (or F+Vol): repeat after this
@@ -68,6 +69,9 @@ PAD_BUTTONS = {
 }
 PAD_TRIGGERS = {"l2": "ABS_Z", "r2": "ABS_RZ"}
 PAD_AXES = {"lx": "ABS_X", "ly": "ABS_Y", "rx": "ABS_RX", "ry": "ABS_RY"}
+# BT Controller mode exits with this combo instead of holding Start (same as Moonlight's quit
+# combo), so a long Start press reaches the other device.
+EXIT_COMBO = ("select", "start", "l1", "r1")
 
 
 class Core:
@@ -77,6 +81,7 @@ class Core:
         self.bind = dict(DEFAULT_BINDINGS)
         self.bind.update(bindings or {})
         self.mode = "desktop"
+        self.combo_exit = False     # gamepad mapping left with EXIT_COMBO (BT Controller mode)
         self.osk_visible = False
         self.screen_off = False
         self.axes = {"lx": 0.0, "ly": 0.0, "rx": 0.0, "ry": 0.0}
@@ -133,7 +138,13 @@ class Core:
         if self.mode == "gamepad":
             if name == "start":
                 self.start_fired = False
-            return self._pad_button(name, True)
+            out = self._pad_button(name, True)
+            if self.combo_exit and all(b in self.held for b in EXIT_COMBO):
+                for b in EXIT_COMBO:                       # release them on the other device
+                    out.extend(self._pad_button(b, False))
+                self.swallowed |= set(self.held)
+                out.extend(self._enter_desktop())
+            return out
 
         # desktop mode
         if name in DPAD:
@@ -202,7 +213,8 @@ class Core:
 
         if self.mode == "gamepad":
             st = self.held.get("start")
-            if st is not None and not self.start_fired and t - st >= self.s["start_hold_seconds"]:
+            if (st is not None and not self.combo_exit and not self.start_fired
+                    and t - st >= self.s["start_hold_seconds"]):
                 self.start_fired = True
                 out.append(("pad_key", "BTN_START", 0))
                 out.extend(self._enter_desktop())
@@ -315,8 +327,27 @@ class Core:
             out.append(("pad_abs", PAD_AXES[name], int(round(v * 32767))))
         return out
 
+    def request_gamepad(self, combo_exit=False):
+        """Switch to gamepad mapping on request (BT Controller app, SIGUSR2 to the daemon).
+        combo_exit: leave with EXIT_COMBO instead of holding Start."""
+        self.combo_exit = combo_exit
+        if self.mode == "gamepad":
+            return []
+        out = self._enter_gamepad()
+        if "start" not in self.held:      # no Start press to swallow: let the next one through
+            self.swallowed.discard("start")
+        return out
+
+    def request_desktop(self):
+        """Leave gamepad mode on request (the BT Controller link ended)."""
+        if self.mode != "gamepad":
+            return []
+        self.swallowed |= set(self.held)  # buttons still down must not act in desktop mode
+        return self._enter_desktop()
+
     def _enter_desktop(self):
         self.mode = "desktop"
+        self.combo_exit = False
         self.acc = [0.0, 0.0, 0.0, 0.0]
         self.osk_next_repeat.clear()
         return [("mode", "desktop")]

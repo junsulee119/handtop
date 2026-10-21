@@ -25,6 +25,7 @@ Implemented by a custom input daemon that grabs the "H700 Gamepad" exclusively a
 | R3 (right stick click) | Paste | Passed through |
 | Start (tap) | Switch to gamepad mode | Passed through |
 | Start (hold 1 s) | — | Switch to desktop mode |
+| Select + Start + L1 + R1 | — | BT Controller mode only: back to desktop mode (ends BT Controller mode). Holding Start does not exit there |
 | Select | — | Passed through |
 | F (tap) | — | — |
 | F + Vol+/− | Brightness | Brightness |
@@ -47,6 +48,11 @@ Implemented by a custom input daemon that grabs the "H700 Gamepad" exclusively a
 - Brightness moved off F-tap to avoid colliding with the F + Vol combo.
 
 ## Implementation
+
+- Signals: `SIGUSR1` re-centres the sticks (Re-center sticks app), `SIGUSR2` switches to an external controller mode (External Controller app, see `bt-controller.md`): gamepad mapping, events sent to `/run/rg35xxh-extpad.sock` (BT or USB service, whichever runs) instead of the local virtual pad; vibration comes back from the USB service. Mode flags `rg35xxh-bt-mode` / `rg35xxh-wired-mode`.
+- Mode-change feedback (`_mode_feedback` in `daemon.py`): the taskbar icon shakes and the motor wobbles with it, both driven by the daemon on one clock from one damped spring, x(t) = A·e^(−3.85 t)·sin(2π·8.33 t). Every 60 ms (half a period) the old mode's icon is shown at the next swing peak (drawing offset 2, −2, 1, −1, 1, −1 px; frame file `$XDG_RUNTIME_DIR/rg35xxh-inputmode-frame` + `SIGRTMIN+8` to Waybar), and the motor gives a 40 ms pulse whose strength follows the spring's decaying envelope (93 % → 57 %), delayed ~70 ms to match Waybar's redraw; then the new icon appears (~360 ms). The motor is an ERM on one PWM line (`rocknix-singleadc-joypad`, 1 kHz; strength = duty cycle; no braking), so the pulses blur into a decaying wobble. Scale or disable with `haptic_strength` (0–1) in `[settings]`. Shutdown and re-centre keep the long 450 ms buzz.
+- Pointer hidden outside desktop mode: labwc has no "hide cursor" action, but it hides the pointer after touch input until the next real pointer motion. On entering gamepad or BT Controller mode the daemon shows a 2x2 px transparent overlay window at the top-left corner, creates a short-lived virtual touchscreen, taps once on that window (so the tap reaches nothing else; tapping the taskbar border opened tray icons), then removes both. The pointer is warped there and hidden, and shows again as soon as it is moved in desktop mode (or by a real mouse).
+- Mode flags in `$XDG_RUNTIME_DIR`: `rg35xxh-gamepad-mode`, `rg35xxh-bt-mode` (read by autosleep and the taskbar input-mode icon: Waybar `image#inputmode` runs `rg35xxh-inputmode`, which prints the icon path from `/usr/local/share/rg35xxh/icons/`; refreshed with `SIGRTMIN+8`).
 
 - Daemon `rg35xxh-inputd` runs inside the labwc session as the desktop user (restarted automatically if it exits); log: `~/.local/state/session/inputd.log`.
 - Access: user is in group `input`; udev rule gives that group `/dev/uinput` and the red status LED.

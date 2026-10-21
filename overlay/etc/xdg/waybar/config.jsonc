@@ -2,13 +2,20 @@
 {
   "layer": "top",
   "position": "bottom",
-  "height": 30,
+  "height": 32,
   "spacing": 4,
   "modules-left": ["custom/apps", "wlr/taskbar"],
-  "modules-right": ["tray", "pulseaudio", "network", "battery", "clock", "custom/power"],
+  "modules-right": ["image#inputmode", "tray", "pulseaudio", "network", "image#battery", "battery", "clock", "custom/power"],
 
   "custom/apps":  { "format": "☰ Apps", "tooltip": false, "on-click": "rg35xxh-drawer" },
   "custom/power": { "format": "⏻", "tooltip": false, "on-click": "rg35xxh-power-menu" },
+  // Input-mode icon (desktop / gamepad / BT Controller); rg35xxh-inputd sends SIGRTMIN+8 on change,
+  // the daemon also drives the shake of the old icon. Bar 32 px = 1 px border + 31 px:
+  // 4 px above and below the 23 px icon (with the 1 px margin-top in style.css).
+  // Battery icon (pixel art, 20x11; charging animation driven by "rg35xxh-battery --animate"),
+  // followed by the percentage from the battery module.
+  "image#battery": { "exec": "rg35xxh-battery", "size": 20, "interval": 30, "signal": 9 },
+  "image#inputmode": { "exec": "rg35xxh-inputmode", "size": 23, "interval": 10, "signal": 8 },
 
   "wlr/taskbar": {
     "format": "{icon}",
@@ -37,7 +44,7 @@
     "interval": 30,
     "states": { "warning": 20, "critical": 10 },
     "format": "{capacity}%",
-    "format-charging": "{capacity}%+",
+    "format-charging": "{capacity}%",          // charging is shown by the icon
     "tooltip-format": "{timeTo}"
   },
   "clock": { "format": "{:%H:%M}", "tooltip-format": "{:%Y-%m-%d %a}" }

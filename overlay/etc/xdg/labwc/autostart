@@ -6,10 +6,11 @@ for k in volume brightness; do        # volume / brightness bars (wob)
   f="$XDG_RUNTIME_DIR/wob-$k.sock"; [ -p "$f" ] || mkfifo "$f"
   (tail -f "$f" | wob -c "/etc/xdg/wob/$k.ini" >"$L/wob-$k.log" 2>&1) &
 done
-swaybg -c '#1e2430' >"$L/swaybg.log" 2>&1 &
+rg35xxh-themed swaybg >"$L/swaybg.log" 2>&1 &     # dark | light: rg35xxh-theme
 kanshi -c /etc/xdg/kanshi/config >"$L/kanshi.log" 2>&1 &
-waybar >"$L/waybar.log" 2>&1 &
-mako >"$L/mako.log" 2>&1 &
+rg35xxh-themed waybar >"$L/waybar.log" 2>&1 &
+rg35xxh-battery --animate >"$L/battery.log" 2>&1 &   # taskbar battery icon (charging animation)
+rg35xxh-themed mako >"$L/mako.log" 2>&1 &   # (a ~/.config/mako/config still wins)
 lxpolkit >"$L/lxpolkit.log" 2>&1 &
 nm-applet --indicator >"$L/nm-applet.log" 2>&1 &
 blueman-applet >"$L/blueman.log" 2>&1 &

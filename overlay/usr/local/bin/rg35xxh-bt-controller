@@ -1,0 +1,3 @@
+#!/bin/sh
+# Old name of the External Controller app's Bluetooth mode (kept for compatibility).
+exec rg35xxh-external-controller bt

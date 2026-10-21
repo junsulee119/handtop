@@ -226,6 +226,46 @@ def test_custom_bindings():
     assert c.button("select", True, 0) == [("cmd", "power_menu")]
 
 
+def test_request_gamepad_from_app():
+    c = Core()
+    c.tick(0.0)
+    assert ("mode", "gamepad") in c.request_gamepad()
+    assert c.mode == "gamepad"
+    assert c.request_gamepad() == []
+    # No Start press to swallow: the next tap reaches the virtual pad.
+    assert c.button("start", True, 1.0) == [("pad_key", "BTN_START", 1)]
+    assert c.button("start", False, 1.1) == [("pad_key", "BTN_START", 0)]
+
+
+def test_request_desktop_when_bt_link_ends():
+    c = Core()
+    c.tick(0.0)
+    assert c.request_desktop() == []          # already in desktop mode
+    c.request_gamepad()
+    c.button("a", True, 1.0)                  # A held on the remote pad when the link ends
+    assert c.request_desktop() == [("mode", "desktop")]
+    assert c.mode == "desktop"
+    assert c.button("a", False, 1.2) == []    # its release must not click in desktop mode
+
+
+def test_bt_mode_exits_with_combo_not_start_hold():
+    c = Core()
+    c.tick(0.0)
+    c.request_gamepad(combo_exit=True)
+    assert c.button("start", True, 1.0) == [("pad_key", "BTN_START", 1)]
+    assert ("mode", "desktop") not in c.tick(3.0)       # long Start press: still BT mode
+    assert c.mode == "gamepad"
+    c.button("select", True, 3.1)
+    c.button("l1", True, 3.2)
+    out = c.button("r1", True, 3.3)
+    assert out[-1] == ("mode", "desktop") and c.mode == "desktop"
+    for b in ("BTN_SELECT", "BTN_START", "BTN_TL", "BTN_TR"):
+        assert ("pad_key", b, 0) in out
+    assert not c.combo_exit
+    for b in ("r1", "l1", "select", "start"):             # releases do nothing in desktop mode
+        assert c.button(b, False, 3.5) == []
+
+
 if __name__ == "__main__":
     failed = 0
     tests = [(n, f) for n, f in sorted(globals().items()) if n.startswith("test_")]

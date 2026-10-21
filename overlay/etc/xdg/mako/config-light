@@ -1,0 +1,15 @@
+# Light theme (rg35xxh-theme light); same as config apart from the colours.
+font=Noto Sans 10
+width=300
+height=120
+margin=8
+padding=8
+border-size=1
+border-radius=6
+background-color=#f4f6fae6
+text-color=#2b303b
+border-color=#3d68b0
+default-timeout=5000
+anchor=top-right
+# Above everything, including the power menu (wlogout) and fullscreen apps.
+layer=overlay

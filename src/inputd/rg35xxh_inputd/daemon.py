@@ -6,11 +6,16 @@ Devices (grabbed exclusively while running):
   device with KEY_VOLUMEUP    volume keys (gpio-keys)
   device with KEY_POWER       power button (AXP717)
 Virtual devices (uinput): mouse, keyboard, and in gamepad mode an Xbox 360 pad.
+External controller modes (BT Controller: rg35xxh-btpad, wired: rg35xxh-usbpad) use the gamepad
+mapping too, but send the pad events over a Unix socket to that service instead of creating the
+local pad, so apps on the handheld see nothing. Only one of the two services runs at a time.
 """
 import logging
+import math
 import os
 import shutil
 import signal
+import socket
 import struct
 import subprocess
 import sys
@@ -22,7 +27,7 @@ from evdev import ff
 from gi.repository import GLib
 
 from . import config
-from .core import Core
+from .core import PAD_AXES, Core
 
 log = logging.getLogger("rg35xxh-inputd")
 
@@ -39,10 +44,96 @@ HW_BUTTONS = {
 HW_AXES = {E.ABS_X: "lx", E.ABS_Y: "ly", E.ABS_RX: "rx", E.ABS_RY: "ry"}
 TERMINALS = ("foot", "footclient", "org.codeberg.dnkl.foot", "xterm", "uxterm", "kitty", "alacritty")
 STATUS_LED = "/sys/class/leds/red:status"
+EXT_SOCKET = "/run/rg35xxh-extpad.sock"        # created by rg35xxh-btpad / -usbpad (root, group input)
+# Messages from the service: b"hello bt" | b"hello usb" first, later b"rumble <big> <small>" (0-255).
+EXT_MODES = {   # transport: (flag file, notification title, notification text, taskbar icon)
+    "bt": ("rg35xxh-bt-mode", "BT Controller mode",
+           "Controls go to the paired PC/phone. Select + Start + L1 + R1 to stop.", "bt"),
+    "usb": ("rg35xxh-wired-mode", "Wired Controller mode",
+            "Controls go to the PC over the USB cable. Select + Start + L1 + R1 to stop.", "wired"),
+}
+BT_EVENT = struct.Struct("<HHi")               # evdev type, code, value
+# Mode-change feedback: the taskbar icon shakes and the motor wobbles with it, both driven from
+# here on one clock and one damped-spring model, x(t) = A e^(-DECAY t) sin(2 pi FREQ t):
+#  - icon: the OLD mode's icon is shown at each swing peak (every half period = STEP_MS, sides
+#    alternating; offsets rounded to whole pixels, e.g. 2 -2 1 -1 1 -1), then the new icon;
+#  - motor: one pulse per swing, strength following the spring's decaying envelope.
+# The motor is an ERM on one PWM line (strength = duty cycle), slow to spin up and without
+# braking, so the pulses blur into a decaying wobble. Waybar redraws ~HAPTIC_LAG_MS after a
+# signal (it re-runs rg35xxh-inputmode), so the pulses are delayed by that much to line up.
+SPRING_FREQ, SPRING_DECAY, SPRING_AMP_PX = 8.33, 3.85, 2.6    # Hz, 1/s, px
+SPRING_SWINGS, SPRING_STEP_MS = 6, 60                         # 60 ms = half a period
+SPRING_PULSE_MS, SPRING_FLOOR = 40, 0.4                       # pulse length; weakest strength
+HAPTIC_LAG_MS = 70
+
+
+def _spring(t):
+    return math.exp(-SPRING_DECAY * t) * math.sin(2 * math.pi * SPRING_FREQ * t)
+
+
+_PEAKS = [(k + 0.5) * SPRING_STEP_MS / 1000 for k in range(SPRING_SWINGS)]
+ICON_FRAMES = [max(-2, min(2, round(SPRING_AMP_PX * _spring(t)))) or (1 if _spring(t) > 0 else -1)
+               for t in _PEAKS]                               # px; frames exist for -2..2
+SPRING_PULSES = [round(SPRING_FLOOR + (1 - SPRING_FLOOR) * math.exp(-SPRING_DECAY * t), 2) for t in _PEAKS]
+INPUTMODE_FRAME = "rg35xxh-inputmode-frame"
+# Hiding the pointer outside desktop mode: labwc has no "hide cursor" action, but it hides the
+# pointer after touch input until the next real pointer motion. So on entering gamepad / BT
+# Controller mode a short-lived virtual touchscreen taps once at the top-left corner, onto our own
+# 2x2 px transparent overlay window shown there just for that moment, so the tap reaches nothing
+# else (an earlier version tapped the taskbar border and opened tray icons). The pointer is warped
+# there and hidden; it shows again as soon as the stick moves it in desktop mode.
+# Motor safety: changing the vibration many times a second (re-uploading the effect) locked up
+# the whole system twice (kernel side: ROCKNIX joypad driver, ff-memless + PWM work). Games and
+# the PC can ask that fast (SDL re-sends rumble every frame; test pages stream it), so every
+# vibration coming from outside (games in gamepad mode, the PC in wired mode) goes through one
+# gate: at most one hardware update per MOTOR_INTERVAL, always with the latest request, and
+# strengths rounded to MOTOR_LEVELS steps. Handtop's own short haptics are not affected.
+# Never endless effects either: an effect with replay length 0 ("until stopped") locked the system
+# up even at a few updates a second (all three freezes had one; our fixed-length haptics never
+# did). So every effect has a length, and long vibrations are re-triggered (MOTOR_REFRESH) while
+# wanted. Wired mode pre-uploads one MOTOR_EFFECT_MS effect per level and only plays/stops them.
+MOTOR_INTERVAL = 0.1           # s
+MOTOR_LEVELS = 8
+MOTOR_EFFECT_MS = 500          # PC vibration: per-level effect length
+MOTOR_GAME_MAX_MS = 1000       # games: length used for an endless (0) effect
+MOTOR_REFRESH = 0.4            # s: re-trigger interval while a long vibration is wanted
+TOUCH_W, TOUCH_H = 640, 480
+TOUCH_TAP = (0, 0)                   # "<mode> <dx>" while shaking
+WAYBAR_SIGNAL = 8                              # image#inputmode in the Waybar config
 
 
 def runtime_flag(name):
     return os.path.join(os.environ.get("XDG_RUNTIME_DIR", "/tmp"), name)
+
+
+def set_flag(name, on):
+    """Runtime flag files, read by rg35xxh-autosleep and the Waybar input-mode indicator."""
+    if on:
+        open(runtime_flag(name), "w").close()
+    else:
+        try:
+            os.unlink(runtime_flag(name))
+        except FileNotFoundError:
+            pass
+
+
+def _comm(pid):
+    try:
+        with open(f"/proc/{pid}/comm") as f:
+            return f.read().strip()
+    except OSError:
+        return None
+
+
+def _proc_age(pid):
+    """Seconds since process pid started (0 if unknown)."""
+    try:
+        with open(f"/proc/{pid}/stat") as f:
+            start = int(f.read().rsplit(")", 1)[1].split()[19]) / os.sysconf("SC_CLK_TCK")
+        with open("/proc/uptime") as f:
+            return float(f.read().split()[0]) - start
+    except (OSError, ValueError, IndexError):
+        return 0
 
 
 def spawn(*argv):
@@ -62,11 +153,32 @@ class Daemon:
         self.absinfo = {}
         self.pad = None            # virtual Xbox pad (gamepad mode only)
         self.pad_ff = {}           # virtual effect id -> physical effect id
+        self.bt = None             # socket to rg35xxh-btpad / -usbpad (external controller modes)
+        self.ext = "bt"             # its transport, from the service's hello: "bt" | "usb"
+        self.ext_rumble_id = None   # effect id for vibration requested by the PC
+        self.motor_timer = None     # motor gate (MOTOR_INTERVAL): pending updates, last update time
+        self.motor_last = 0.0
+        self.motor_pending_upload = {}
+        self.motor_pending_play = {}
+        self.motor_ext_want = self.motor_ext_applied = 0   # level 0..MOTOR_LEVELS
+        self.motor_ext_ids = {}     # level -> effect id (wired mode, uploaded on first use)
+        self.motor_game_endless = set()   # game effects that asked for endless length
+        self.motor_game_active = set()    # ... currently playing (re-triggered)
+        self.motor_refresh_timer = None
+        self.bt_watch = None
+        self.icon_mode = "desktop"  # mode whose icon the taskbar shows (lags during the shake)
+        self.touch = None           # short-lived virtual touchscreen (pointer hiding)
+        self.touch_win = None       # its tap target: a tiny transparent overlay window
+        self.anim = None
+        self.waybar_pid = None
         self.haptic_id = None
+        self.step_ids = {}
         self.axis_offset = {}      # software centre correction per axis (set by re-centre)
         self.watches = {}          # fd -> GLib watch id
         self.osk = None
         self.ticks = 0
+        for flag in ("rg35xxh-gamepad-mode", "rg35xxh-bt-mode", "rg35xxh-wired-mode", INPUTMODE_FRAME):
+            set_flag(flag, False)
         self._open_devices()
         self._create_virtual_devices()
         self._init_osk()
@@ -116,14 +228,26 @@ class Daemon:
         for code, info in self.gamepad.capabilities().get(E.EV_ABS, []):
             self.absinfo[code] = info
         self.haptic_id = None
+        self.step_ids = {}     # (magnitude, ms) -> uploaded effect id, for SPRING_PULSES
         if E.EV_FF in self.gamepad.capabilities():
             try:
-                rumble = ff.Rumble(strong_magnitude=0xFFFF, weak_magnitude=0xFFFF)
-                eff = ff.Effect(E.FF_RUMBLE, -1, 0, ff.Trigger(0, 0), ff.Replay(450, 0),
-                                ff.EffectType(ff_rumble_effect=rumble))
-                self.haptic_id = self.gamepad.upload_effect(eff)
+                self.haptic_id = self._upload_rumble(0xFFFF, 450)   # shutdown, re-centre
+                for strength in SPRING_PULSES:
+                    mag = self._magnitude(strength)
+                    if mag and (mag, SPRING_PULSE_MS) not in self.step_ids:
+                        self.step_ids[(mag, SPRING_PULSE_MS)] = self._upload_rumble(mag, SPRING_PULSE_MS)
             except OSError as e:
                 log.warning("rumble not available: %s", e)
+
+    def _magnitude(self, strength):
+        scale = max(0.0, min(1.0, self.core.s["haptic_strength"]))
+        return int(round(strength * scale * 0xFFFF))
+
+    def _upload_rumble(self, magnitude, ms):
+        rumble = ff.Rumble(strong_magnitude=magnitude, weak_magnitude=magnitude)
+        eff = ff.Effect(E.FF_RUMBLE, -1, 0, ff.Trigger(0, 0), ff.Replay(ms, 0),
+                        ff.EffectType(ff_rumble_effect=rumble))
+        return self.gamepad.upload_effect(eff)
 
     # ---------------------------------------------------- stick re-centre
     # The stick driver (rocknix-singleadc-joypad) measures each axis' centre ONCE, from a single
@@ -337,22 +461,32 @@ class Daemon:
                 if a[1] == "gamepad":
                     if self.osk and self.osk.visible:
                         self.osk.toggle()
-                    self._create_pad()
-                    open(runtime_flag("rg35xxh-gamepad-mode"), "w").close()   # read by rg35xxh-autosleep
-                    spawn("notify-send", "-t", "2500", "Gamepad mode", "Hold Start for 1 s to return to desktop mode")
+                    self._hide_cursor()                   # no pointer outside desktop mode
+                    if self.bt:
+                        flag, title, text, _icon = EXT_MODES[self.ext]
+                        set_flag(flag, True)
+                        spawn("notify-send", "-t", "6000", title, text)
+                    else:
+                        self._create_pad()
+                        set_flag("rg35xxh-gamepad-mode", True)
+                        spawn("notify-send", "-t", "2500", "Gamepad mode", "Hold Start for 1 s to return to desktop mode")
                 else:
-                    self._destroy_pad()
-                    try:
-                        os.unlink(runtime_flag("rg35xxh-gamepad-mode"))
-                    except FileNotFoundError:
-                        pass
-                    spawn("notify-send", "-t", "1500", "Desktop mode")
-            elif kind == "pad_key" and self.pad:
-                self.pad.write(E.EV_KEY, E.ecodes[a[1]], a[2])
-                self.pad.syn()
-            elif kind == "pad_abs" and self.pad:
-                self.pad.write(E.EV_ABS, E.ecodes[a[1]], a[2])
-                self.pad.syn()
+                    if self.bt:
+                        title = EXT_MODES[self.ext][1]
+                        self._bt_close()
+                        spawn("notify-send", "-t", "2500", "Desktop mode", f"{title} stopped")
+                    else:
+                        self._destroy_pad()
+                        spawn("notify-send", "-t", "1500", "Desktop mode")
+                    set_flag("rg35xxh-gamepad-mode", False)
+                self._mode_feedback(EXT_MODES[self.ext][3] if self.bt else a[1])   # icon shake + haptic wobble
+            elif kind in ("pad_key", "pad_abs"):
+                etype = E.EV_KEY if kind == "pad_key" else E.EV_ABS
+                if self.bt:
+                    self._bt_send(etype, E.ecodes[a[1]], a[2])
+                elif self.pad:
+                    self.pad.write(etype, E.ecodes[a[1]], a[2])
+                    self.pad.syn()
             elif kind == "cmd":
                 self._command(a[1])
             elif kind == "screen_wake":
@@ -452,11 +586,138 @@ class Daemon:
         GLib.timeout_add(600, lambda: spawn("systemctl", "poweroff") or False)
 
     def _haptic(self):
-        if self.gamepad is not None and self.haptic_id is not None:
+        self._play_effect(self.haptic_id)
+
+    def _play_effect(self, eid):
+        if self.gamepad is not None and eid is not None:
             try:
-                self.gamepad.write(E.EV_FF, self.haptic_id, 1)
+                self.gamepad.write(E.EV_FF, eid, 1)
             except OSError as e:
                 log.warning("rumble failed: %s", e)
+        return False
+
+    # ------------------------------------------------ pointer hiding
+    def _touch_target(self):
+        """The 2x2 px transparent overlay window the hide-pointer tap lands on (top-left corner)."""
+        if self.touch_win is None:
+            from gi.repository import Gtk, GtkLayerShell
+            w = Gtk.Window()
+            GtkLayerShell.init_for_window(w)
+            GtkLayerShell.set_layer(w, GtkLayerShell.Layer.OVERLAY)
+            GtkLayerShell.set_namespace(w, "rg35xxh-touch-target")
+            GtkLayerShell.set_anchor(w, GtkLayerShell.Edge.TOP, True)
+            GtkLayerShell.set_anchor(w, GtkLayerShell.Edge.LEFT, True)
+            GtkLayerShell.set_exclusive_zone(w, -1)
+            GtkLayerShell.set_keyboard_mode(w, GtkLayerShell.KeyboardMode.NONE)
+            w.set_size_request(2, 2)
+            visual = w.get_screen().get_rgba_visual()
+            if visual:
+                w.set_visual(visual)
+            w.set_app_paintable(True)
+
+            def clear(_w, cr):
+                cr.set_operator(0)          # CAIRO_OPERATOR_CLEAR: fully transparent
+                cr.paint()
+                return True
+            w.connect("draw", clear)
+            self.touch_win = w
+        return self.touch_win
+
+    def _hide_cursor(self):
+        if self.touch:
+            return
+        if not self.osk:                    # no GTK main loop (no display): cannot show the target
+            return
+        try:
+            self._touch_target().show_all()
+        except Exception as e:  # pragma: no cover - GTK/layer-shell missing
+            log.warning("cannot hide the pointer (touch target): %s", e)
+            return
+        caps = {E.EV_KEY: [E.BTN_TOUCH],
+                E.EV_ABS: [(E.ABS_X, evdev.AbsInfo(0, 0, TOUCH_W - 1, 0, 0, 0)),
+                           (E.ABS_Y, evdev.AbsInfo(0, 0, TOUCH_H - 1, 0, 0, 0)),
+                           (E.ABS_MT_SLOT, evdev.AbsInfo(0, 0, 0, 0, 0, 0)),
+                           (E.ABS_MT_TRACKING_ID, evdev.AbsInfo(0, 0, 65535, 0, 0, 0)),
+                           (E.ABS_MT_POSITION_X, evdev.AbsInfo(0, 0, TOUCH_W - 1, 0, 0, 0)),
+                           (E.ABS_MT_POSITION_Y, evdev.AbsInfo(0, 0, TOUCH_H - 1, 0, 0, 0))]}
+        try:
+            self.touch = evdev.UInput(caps, name="rg35xxh virtual touch", input_props=[E.INPUT_PROP_DIRECT])
+        except (OSError, evdev.UInputError) as e:
+            log.warning("cannot hide the pointer (virtual touch): %s", e)
+            self.touch_win.hide()
+            return
+        GLib.timeout_add(400, self._touch_tap)       # let libinput pick the new device up first
+
+    def _touch_tap(self):
+        t = self.touch
+        if self.core.mode == "gamepad":
+            x, y = TOUCH_TAP
+            for code, v in ((E.ABS_MT_SLOT, 0), (E.ABS_MT_TRACKING_ID, 1), (E.ABS_MT_POSITION_X, x),
+                            (E.ABS_MT_POSITION_Y, y), (E.ABS_X, x), (E.ABS_Y, y)):
+                t.write(E.EV_ABS, code, v)
+            t.write(E.EV_KEY, E.BTN_TOUCH, 1)
+            t.syn()
+            t.write(E.EV_ABS, E.ABS_MT_TRACKING_ID, -1)
+            t.write(E.EV_KEY, E.BTN_TOUCH, 0)
+            t.syn()
+        GLib.timeout_add(300, self._touch_close)
+        return False
+
+    def _touch_close(self):
+        if self.touch:
+            self.touch.close()
+            self.touch = None
+        if self.touch_win:
+            self.touch_win.hide()
+        return False
+
+    # ------------------------------------------------ mode-change feedback
+    def _mode_feedback(self, new):
+        """Shake the old mode's taskbar icon and wobble the motor, then show the new icon."""
+        if self.anim:
+            GLib.source_remove(self.anim["timer"])
+            self.anim = None
+        if self.icon_mode == new:
+            set_flag(INPUTMODE_FRAME, False)
+            self._signal_waybar()
+            return
+        self.anim = {"old": self.icon_mode, "new": new, "k": 0}
+        self._anim_step()
+        self.anim["timer"] = GLib.timeout_add(SPRING_STEP_MS, self._anim_step)
+
+    def _anim_step(self):
+        an = self.anim
+        k = an["k"]
+        if k < len(ICON_FRAMES):
+            with open(runtime_flag(INPUTMODE_FRAME), "w") as f:
+                f.write(f"{an['old']} {ICON_FRAMES[k]}\n")
+            eid = self.step_ids.get((self._magnitude(SPRING_PULSES[k]), SPRING_PULSE_MS))
+            if eid is not None:
+                GLib.timeout_add(HAPTIC_LAG_MS, self._play_effect, eid)
+            an["k"] = k + 1
+            self._signal_waybar()
+            return True
+        set_flag(INPUTMODE_FRAME, False)
+        self.icon_mode = an["new"]
+        self.anim = None
+        self._signal_waybar()
+        return False
+
+    def _signal_waybar(self):
+        """SIGRTMIN+WAYBAR_SIGNAL to Waybar (re-runs rg35xxh-inputmode). Cheaper than pkill."""
+        for _ in range(2):
+            if self.waybar_pid is None:
+                self.waybar_pid = next((int(d) for d in os.listdir("/proc") if d.isdigit()
+                                        and _comm(d) == "waybar"), None)
+                if self.waybar_pid is None:
+                    return
+            if _proc_age(self.waybar_pid) < 3:     # starting up: a real-time signal would kill it
+                return
+            try:
+                os.kill(self.waybar_pid, signal.SIGRTMIN + WAYBAR_SIGNAL)
+                return
+            except ProcessLookupError:
+                self.waybar_pid = None
 
     # ------------------------------------------- rumble from the virtual pad
     _EV = struct.Struct("llHHi")
@@ -474,23 +735,32 @@ class Daemon:
             _, _, etype, code, value = self._EV.unpack_from(data, i)
             try:
                 if etype == E.EV_UINPUT and code == E.UI_FF_UPLOAD:
+                    # acknowledge at once; the hardware upload goes through the motor gate
                     up = self.pad.begin_upload(value)
-                    vid = up.effect.id
-                    existing = self.pad_ff.get(vid)
-                    up.effect.id = existing if existing is not None else -1
-                    self.pad_ff[vid] = self.gamepad.upload_effect(up.effect)
-                    up.effect.id = vid
+                    eff = ff.Effect.from_buffer_copy(up.effect)
+                    if eff.ff_replay.length == 0:          # endless: cap it, re-trigger while playing
+                        eff.ff_replay.length = MOTOR_GAME_MAX_MS
+                        self.motor_game_endless.add(up.effect.id)
+                    else:
+                        self.motor_game_endless.discard(up.effect.id)
+                    self.motor_pending_upload[up.effect.id] = eff
                     up.retval = 0
                     self.pad.end_upload(up)
+                    self._motor_kick()
                 elif etype == E.EV_UINPUT and code == E.UI_FF_ERASE:
                     er = self.pad.begin_erase(value)
+                    self.motor_pending_upload.pop(er.effect_id, None)
+                    self.motor_pending_play.pop(er.effect_id, None)
+                    self.motor_game_endless.discard(er.effect_id)
+                    self.motor_game_active.discard(er.effect_id)
                     phys = self.pad_ff.pop(er.effect_id, None)
                     if phys is not None:
                         self.gamepad.erase_effect(phys)
                     er.retval = 0
                     self.pad.end_erase(er)
-                elif etype == E.EV_FF and code in self.pad_ff:
-                    self.gamepad.write(E.EV_FF, self.pad_ff[code], value)
+                elif etype == E.EV_FF and (code in self.pad_ff or code in self.motor_pending_upload):
+                    self.motor_pending_play[code] = value
+                    self._motor_kick()
             except Exception as e:  # rumble is best effort
                 log.debug("rumble forward: %s", e)
         return True
@@ -504,9 +774,190 @@ class Daemon:
             self._loop.quit()
         return False
 
+    # ------------------------------------------------- BT Controller mode
+    def _request_bt(self):
+        """SIGUSR2 (External Controller app): connect to the running external-controller service
+        (rg35xxh-btpad or rg35xxh-usbpad) and send it the controls."""
+        if self.bt:
+            return True
+        try:
+            s = socket.socket(socket.AF_UNIX, socket.SOCK_SEQPACKET)
+            s.settimeout(1.0)
+            s.connect(EXT_SOCKET)
+            hello = s.recv(64)
+            s.settimeout(0.2)
+        except OSError as e:
+            log.warning("External controller: cannot connect to %s: %s", EXT_SOCKET, e)
+            spawn("notify-send", "-t", "5000", "External Controller", "Could not connect to the controller service")
+            return True
+        self.ext = "usb" if hello == b"hello usb" else "bt"
+        self.bt = s
+        self.bt_watch = GLib.io_add_watch(s.fileno(), GLib.IO_IN | GLib.IO_HUP | GLib.IO_ERR, self._on_bt_data)
+        log.info("%s: connected to %s", EXT_MODES[self.ext][1], EXT_SOCKET)
+        if self.core.mode == "gamepad":           # local gamepad mode -> BT Controller mode
+            self._destroy_pad()
+            set_flag("rg35xxh-gamepad-mode", False)
+            self.core.request_gamepad(combo_exit=True)
+            self._run([("mode", "gamepad")] + [("pad_abs", PAD_AXES[n], int(round(v * 32767)))
+                                               for n, v in self.core.axes.items()])
+        else:
+            self._run(self.core.request_gamepad(combo_exit=True))
+        return True
+
+    def _bt_send(self, etype, code, value):
+        try:
+            self.bt.send(BT_EVENT.pack(etype, code, value))
+        except OSError as e:
+            log.warning("BT Controller: send failed: %s", e)
+            self._bt_lost()
+
+    def _on_bt_data(self, fd, cond):
+        """Message from the service (vibration), or EOF / hang-up: the service stopped."""
+        data = b""
+        if cond & GLib.IO_IN:
+            try:
+                data = self.bt.recv(64)
+            except BlockingIOError:
+                return True
+            except OSError:
+                data = b""
+        if data.startswith(b"rumble "):
+            try:
+                big, small = (int(v) for v in data.split()[1:3])
+                self._ext_rumble(big, small)
+            except ValueError:
+                pass
+            return True
+        if data:
+            return True                            # unknown message: ignore
+        self.bt_watch = None
+        self._bt_lost()
+        return False
+
+    def _ext_rumble(self, big, small):
+        """Vibration requested by the PC (wired mode): the stronger of the two motors' values, on the
+        handheld's single motor, through the motor gate. Runs until the PC sends 0 0 / the mode ends."""
+        self.motor_ext_want = round(max(big, small) / 255 * MOTOR_LEVELS)
+        self._motor_kick()
+
+    # ------------------------------------------------ motor gate (see MOTOR_INTERVAL)
+    def _motor_kick(self):
+        if self.motor_timer:
+            return
+        wait = max(0.0, self.motor_last + MOTOR_INTERVAL - time.monotonic())
+        self.motor_timer = GLib.timeout_add(int(wait * 1000), self._motor_flush)
+
+    def _motor_ok(self):
+        return self.gamepad is not None and E.EV_FF in self.gamepad.capabilities()
+
+    def _ext_levels_upload(self):
+        """One fixed-length effect per strength level, uploaded while the motor is idle."""
+        if self.motor_ext_ids:
+            return
+        for lvl in range(1, MOTOR_LEVELS + 1):
+            mag = lvl * 0xFFFF // MOTOR_LEVELS
+            rumble = ff.Rumble(strong_magnitude=mag, weak_magnitude=mag)
+            eff = ff.Effect(E.FF_RUMBLE, -1, 0, ff.Trigger(0, 0), ff.Replay(MOTOR_EFFECT_MS, 0),
+                            ff.EffectType(ff_rumble_effect=rumble))
+            self.motor_ext_ids[lvl] = self.gamepad.upload_effect(eff)
+
+    def _ext_levels_free(self):
+        for eid in self.motor_ext_ids.values():
+            try:
+                self.gamepad.write(E.EV_FF, eid, 0)
+                self.gamepad.erase_effect(eid)
+            except OSError:
+                pass
+        self.motor_ext_ids = {}
+        self.motor_ext_applied = 0
+        self.motor_ext_want = 0
+
+    def _motor_flush(self):
+        self.motor_timer = None
+        if not self._motor_ok():
+            self.motor_pending_upload.clear()
+            self.motor_pending_play.clear()
+            return False
+        self.motor_last = time.monotonic()
+        try:
+            # games (virtual pad): latest upload per effect, then play/stop changes
+            for vid, eff in list(self.motor_pending_upload.items()):
+                existing = self.pad_ff.get(vid)
+                eff.id = existing if existing is not None else -1
+                self.pad_ff[vid] = self.gamepad.upload_effect(eff)
+            self.motor_pending_upload.clear()
+            for vid, val in list(self.motor_pending_play.items()):
+                if vid in self.pad_ff:
+                    self.gamepad.write(E.EV_FF, self.pad_ff[vid], val)
+                    if vid in self.motor_game_endless and val:
+                        self.motor_game_active.add(vid)
+                    else:
+                        self.motor_game_active.discard(vid)
+            self.motor_pending_play.clear()
+            # PC (wired mode): switch between the pre-uploaded level effects
+            want = self.motor_ext_want
+            if want != self.motor_ext_applied:
+                if self.motor_ext_applied and self.motor_ext_applied in self.motor_ext_ids:
+                    self.gamepad.write(E.EV_FF, self.motor_ext_ids[self.motor_ext_applied], 0)
+                if want:
+                    self._ext_levels_upload()
+                    self.gamepad.write(E.EV_FF, self.motor_ext_ids[want], 1)
+                self.motor_ext_applied = want
+        except OSError as e:
+            log.debug("motor: %s", e)
+        self._motor_refresh_schedule()
+        return False
+
+    def _motor_refresh_schedule(self):
+        if self.motor_refresh_timer is None and (self.motor_ext_applied or self.motor_game_active):
+            self.motor_refresh_timer = GLib.timeout_add(int(MOTOR_REFRESH * 1000), self._motor_refresh)
+
+    def _motor_refresh(self):
+        """Re-trigger long vibrations before their fixed-length effect runs out."""
+        self.motor_refresh_timer = None
+        if not self._motor_ok():
+            return False
+        try:
+            if self.motor_ext_applied in self.motor_ext_ids:
+                self.gamepad.write(E.EV_FF, self.motor_ext_ids[self.motor_ext_applied], 1)
+            for vid in list(self.motor_game_active):
+                if vid in self.pad_ff:
+                    self.gamepad.write(E.EV_FF, self.pad_ff[vid], 1)
+        except OSError as e:
+            log.debug("motor refresh: %s", e)
+        self._motor_refresh_schedule()
+        return False
+
+    def _bt_lost(self):
+        if not self.bt:
+            return
+        log.info("%s: service ended, back to desktop mode", EXT_MODES[self.ext][1])
+        actions = self.core.request_desktop()
+        if actions:
+            self._run(actions)                    # closes the socket via the "mode" action
+        else:
+            self._bt_close()
+
+    def _bt_close(self):
+        if self._motor_ok():
+            self._ext_levels_free()               # stop any vibration the PC left on
+        if self.bt_watch:
+            GLib.source_remove(self.bt_watch)
+            self.bt_watch = None
+        if self.bt:
+            try:
+                self.bt.close()                   # btpad sees EOF and stops
+            except OSError:
+                pass
+            self.bt = None
+            log.info("%s: disconnected", EXT_MODES[self.ext][1])
+        for flag, *_ in EXT_MODES.values():
+            set_flag(flag, False)
+
     def run(self):
         GLib.timeout_add(10, self._tick)
         GLib.unix_signal_add(GLib.PRIORITY_DEFAULT, signal.SIGUSR1, self._recenter)
+        GLib.unix_signal_add(GLib.PRIORITY_DEFAULT, signal.SIGUSR2, self._request_bt)
         self._loop = None
         try:
             if self.osk:

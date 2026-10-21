@@ -1,0 +1,20 @@
+#!/bin/sh
+# Start a desktop component in the current Handtop theme (dark | light, set by rg35xxh-theme).
+#   rg35xxh-themed waybar|mako|swaybg
+# Used by the labwc autostart, and by rg35xxh-theme to restart them after a switch.
+# Your own config (~/.config/waybar/style.css, ~/.config/mako/config) still takes precedence.
+C="${XDG_CONFIG_HOME:-$HOME/.config}"
+T=$(cat "$C/rg35xxh/theme" 2>/dev/null)
+case "$1" in
+  waybar)
+    [ "$T" = light ] && [ ! -e "$C/waybar/style.css" ] && exec waybar -s /etc/xdg/waybar/style-light.css
+    exec waybar ;;
+  mako)
+    [ -e "$C/mako/config" ] && exec mako      # mako does not read /etc/xdg/mako/config by itself
+    [ "$T" = light ] && exec mako -c /etc/xdg/mako/config-light
+    exec mako -c /etc/xdg/mako/config ;;
+  swaybg)
+    [ "$T" = light ] && exec swaybg -c '#dfe4ec'
+    exec swaybg -c '#1e2430' ;;
+  *) echo "usage: rg35xxh-themed waybar|mako|swaybg" >&2; exit 2 ;;
+esac

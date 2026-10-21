@@ -13,13 +13,14 @@ an external monitor over mini HDMI, and everything else Debian's arm64 archive o
 - **Desktop:** labwc (Wayland) + Waybar + nwg-drawer + wlogout, 640×480 on the built-in screen
 - **Controls:** a custom input daemon turns the gamepad into mouse + keyboard, with an on-screen keyboard
 
-Status: **v0.1.1**, developed and tested on the RG35XX H.
+Status: **v0.2.0**, developed and tested on the RG35XX H.
 
 ## Features
 
 - Desktop mode by default: stick / D-pad pointer, A/B clicks, right-stick scrolling, L1/R1/R2 = Esc/Enter/Backspace, L3/R3 = copy/paste
 - On-screen keyboard (X), navigable with the D-pad
 - Gamepad mode (tap Start) presents an Xbox 360 pad, e.g. for Moonlight; hold Start 1 s to go back
+- **BT Controller mode**: the handheld becomes a Bluetooth gamepad for your PC or phone
 - **Moonlight** with **hardware video decoding** (H.264/HEVC up to 1080p60) via the Cedrus decoder
 - **Tailscale** with tray icon and a QR-code login launcher
 - **HDMI**: hot-plug, monitor-only / extend / mirror modes, keyboard panel on the handheld when the monitor is the only screen
@@ -35,7 +36,7 @@ Full control map: [docs/input-mapping.md](docs/input-mapping.md).
 
 You need a microSD card (16 GB or larger) and balenaEtcher or Rufus.
 
-1. Download `handtop-<date>-v0.1.2.img.xz` and its `.sha256` from the Releases page. If that image does nothing at all on power-on (no LED), your unit has DDR3 RAM: use the `-DDR3` image instead.
+1. Download `handtop-<date>-v0.2.0.img.xz` and its `.sha256` from the Releases page. If that image does nothing at all on power-on (no LED), your unit has DDR3 RAM: use the `-DDR3` image instead.
 2. Flash the `.img.xz` directly (no need to unpack). If Windows offers to format the card afterwards, choose **Cancel**.
 3. Optional: on the `RG35XXHBOOT` drive, fill in `wifi.txt` (SSID, password, country).
 4. Put the card in the **TF1** (left) slot and power on. The first boot takes longer (the system grows to fill the card).
@@ -64,6 +65,12 @@ wlr-randr --output HDMI-A-1 --scale 2            # bigger UI on 4K screens
 ```
 
 There is no HDMI audio.
+
+## External Controller (Bluetooth or USB cable)
+
+Use the handheld as a game controller for your PC or phone: **Apps → External Controller**. **Bluetooth**: pair **"Handtop Gamepad"** from the other device (first time only; it reconnects by itself afterwards). The taskbar's input-mode icon turns blue with rainbow stripes while it is on; press Select + Start + L1 + R1 to stop. Unlike gamepad mode, apps on the handheld don't see the controls. The handheld's screen shows the connection, a live view of the controls and the battery while it is on. It shows up as a standard Bluetooth LE gamepad; while it is on, classic-Bluetooth accessories connected to the handheld pause. Details: [docs/bt-controller.md](docs/bt-controller.md).
+
+**USB cable**: connect the handheld's right USB-C port (OTG2/DC) to a PC and pick USB cable. It shows up as a wired Xbox 360 controller (works with Xbox-only games, game vibration on the handheld), and the handheld charges meanwhile. One connection (Bluetooth or cable) at a time.
 
 ## Good to know
 

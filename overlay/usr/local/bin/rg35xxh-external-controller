@@ -1,0 +1,126 @@
+#!/usr/bin/python3
+"""External Controller app: use the handheld as a game controller for a PC or phone.
+
+  rg35xxh-external-controller          choose Bluetooth or USB cable
+  rg35xxh-external-controller bt|usb   start that mode directly
+
+Bluetooth: rg35xxh-btpad.service (BLE gamepad). USB cable: rg35xxh-usbpad.service (wired Xbox 360
+controller; right USB-C port only, OTG2/DC). One at a time: starting one stops the other (the
+units also conflict). After the service is up, the input daemon is told (SIGUSR2) to send it the
+controls, and the full-screen status page opens. Select + Start + L1 + R1 ends the mode.
+"""
+import os
+import socket
+import subprocess
+import sys
+import time
+
+SERVICES = {"bt": "rg35xxh-btpad.service", "usb": "rg35xxh-usbpad.service"}
+NAMES = {"bt": "BT Controller", "usb": "Wired Controller"}
+STATUS = "/run/rg35xxh-extpad-status.sock"
+ICONS = "/usr/local/share/rg35xxh/icons"
+
+
+def notify(title, text, ms=5000):
+    subprocess.run(["notify-send", "-t", str(ms), title, text])
+
+
+def active(unit):
+    return subprocess.run(["systemctl", "is-active", "--quiet", unit]).returncode == 0
+
+
+def start(mode):
+    unit = SERVICES[mode]
+    if active(unit):
+        notify(NAMES[mode], "Already on. Select + Start + L1 + R1 to stop.", 4000)
+        return 0
+    for other, u in SERVICES.items():           # one connection at a time
+        if other != mode and active(u):
+            subprocess.run(["systemctl", "stop", u])
+            time.sleep(1)
+    if subprocess.run(["systemctl", "start", unit]).returncode:
+        notify(NAMES[mode], "Could not start" + (" (is Bluetooth on?)" if mode == "bt" else ""), 6000)
+        return 1
+    ready = False
+    for _ in range(80):                        # wait until the service accepts connections
+        try:                                   # (probe the status socket: the pad socket takes
+            with socket.socket(socket.AF_UNIX) as c:   # a single client, the input daemon)
+                c.connect(STATUS)
+            ready = True
+            break
+        except OSError:
+            if not active(unit):               # service died on start: don't switch modes or
+                break                          # open the screen (it would show a stale/BT page)
+            time.sleep(0.1)
+    if not ready:
+        subprocess.run(["systemctl", "stop", unit], stderr=subprocess.DEVNULL)
+        notify(NAMES[mode], f"Could not start. Details: journalctl -u {unit}", 8000)
+        return 1
+    subprocess.run(["pkill", "-USR2", "-f", "^python3 -m rg35xxh_inputd"])
+    subprocess.Popen(["rg35xxh-controller-screen"], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                     stderr=subprocess.DEVNULL, start_new_session=True)
+    return 0
+
+
+def choose():
+    import cairo
+    import gi
+    gi.require_version("Gdk", "3.0")
+    gi.require_version("Gtk", "3.0")
+    from gi.repository import Gdk, Gtk
+
+    def icon(name):
+        try:
+            img = cairo.ImageSurface.create_from_png(f"{ICONS}/{name}.png")
+        except (OSError, cairo.Error):
+            return Gtk.Label()
+        z = 3
+        surf = cairo.ImageSurface(cairo.FORMAT_ARGB32, img.get_width() * z, img.get_height() * z)
+        cr = cairo.Context(surf)
+        cr.scale(z, z)
+        cr.set_source_surface(img, 0, 0)
+        cr.get_source().set_filter(cairo.FILTER_NEAREST)
+        cr.paint()
+        return Gtk.Image.new_from_pixbuf(Gdk.pixbuf_get_from_surface(surf, 0, 0, surf.get_width(), surf.get_height()))
+
+    picked = {}
+    win = Gtk.Window(title="External Controller")
+    win.set_default_size(640, 440)
+    win.connect("destroy", Gtk.main_quit)
+    box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12, margin=14)
+    win.add(box)
+    head = Gtk.Label(xalign=0)
+    head.set_markup("<span size='x-large' weight='bold'>External Controller</span>\n"
+                    "<small>Use the handheld as a game controller for a PC or phone.</small>")
+    box.pack_start(head, False, False, 0)
+    row = Gtk.Box(spacing=12, homogeneous=True)
+    box.pack_start(row, True, True, 0)
+    for mode, ic, title, text in (
+            ("bt", "inputmode-bt", "Bluetooth", "PC or phone. Pair \"Handtop Gamepad\" once;\nit reconnects by itself."),
+            ("usb", "inputmode-wired", "USB cable", "PC: shows up as an Xbox 360 controller.\nRight USB-C port (OTG2/DC) only.")):
+        b = Gtk.Button()
+        v = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10, margin=10)
+        v.pack_start(icon(ic), True, True, 0)
+        lab = Gtk.Label(justify=Gtk.Justification.CENTER)
+        lab.set_markup(f"<span size='large' weight='bold'>{title}</span>\n<small>{text}</small>")
+        v.pack_start(lab, False, False, 0)
+        b.add(v)
+        b.connect("clicked", lambda _b, m=mode: (picked.update(mode=m), win.destroy()))
+        row.pack_start(b, True, True, 0)
+    foot = Gtk.Label(xalign=0, wrap=True, max_width_chars=60)
+    foot.set_markup("<small>Select + Start + L1 + R1 ends the mode. One connection at a time.</small>")
+    box.pack_start(foot, False, False, 0)
+    win.show_all()
+    Gtk.main()
+    return start(picked["mode"]) if "mode" in picked else 0
+
+
+if __name__ == "__main__":
+    arg = sys.argv[1] if len(sys.argv) > 1 else ""
+    if arg in SERVICES:
+        sys.exit(start(arg))
+    for m, u in SERVICES.items():
+        if active(u):
+            notify(NAMES[m], "Already on. Select + Start + L1 + R1 to stop.", 4000)
+            sys.exit(0)
+    sys.exit(choose())
