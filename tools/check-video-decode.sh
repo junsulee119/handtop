@@ -100,6 +100,33 @@ fi
 grep -aE 'Using hardware decoding|dmabuf interop|Using software decoding' "$T/mpv-zerocopy.log" \
   | head -3 | sed 's/^/        /'
 
+# A picture whose width is not a multiple of 64 is the case the driver's
+# 64-byte stride exists for: Mali only imports linear surfaces whose stride
+# and plane offsets are 64-byte aligned, so a 16-byte stride leaves panfrost
+# refusing every frame ("rejecting image due to unsupported offset or stride
+# alignment") and the video area blue. See docs/video-decode.md.
+echo
+echo "zero-copy at an unaligned width (416):"
+ODD="$T/odd416.mp4"
+if ffmpeg -hide_banner -nostdin -v error -f lavfi -i testsrc2=size=416x234:rate=24 \
+       -t 1 -c:v libx264 -pix_fmt yuv420p "$ODD" -y 2>/dev/null && [ -s "$ODD" ]; then
+  timeout 90 mpv --hwdec=drm --vo=gpu --gpu-context=wayland --no-audio --frames=30 \
+        --msg-level=all=info -- "$ODD" > "$T/mpv-odd.log" 2>&1
+  grep -qa 'Using hardware decoding (drm' "$T/mpv-odd.log" \
+    && chk "416-wide file decodes on the VPU" 0 \
+    || chk "416-wide file decodes on the VPU" 1
+  if grep -qaE 'rejecting image due to unsupported offset|Mapping hardware decoded surface failed' \
+       "$T/mpv-odd.log"; then
+    chk "panfrost imports the 416-wide frame (64-byte stride)" 1
+    grep -aoE 'rejecting image due to unsupported offset or stride alignment|Mapping hardware decoded surface failed' \
+      "$T/mpv-odd.log" | sort -u | head -2 | sed 's/^/        /'
+  else
+    chk "panfrost imports the 416-wide frame (64-byte stride)" 0
+  fi
+else
+  echo "  skip  416-wide check (no libx264 to make the test file)"
+fi
+
 echo
 [ $fail -eq 0 ] && echo "RESULT: VPU path OK" || echo "RESULT: VPU path NOT working (see docs/video-decode.md)"
 exit $fail
