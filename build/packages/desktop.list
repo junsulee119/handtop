@@ -17,6 +17,11 @@ wlogout
 mako-notifier
 swaybg
 xdg-utils
+# GIO maps a content type to an application only with both of these: the MIME
+# database and the desktop-file cache (build/05-configure-base.sh refreshes
+# them). Without them a fresh home has no handler for a video file.
+shared-mime-info
+desktop-file-utils
 wl-clipboard
 wlrctl
 grim

@@ -89,7 +89,7 @@ Selection rule: light apps for 1 GB RAM; Qt apps preferred where equal, since mo
 | Clipboard | `wl-clipboard` | Required by L3/R3 copy/paste |
 | Brightness / volume | `brightnessctl`, `wireplumber` (`wpctl`) | Used by F + Vol and Vol keys; the pop-up bar is Handtop's own `rg35xxh-osd` (`src/osd`: plain C Wayland client, ~2 MB, built by `build/07b-osd.sh`) |
 | Screenshots | `grim`, `slurp` | |
-| Viewers | `imv` (images), `qpdfview` (PDF), `mpv` (video, CPU decode) | |
+| Viewers | `imv` (images), `qpdfview` (PDF), `mpv` (video, VPU decode — see [video-decode.md](video-decode.md)) | |
 | Archives | `xarchiver` | |
 | System | `htop`, `git`, `zram-tools`, `systemd-timesyncd` | zram = compressed RAM swap |
 | Fonts | `fonts-noto-core`, `fonts-noto-cjk`, `fonts-noto-color-emoji` | CJK and emoji rendering |
@@ -97,6 +97,23 @@ Selection rule: light apps for 1 GB RAM; Qt apps preferred where equal, since mo
 Locale `en_US.UTF-8`, timezone UTC (change with `sudo timedatectl set-timezone Area/City`).
 
 Heavy web browsing is the expected weak point (1 GB RAM).
+
+### File associations
+
+`/usr/local/share/applications/mpv.desktop` is a full entry — `Exec=mpv -- %U`,
+an icon, and the video and audio types it handles — with `NoDisplay=true`: it
+is the handler for those types and stays out of the drawer.
+
+Two caches decide whether GIO knows that:
+
+- `/usr/share/mime/mime.cache` (shared-mime-info) holds the content types,
+- `/usr/local/share/applications/mimeinfo.cache` (desktop-file-utils) holds
+  which application handles which type.
+
+Without them GIO can still guess the type of a file but cannot map it to an
+application, so Thunar has no handler and falls back to running a literal `%U`
+("missing exec"). The image build refreshes both (`build/05-configure-base.sh`);
+an in-place update of the overlay has to do the same.
 
 ## Tailscale (added 2026-10-09)
 

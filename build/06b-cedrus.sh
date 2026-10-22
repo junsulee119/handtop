@@ -47,6 +47,13 @@ if [ ! -f "$T/.rg35xxh-patched" ]; then
   touch "$T/.rg35xxh-patched"
 fi
 
+# The 64-byte stride is what lets the GPU import the decoded picture
+# (docs/video-decode.md, "The blue video"): a 16-byte stride leaves panfrost
+# refusing every frame whose width is not a multiple of 64.
+grep -q "bytesperline = ALIGN(width, 64)" \
+  "$T/drivers/staging/media/sunxi/cedrus/cedrus_video.c" \
+  || die "the 64-byte stride patch did not apply (build/kernel/0002-cedrus-64-byte-stride.patch)"
+
 # 3. ROCKNIX's .config (from the KERNEL image) + the decoder as a module
 "$T/scripts/extract-ikconfig" "$ROCKNIX_EX/boot/KERNEL" > "$K/rocknix.config"
 cp "$K/rocknix.config" "$T/.config"

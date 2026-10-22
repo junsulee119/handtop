@@ -8,6 +8,18 @@ chroot_mount
 
 # Files we ship verbatim.
 rsync -a --chown=root:root --chmod=D755,F644 "$TOP/overlay/" "$ROOTFS/"
+
+# Desktop entries and MIME types.
+#
+# The overlay adds entries under /usr/local/share/applications. GIO only maps a
+# content type to an application when that directory has a mimeinfo.cache, and
+# without it a fresh home has no handler for a video file at all: Thunar falls
+# back to running a literal "%U" ("missing exec"). The shared-mime-info cache
+# (the other half) is missing in some images, which leaves GIO guessing content
+# types but unable to map them to applications.
+in_chroot "update-mime-database /usr/share/mime"
+in_chroot "update-desktop-database /usr/local/share/applications"
+in_chroot "update-desktop-database /usr/share/applications"
 # Executables in the overlay
 chmod 755 "$ROOTFS"/usr/local/sbin/* "$ROOTFS"/usr/local/bin/* 2>/dev/null || true
 chmod 0440 "$ROOTFS"/etc/sudoers.d/rg35xxh-* 2>/dev/null || true

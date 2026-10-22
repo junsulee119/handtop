@@ -25,6 +25,13 @@ KTOOLCHAIN_URL="https://developer.arm.com/-/media/Files/downloads/gnu/15.2.rel1/
 KTOOLCHAIN_SHA256="9a685b335bd709d683a8c782253c37e8c36c10e6924e59e39d4769b02132eb43"
 CMA_SIZE="256M"                    # contiguous memory for the decoder (no IOMMU, see docs/video-decode.md)
 
+# FFmpeg with the V4L2 request-API hwaccels (04c-v4l2-ffmpeg.sh): Kwiboo's tree, the same
+# patchset Moonlight embeds. Pinned commit of branch v4l2-request-n7.1.3, which is rebased on
+# FFmpeg n7.1.3 and reports the same libav ABI as Debian's ffmpeg 7.1.5, so nothing else is
+# rebuilt (mpv keeps working against the replaced libs).
+FFMPEG_V4L2REQ_URL="https://github.com/Kwiboo/FFmpeg"
+FFMPEG_V4L2REQ_PIN="fad85d9c76611c09b561167ab405c667a0dcdeb7"
+
 # Target system identity
 HOSTNAME_TARGET="rg35xxh"
 USER_NAME="rg"

@@ -1,0 +1,8 @@
+# Give the desktop user (group "video") access to the dma-buf heaps.
+#
+# The kernel creates /dev/dma_heap/* as root:root 0600, which blocks the
+# dmabuf allocations that the V4L2 request-API / hardware video-decode path
+# needs -- eg. ffmpeg logs "Unable to open any dma_heap device" and any
+# dmabuf-based hw path (mpv's drmprime interop, Wayland dmabuf) is unavailable.
+# Members of the "video" group can then open the heap devices.
+SUBSYSTEM=="dma_heap", GROUP="video", MODE="0660"
