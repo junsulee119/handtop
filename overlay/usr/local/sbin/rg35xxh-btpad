@@ -29,6 +29,7 @@ Started by the "BT Controller" app (rg35xxh-bt-controller) as rg35xxh-btpad.serv
 by itself when the daemon disconnects (Select + Start + L1 + R1), or if it never connects.
 Runs as root (registers a GATT application, an advertisement and a pairing agent with BlueZ).
 """
+import glob
 import grp
 import json
 import os
@@ -70,6 +71,13 @@ APPEARANCE_GAMEPAD = 0x03C4
 PROFILE = os.environ.get("RG35XXH_BTPAD_PROFILE", "xbox")   # "xbox" or "generic"
 XBOX_DEVICE_ID = "usb:045e:0b13:0509"        # Microsoft, Xbox Wireless Controller (model 1914), fw 5.9
 BT_CONF = "/etc/bluetooth/main.conf"
+# Connection interval asked for while BT Controller mode is on (units of 1.25 ms: 7.5-15 ms, like a
+# real Xbox controller). Windows otherwise picks 45 ms: ~22 link slots per second, so a moving
+# stick (more reports than that) queued up and lagged 0.1-0.3 s. As the peripheral, the kernel
+# asks the PC for this range right after connecting (L2CAP connection parameter update).
+# Windows 11 rejects the request at first but switches to 15 ms by itself moments later
+# (btmon, 2026-10-24): the lag is gone. Reports are paced to match (Pad.flush, 15 ms).
+LE_CONN_PARAMS = ["MinConnectionInterval = 6", "MaxConnectionInterval = 12", "ConnectionLatency = 0"]
 RUN_DIR = "/run/rg35xxh-btpad"
 DROPIN = "/run/systemd/system/bluetooth.service.d/50-rg35xxh-btpad.conf"
 BLUETOOTHD = "/usr/libexec/bluetooth/bluetoothd"
@@ -443,7 +451,9 @@ class Pad:
                 self.axes[code] = value
         if not self.pending:
             self.pending = True
-            GLib.timeout_add(8, self.flush)       # at most ~125 reports/s
+            GLib.timeout_add(15, self.flush)      # at most ~66 reports/s: one per link slot at the
+                                                  # slowest interval asked for (15 ms), so reports
+                                                  # never queue up; each carries the newest state
         return True
 
 
@@ -627,11 +637,31 @@ def bredr_enabled():
     return bool(cur) and "br/edr" in cur[0].split()
 
 
+def unblock_bt():
+    """Clear a soft rfkill block on Bluetooth. Switching the adapter off and on (BR/EDR off, the
+    Xbox identity restart) can make the Bluetooth tray applet (blueman) block the radio, after
+    which powering on fails ("Failed to set mode") and advertising is rejected."""
+    for d in glob.glob("/sys/class/rfkill/rfkill*"):
+        try:
+            with open(f"{d}/type") as f:
+                if f.read().strip() != "bluetooth":
+                    continue
+            with open(f"{d}/soft") as f:
+                if f.read().strip() == "0":
+                    continue
+            with open(f"{d}/soft", "w") as f:
+                f.write("0")
+            log("Bluetooth was blocked (rfkill): unblocked")
+        except OSError:
+            pass
+
+
 def set_bredr(on):
     btmgmt("power", "off")
     btmgmt("bredr", "on" if on else "off")
     if on:
         btmgmt("ssp", "on")          # dropped by switching BR/EDR off and on
+    unblock_bt()
     btmgmt("power", "on")
     log("classic Bluetooth", "on" if on else "off (BLE only while BT Controller mode is on)")
 
@@ -645,15 +675,21 @@ def xbox_identity(on):
                 lines = f.read().splitlines()
         except OSError:
             lines = []
-        lines = [ln for ln in lines if not re.match(r"\s*DeviceID\s*=", ln)]
-        out, done = [], False
+        lines = [ln for ln in lines
+                 if not re.match(r"\s*(DeviceID|MinConnectionInterval|MaxConnectionInterval|ConnectionLatency)\s*=", ln)]
+        out, done, le_done = [], False, False
         for ln in lines:
             out.append(ln)
             if not done and ln.strip() == "[General]":
                 out.append(f"DeviceID = {XBOX_DEVICE_ID}")
                 done = True
+            if not le_done and ln.strip() == "[LE]":
+                out += LE_CONN_PARAMS
+                le_done = True
         if not done:
             out = ["[General]", f"DeviceID = {XBOX_DEVICE_ID}", ""] + out
+        if not le_done:
+            out += ["", "[LE]"] + LE_CONN_PARAMS
         os.makedirs(RUN_DIR, exist_ok=True)
         with open(f"{RUN_DIR}/main.conf", "w") as f:
             f.write("# Written by rg35xxh-btpad for BT Controller mode (Xbox profile); removed afterwards.\n"
@@ -674,6 +710,7 @@ def xbox_identity(on):
         log("bluetoothd: original identity")
     subprocess.run(["systemctl", "daemon-reload"])
     subprocess.run(["systemctl", "restart", "bluetooth.service"])
+    unblock_bt()
     if on:                       # let bluetoothd bring the adapter up before we change its settings
         for _ in range(50):
             out = subprocess.run(["bluetoothctl", "show"], capture_output=True, text=True, timeout=5).stdout
@@ -685,6 +722,7 @@ def xbox_identity(on):
 
 
 def main():
+    unblock_bt()
     xbox = PROFILE == "xbox"
     if xbox:
         xbox_identity(True)
@@ -725,7 +763,16 @@ def run():
     adapter = bus.get_object(BLUEZ, adapter_path)
     props = dbus.Interface(adapter, PROP_IFACE)
     old_alias = props.Get(ADAPTER_IFACE, "Alias")
-    props.Set(ADAPTER_IFACE, "Powered", True)
+    for attempt in range(3):
+        unblock_bt()
+        try:
+            props.Set(ADAPTER_IFACE, "Powered", True)
+            break
+        except dbus.exceptions.DBusException as e:
+            if attempt == 2:
+                raise
+            log(f"power on failed ({e.get_dbus_message()}), retrying")
+            time.sleep(1)
     props.Set(ADAPTER_IFACE, "Pairable", True)
     props.Set(ADAPTER_IFACE, "Alias", NAME)
 
