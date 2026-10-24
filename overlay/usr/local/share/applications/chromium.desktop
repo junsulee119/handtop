@@ -1,0 +1,18 @@
+# Handtop: Chromium's own entry (/usr/share/applications/chromium.desktop) under the name
+# "Web Browser" in the app drawer. Same desktop id, so this copy replaces the package's one;
+# translations dropped, everything else unchanged.
+[Desktop Entry]
+Version=1.0
+Name=Web Browser
+GenericName=Web Browser
+Comment=Access the Internet (Chromium)
+Exec=/usr/bin/chromium %U
+Terminal=false
+X-MultipleArgs=false
+Type=Application
+Icon=chromium
+Categories=Network;WebBrowser;
+MimeType=text/html;text/xml;application/xhtml_xml;application/x-mimearchive;x-scheme-handler/http;x-scheme-handler/https;
+StartupWMClass=chromium
+StartupNotify=true
+Keywords=browser;internet;web;chromium;
