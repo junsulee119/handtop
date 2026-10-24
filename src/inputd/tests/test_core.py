@@ -326,3 +326,27 @@ if __name__ == "__main__":
             print("FAIL ", name, e)
     print(f"{len(tests) - failed}/{len(tests)} passed")
     sys.exit(1 if failed else 0)
+
+
+def test_osk_hold_a_repeats():
+    c = Core()
+    c.set_osk_visible(True)
+    assert c.button("a", True, 0) == [("osk", "press")]
+    out, t = run_ticks(c, 0, 0.45)
+    assert [a for a in out if a[0] == "osk"] == []            # not before the delay
+    out, t = run_ticks(c, t, 0.30)
+    reps = [a for a in out if a == ("osk", "repeat")]
+    assert 3 <= len(reps) <= 6                                # every 0.06 s after 0.5 s
+    assert c.button("a", False, t) == [("osk", "release")]
+    out, _ = run_ticks(c, t, 0.3)
+    assert ("osk", "repeat") not in out
+
+
+def test_osk_l2_is_shift_only_while_open():
+    c = Core()
+    c.set_osk_visible(True)
+    assert c.button("l2", True, 0) == [("osk", "shift")]
+    assert c.button("l2", False, 0.1) == []
+    c.set_osk_visible(False)
+    assert c.button("l2", True, 1) == []                     # default binding: none
+    assert c.button("l2", False, 1.1) == []
