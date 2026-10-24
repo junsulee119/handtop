@@ -14,6 +14,7 @@ Every call returns a list of actions (tuples):
   ("key", "KEY_ENTER", pressed)
   ("clipboard", "copy"|"paste")   daemon picks Ctrl(+Shift)+C/V depending on focused app
   ("osk", "toggle") / ("osk", "move", dx, dy) / ("osk", "press") / ("osk", "release")
+  / ("osk", "repeat") (A held on a key) / ("osk", "shift") (L2 while the keyboard is open)
   ("mode", "gamepad"|"desktop")
   ("pad_key", "BTN_A", value)     virtual Xbox-style pad (gamepad mode)
   ("pad_abs", "ABS_X", value)
@@ -42,6 +43,8 @@ DEFAULT_SETTINGS = {
                                    # handheld's (1080p: ~2.75x), 0 = same px/s everywhere
     "osk_repeat_delay": 0.40,
     "osk_repeat_interval": 0.09,
+    "osk_key_repeat_delay": 0.50,  # keyboard open, A held on a key: type it again after this
+    "osk_key_repeat_interval": 0.06,
     "vol_repeat_delay": 0.40,      # hold Vol (or F+Vol): repeat after this
     "vol_repeat_interval": 0.12,
 }
@@ -96,6 +99,8 @@ class Core:
         self.start_fired = False
         self.osk_pressed_button = None  # button that triggered the current OSK press
         self.osk_next_repeat = {}   # dpad dir -> next repeat time
+        self.osk_key_next = None    # next "repeat" while the OSK key (A) is held
+        self.osk_shift_button = None  # L2 pressed as Shift on the keyboard (its binding is skipped)
         self.vol_repeat = {}        # vol_up/vol_down -> [cmd, next repeat time]
         self.last_tick = None
         self.acc = [0.0, 0.0, 0.0, 0.0]   # sub-unit accumulators: x, y, wheel v, wheel h
@@ -161,7 +166,11 @@ class Core:
         osk_key = next((btn for btn, act in self.bind.items() if act == "click_left"), "a")
         if name == osk_key and self.osk_visible:
             self.osk_pressed_button = name
+            self.osk_key_next = t + self.s["osk_key_repeat_delay"]
             return [("osk", "press")]
+        if name == "l2" and self.osk_visible:
+            self.osk_shift_button = name
+            return [("osk", "shift")]
         return self._binding(name, True)
 
     def _release(self, name, t):
@@ -195,7 +204,11 @@ class Core:
             return []
         if self.osk_pressed_button and name == self.osk_pressed_button:
             self.osk_pressed_button = None
+            self.osk_key_next = None
             return [("osk", "release")]
+        if self.osk_shift_button and name == self.osk_shift_button:
+            self.osk_shift_button = None
+            return []
         return self._binding(name, False)
 
     # ------------------------------------------------------------------ tick
@@ -267,6 +280,11 @@ class Core:
                     dx, dy = _dpad_vector(d)
                     out.append(("osk", "move", dx, dy))
                     self.osk_next_repeat[d] = t + self.s["osk_repeat_interval"]
+            # A held on a key: type it again, like a real keyboard's key repeat.
+            if self.osk_pressed_button in self.held and self.osk_key_next is not None \
+                    and t >= self.osk_key_next:
+                out.append(("osk", "repeat"))
+                self.osk_key_next = t + self.s["osk_key_repeat_interval"]
         return out
 
     # --------------------------------------------------------------- helpers
@@ -356,6 +374,7 @@ class Core:
         self.combo_exit = False
         self.acc = [0.0, 0.0, 0.0, 0.0]
         self.osk_next_repeat.clear()
+        self.osk_key_next = None
         return [("mode", "desktop")]
 
     def _pad_button(self, name, pressed):

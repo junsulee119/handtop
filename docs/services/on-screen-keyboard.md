@@ -16,25 +16,31 @@ Design of the built-in on-screen keyboard (OSK). It is part of the input daemon 
 |---|---|
 | X | Show / hide the keyboard |
 | D-pad | Move the highlight (auto-repeat when held: 0.4 s delay, then every 0.09 s) |
-| A | Type the highlighted key (the button bound to `click_left`; A by default) |
+| A | Type the highlighted key (the button bound to `click_left`; A by default). Held: the key repeats after 0.5 s, every 0.06 s (not Shift / Ctrl / Alt / Hide), with the modifiers it was typed with |
+| L2 | Shift (same as the ⇧ key) while the keyboard is open; its desktop binding is skipped then |
 | L1 / R1 / R2 | Esc / Enter / Backspace (physical shortcuts still work while it is open) |
 | Left stick | Still moves the pointer; keys can also be clicked with the pointer |
 | Hide key | Same as X |
 
-Moving up/down keeps the horizontal position (picks the key whose centre is closest). Left/right wraps around within a row. The highlight starts on `g`.
+Moving up/down keeps the horizontal position (picks the key whose centre is closest) and wraps from the top row to the bottom row and back. Left/right wraps around within a row. The highlight starts on `g`.
+
+Keys that a shoulder button also types carry a small corner badge with that button's name (by default `L1` on Esc, `R1` on Enter, `L2` on ⇧, `R2` on ⌫), taken from the `[desktop]` bindings, so a remapped shoulder moves its badge.
 
 ## Layout
 
-Five rows, 12 columns (US):
+Five rows, 15 keys wide (US), staggered like a real keyboard: each row starts a little further right (widths in quarter keys, every row 60). Enter and ⌫ are where a real keyboard has them (wide), Ctrl sits where Caps Lock is (HHKB style), ↑ is right above ↓ with Esc beside it, Hide is next to Alt.
 
 ```
-`  1  2  3  4  5  6  7  8  9  0  ⌫
-Tab q  w  e  r  t  y  u  i  o  p  -
-a  s  d  f  g  h  j  k  l  ;  '  \
-⇧  z  x  c  v  b  n  m  ,  .  /  ↑
-Ctrl Alt [ Space ×3 ] =  [  ]  ←  ↓  →  Hide
+`  1  2  3  4  5  6  7  8  9  0  -  =    ⌫
+Tab   q  w  e  r  t  y  u  i  o  p  [  ]  \
+Ctrl    a  s  d  f  g  h  j  k  l  ;  '  Enter
+⇧          z  x  c  v  b  n  m  ,  .  /  ↑  Esc
+Alt  Hide  [        Space        ]  ←  ↓  →
 ```
 
+Character keys (letters, digits, symbols, Space) are brighter; special keys (Esc, Tab, Enter, ⌫, ⇧, Ctrl, Alt, arrows, Hide) are darker and bluer.
+
+- **Press trace:** a typed key goes dark (pressed in, unlike the bright highlight) and fades back over 0.35 s when it comes up, so each press is visible even when the highlight has already moved on. With A it stays pressed in while A is held (also during key repeat); with L1 / R1 / R2 the key they type (Esc / Enter / ⌫ by default) does the same while the shoulder button is held; a pointer click flashes it briefly. L2 shows as Shift latching (amber).
 - **Shift / Ctrl / Alt are one-shot (latched):** press once, they apply to the next key, then release. Latched keys are shown in amber; Shift also switches the labels to their shifted form (`1` → `!`, `a` → `A`).
 - Ctrl+C etc. work by latching Ctrl, then typing the letter.
 
@@ -55,9 +61,10 @@ Switching is done by `rg35xxh-display osk on|off` (see `desktop.md` → External
 
 | | Handheld (strip) | Keyboard panel (monitor-only) |
 |---|---|---|
-| Key height | 30 px min | ~92 px (5 rows fill 480 px) |
-| Letters / symbols | 13 px Noto Sans | 24 px Noto Sans semi-bold |
-| Word keys (Tab, Ctrl, Alt, Space, Hide) | 13 px | 14 px semi-bold (so 12 columns fit 640 px) |
+| Key height | 30 px min (strip ~170 px) | ~92 px (5 rows fill 480 px) |
+| Letters / symbols | 17 px Noto Sans | 30 px Noto Sans semi-bold |
+| Word keys (Esc, Tab, Enter, Ctrl, Alt, Space, Hide) | 12 px semi-bold | 12 px semi-bold (15 keys must fit 640 px; ⌫ is 22 px on the panel for the same reason) |
+| Shoulder badges | 8 px semi-bold, top-right | 12 px |
 | Corners / gaps | 5 px / 1 px | 8 px / 2 px |
 
 Colours follow the Handtop theme (`~/.config/rg35xxh/theme`, re-read every time the keyboard is shown, so a theme switch needs no restart; `PALETTES` in `osk.py`):
@@ -65,7 +72,10 @@ Colours follow the Handtop theme (`~/.config/rg35xxh/theme`, re-read every time 
 | | Dark | Light |
 |---|---|---|
 | Background | `#141820` | `#d5dbe5` |
-| Keys / border / text | `#2b3240` / `#3a4456` / `#e8eaee` | `#f8f9fb` / `#b9c1ce` / `#2b303b` |
+| Character keys (letters, digits, symbols, Space): key / border / text | `#2e3544` / `#3e4859` / `#eef0f4` | `#ffffff` / `#b9c1ce` / `#22262e` |
+| Special keys (Tab, ⇧, Ctrl, Alt, ⌫, arrows, Hide): darker, bluer | `#1f2a3d` / `#2f4266` / `#a9c4f2` | `#dbe4f3` / `#a3b4d2` / `#2c4a7c` |
+| Shoulder badge | `#8fb4ff` | `#3d68b0` |
+| Press trace (dark, fades out) | `#0c1018`, border `#5b7bb0`, text `#8fb4ff` | `#9fadc4`, border `#3d68b0`, text `#14233f` |
 | Highlight (blue) | `#3d5a8a`, border `#8fb4ff` | `#c9dbff`, border `#3d68b0`, text `#1a2a4a` |
 | Latched modifier (amber) | `#6a4d1f`; highlighted `#8a6a2f` / `#ffd28f` | `#ffe2a8`; highlighted `#ffd28f` / `#8a6a2f` |
 
@@ -81,7 +91,7 @@ Blue and amber match the volume and brightness pop-up bars.
 ## Ideas (not implemented)
 
 - Bigger keys on the handheld-only strip, or a size setting in `input.conf`.
-- Hold a key for its shifted character; key repeat while A is held (useful for ⌫ and arrows).
+- Hold a key for its shifted character.
 - Extra row or page with F1–F12, Esc, Home/End, PgUp/PgDn, Del.
 - Remember the last highlighted key between shows.
 - Non-Latin layouts (would need an input method; currently out of scope).

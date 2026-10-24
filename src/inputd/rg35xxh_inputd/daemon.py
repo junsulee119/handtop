@@ -359,7 +359,7 @@ class Daemon:
     def _init_osk(self):
         try:
             from . import osk
-            self.osk = osk.OnScreenKeyboard(self._type_combo)
+            self.osk = osk.OnScreenKeyboard(self._type_combo, self.core.bind)
         except Exception as e:  # no display / missing GTK layer shell
             log.warning("on-screen keyboard unavailable: %s", e)
 
@@ -477,6 +477,8 @@ class Daemon:
             elif kind == "key":
                 self.keyboard.write(E.EV_KEY, E.ecodes[a[1]], 1 if a[2] else 0)
                 self.keyboard.syn()
+                if self.osk and self.osk.visible:       # L1 / R1 / R2: show it on the keyboard too
+                    self.osk.key_state(a[1], a[2])
             elif kind == "clipboard":
                 self._clipboard(a[1])
             elif kind == "osk" and not self.osk:
@@ -492,6 +494,10 @@ class Daemon:
                     self.osk.press_selected()
                 elif a[1] == "release":
                     self.osk.release_selected()
+                elif a[1] == "repeat":
+                    self.osk.repeat_selected()
+                elif a[1] == "shift":
+                    self.osk.toggle_shift()
             elif kind == "mode":
                 if a[1] == "gamepad":
                     if self.osk and self.osk.visible:
