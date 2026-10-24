@@ -6,7 +6,7 @@ sharp in the app drawer).
                                diagonally, rainbow stripes) with BT waves, a USB plug and an RG35XX H.
   app-display.png              Display: a monitor with an HDMI cable to an RG35XX H (no glass, fills the grid).
   app-ssh.png                  Enable SSH: a terminal saying "SSH" (white) over a ">_" prompt, and a key (no glass).
-  (terminal_icon, files_icon, notepad_icon, browser_icon, monitor_icon, code_icon: default-app icons, written by gen_default_app_icons.py)
+  (terminal_icon, files_icon, notepad_icon, browser_icon, monitor_icon, code_icon, pdf_icon: default-app icons, written by gen_default_app_icons.py)
   app-recenter.png             Re-center sticks: a stick well seen from above with a crosshair, a faint
                                drifted knob up-right and a blue arrow back to the knob in the centre (no glass).
   All are 27x27 art x2 + 1 px margin = exactly 56x56, the app drawer's icon size.
@@ -412,6 +412,55 @@ def code_icon(light=False):
                 g[(x + i, 6 + row * 2)] = c
             x += n + 1
     return _tile(_draw(g, colors, SHADE_LIGHT if light else SHADE))
+
+
+# ---- PDF Viewer (default app: qpdfview) -----------------------------------------------------
+# A white page with a folded corner, three grey text lines and a red "PDF" band across the bottom.
+# The light version outlines the page so it stands out on the light background. Written under the
+# icon name "qpdfview" by gen_default_app_icons.py.
+PDF_COLORS = {"P": (240, 242, 246), "p": (196, 203, 215), "F": (214, 220, 230), "L": (150, 158, 172),
+              "R": (214, 64, 58), "W": (255, 255, 255), "O": (138, 147, 163)}
+PDF_GLYPH = {"P": ["###.", "#..#", "###.", "#...", "#..."],
+             "D": ["###.", "#..#", "#..#", "#..#", "###."],
+             "F": ["###", "#..", "##.", "#..", "#.."]}
+
+
+def pdf_icon(light=False):
+    g = {}
+    w, h, fold, x0, y0 = 19, 24, 6, 4, 1                  # page, folded top-right corner
+    for y in range(h):
+        for x in range(w):
+            if y < fold and x > w - fold + y:
+                continue
+            if y < fold and x >= w - fold:
+                c = "p" if x == w - fold + y else "F"     # the fold
+            else:
+                c = "p" if x == w - 1 or y == h - 1 else "P"
+            g[(x0 + x, y0 + y)] = c
+    if light:                                             # outline around the page
+        page = set(g)
+        for (x, y) in list(page):
+            for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+                n = (x + dx, y + dy)
+                if n not in page and 0 <= n[0] < EN and 0 <= n[1] < EN:
+                    g[n] = "O"
+    for y, n in ((9, 12), (11, 10), (13, 12)):            # text lines
+        for x in range(n):
+            g[(7 + x, y)] = "L"
+    for y in range(16, 23):                               # red band, wider than the page
+        for x in range(2, 21):
+            g[(x, y)] = "R"
+    x = 5
+    for ch in "PDF":
+        for j, row in enumerate(PDF_GLYPH[ch]):
+            for i, v in enumerate(row):
+                if v == "#":
+                    g[(x + i, 17 + j)] = "W"
+        x += len(PDF_GLYPH[ch][0]) + 1
+    im = Image.new("RGBA", (EN, EN), (0, 0, 0, 0))
+    for xy, c in g.items():
+        im.putpixel(xy, PDF_COLORS[c] + (255,))
+    return _tile(im)
 
 
 # ---- Re-center sticks -----------------------------------------------------------------------

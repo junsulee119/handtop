@@ -1,0 +1,24 @@
+# Handtop: qpdfview's own entry (/usr/share/applications/qpdfview.desktop) under the name
+# "PDF Viewer" in the app drawer. Same desktop id, so this copy replaces the package's one;
+# translations dropped, everything else unchanged.
+[Desktop Entry]
+Type=Application
+Terminal=false
+Name=PDF Viewer
+Icon=qpdfview
+GenericName=Document Viewer
+Comment=A tabbed document viewer using Qt and the Poppler library (qpdfview)
+Categories=Viewer;Office;
+Keywords=viewer;document;presentation;pdf;ps;djvu;qpdfview;
+TryExec=qpdfview
+Exec=qpdfview --unique %F
+MimeType=application/pdf;application/x-pdf;text/pdf;text/x-pdf;image/pdf;image/x-pdf;application/postscript;image/vnd.djvu;image/x-djvu;
+Actions=ChooseInstance;NonUniqueInstance;
+
+[Desktop Action ChooseInstance]
+Name=Choose instance
+Exec=qpdfview --unique --choose-instance %F
+
+[Desktop Action NonUniqueInstance]
+Name=Non-unique instance
+Exec=qpdfview %F
