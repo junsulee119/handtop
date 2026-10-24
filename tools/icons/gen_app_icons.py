@@ -6,7 +6,7 @@ sharp in the app drawer).
                                diagonally, rainbow stripes) with BT waves, a USB plug and an RG35XX H.
   app-display.png              Display: a monitor with an HDMI cable to an RG35XX H (no glass, fills the grid).
   app-ssh.png                  Enable SSH: a terminal saying "SSH" (white) over a ">_" prompt, and a key (no glass).
-  (terminal_icon, files_icon, notepad_icon: default-app icons, written by gen_default_app_icons.py)
+  (terminal_icon, files_icon, notepad_icon, browser_icon: default-app icons, written by gen_default_app_icons.py)
   app-recenter.png             Re-center sticks: a stick well seen from above with a crosshair, a faint
                                drifted knob up-right and a blue arrow back to the knob in the centre (no glass).
   All are 27x27 art x2 + 1 px margin = exactly 56x56, the app drawer's icon size.
@@ -306,6 +306,58 @@ def notepad_icon(light=False):
     im = Image.new("RGBA", (EN, EN), (0, 0, 0, 0))
     for xy, c in g.items():
         im.putpixel(xy, NOTEPAD_COLORS[c] + (255,))
+    return _tile(im)
+
+
+# ---- Web Browser (default app: Chromium) ----------------------------------------------------
+# A blue wireframe globe (latitude / longitude lines, shaded lower right, a small highlight) with a
+# mouse pointer over its lower right. Brand-free, one set for both themes. Written under the icon
+# name "chromium" by gen_default_app_icons.py.
+GLOBE_COLORS = {"O": (58, 120, 214), "o": (40, 86, 164), "L": (159, 195, 255), "H": (214, 230, 255),
+                "K": (22, 26, 34), "P": (240, 242, 246)}
+POINTER = ["K.......",
+           "KK......",
+           "KPK.....",
+           "KPPK....",
+           "KPPPK...",
+           "KPPPPK..",
+           "KPPPPPK.",
+           "KPPPKKKK",
+           "KPKKPK..",
+           "KK.KPK..",
+           "K...KPK.",
+           "....KPK.",
+           ".....KK."]
+
+
+def _globe(g, cx, cy, r):
+    for y in range(EN):
+        for x in range(EN):
+            dx, dy = x + 0.5 - cx, y + 0.5 - cy
+            d = (dx * dx + dy * dy) ** 0.5
+            if d > r:
+                continue
+            c = "o" if d > r - 1.2 or dx + dy > r * 0.95 else "O"
+            if d < r - 1:
+                if any(abs(dy / r - lat) < 0.06 for lat in (-0.5, 0.0, 0.5)):
+                    c = "L"
+                w = max(r * r - dy * dy, 0) ** 0.5
+                if any(abs(abs(dx) - k * w) < 0.55 for k in (0.0, 0.55)):
+                    c = "L"
+            g[(x, y)] = c
+    hx, hy = int(cx - r * 0.55), int(cy - r * 0.55)
+    for xy in ((hx, hy), (hx + 1, hy), (hx, hy + 1)):
+        g[xy] = "H"
+
+
+def browser_icon(light=False):
+    g = {}
+    _globe(g, 12.5, 12.5, 11.5)
+    _put(g, POINTER, 15, 13)
+    im = Image.new("RGBA", (EN, EN), (0, 0, 0, 0))
+    for (x, y), c in g.items():
+        if 0 <= x < EN and 0 <= y < EN:
+            im.putpixel((x, y), GLOBE_COLORS[c] + (255,))
     return _tile(im)
 
 

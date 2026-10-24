@@ -12,6 +12,7 @@ scalable directory; the PNG is used at its own size there.
   foot         Terminal: the Enable SSH terminal without text and key, with a big ">_" prompt
   org.xfce.thunar  Files (Thunar): a blue folder with a sheet of paper, one set for both themes
   org.xfce.mousepad  Text Editor (Mousepad): a yellow legal pad, one set for both themes
+  chromium           Web Browser (Chromium): a wireframe globe with a mouse pointer, one set for both themes
 
 Window title bars: labwc looks the icon up at exactly 22 px, where the package's own 22x22 file
 would win over our scalable one, so a 22x22 copy (smoothly scaled down from the 56 px icon, dark set
@@ -24,10 +25,10 @@ import sys
 
 from PIL import Image
 
-from gen_app_icons import files_icon, notepad_icon, terminal_icon
+from gen_app_icons import browser_icon, files_icon, notepad_icon, terminal_icon
 
 ICONS = {"foot": terminal_icon, "org.xfce.thunar": files_icon,
-         "org.xfce.mousepad": notepad_icon}
+         "org.xfce.mousepad": notepad_icon, "chromium": browser_icon}
 
 
 if __name__ == "__main__":
