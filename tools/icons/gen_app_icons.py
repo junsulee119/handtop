@@ -6,6 +6,7 @@ sharp in the app drawer).
                                diagonally, rainbow stripes) with BT waves, a USB plug and an RG35XX H.
   app-display.png              Display: a monitor with an HDMI cable to an RG35XX H (no glass, fills the grid).
   app-ssh.png                  Enable SSH: a terminal saying "SSH" (white) over a ">_" prompt, and a key (no glass).
+  (terminal_icon: the default terminal's icon, written by gen_default_app_icons.py)
   app-recenter.png             Re-center sticks: a stick well seen from above with a crosshair, a faint
                                drifted knob up-right and a blue arrow back to the knob in the centre (no glass).
   All are 27x27 art x2 + 1 px margin = exactly 56x56, the app drawer's icon size.
@@ -215,6 +216,28 @@ def ssh_icon(light=False):
     for dx, dy in ((0, 0), (1, 1), (0, 2), (3, 2), (4, 2)):   # small ">_" prompt
         g[(5 + dx, 15 + dy)] = "G"
     _put(g, SSH_KEY, 17, 18)
+    return _tile(_draw(g, colors, SHADE_LIGHT if light else SHADE))
+
+
+# ---- Terminal (default app: foot) ------------------------------------------------------------
+# The Enable SSH terminal without its text and key: a big ">_" prompt. Written under the icon name
+# "foot" by gen_default_app_icons.py (not into the Handtop app icon folder).
+TERM_PROMPT = ["#.......", "##......", ".##.....", "..##....", ".##.....", "##......", "#......."]
+
+
+def terminal_icon(light=False):
+    colors = dict(COLORS_LIGHT if light else COLORS)
+    colors.update(D=(22, 26, 34), G=(232, 234, 238), r=(226, 70, 70), y=(240, 200, 60),
+                  g=(80, 190, 100), T=(79, 88, 105) if light else (200, 205, 214))
+    g = {}
+    _put(g, SSH_TERM, 1, 3)
+    for y, row in enumerate(TERM_PROMPT):                # ">" 4x7, 2 px strokes
+        for x, c in enumerate(row):
+            if c == "#":
+                g[(6 + x, 8 + y)] = "G"
+    for x in range(11, 18):                              # "_" 7x2
+        for y in (13, 14):
+            g[(x, y)] = "G"
     return _tile(_draw(g, colors, SHADE_LIGHT if light else SHADE))
 
 

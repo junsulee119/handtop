@@ -1,0 +1,13 @@
+# Handtop: foot's own entry (/usr/share/applications/foot.desktop) under the name "Terminal" in the
+# app drawer. Same desktop id, so this copy replaces the package's one; everything else unchanged.
+[Desktop Entry]
+Type=Application
+Exec=foot
+Icon=foot
+Terminal=false
+Categories=System;TerminalEmulator;
+Keywords=shell;prompt;command;commandline;foot;
+
+Name=Terminal
+GenericName=Terminal
+Comment=A wayland native terminal emulator (foot)
