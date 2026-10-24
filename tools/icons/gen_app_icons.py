@@ -6,7 +6,7 @@ sharp in the app drawer).
                                diagonally, rainbow stripes) with BT waves, a USB plug and an RG35XX H.
   app-display.png              Display: a monitor with an HDMI cable to an RG35XX H (no glass, fills the grid).
   app-ssh.png                  Enable SSH: a terminal saying "SSH" (white) over a ">_" prompt, and a key (no glass).
-  (terminal_icon, files_icon, notepad_icon, browser_icon: default-app icons, written by gen_default_app_icons.py)
+  (terminal_icon, files_icon, notepad_icon, browser_icon, monitor_icon: default-app icons, written by gen_default_app_icons.py)
   app-recenter.png             Re-center sticks: a stick well seen from above with a crosshair, a faint
                                drifted knob up-right and a blue arrow back to the knob in the centre (no glass).
   All are 27x27 art x2 + 1 px margin = exactly 56x56, the app drawer's icon size.
@@ -359,6 +359,31 @@ def browser_icon(light=False):
         if 0 <= x < EN and 0 <= y < EN:
             im.putpixel((x, y), GLOBE_COLORS[c] + (255,))
     return _tile(im)
+
+
+# ---- System Monitor (default app: htop) -----------------------------------------------------
+# The Terminal frame (htop runs in a terminal) with a green heartbeat line across the screen.
+# Dark and light versions like Terminal. Written under the icon name "htop" by
+# gen_default_app_icons.py.
+PULSE = [(3, 12), (8, 12), (10, 7), (12, 16), (14, 10), (15, 12), (23, 12)]   # polyline on the screen
+
+
+def _line(g, a, b, c):
+    (x0, y0), (x1, y1) = a, b
+    n = max(abs(x1 - x0), abs(y1 - y0))
+    for i in range(n + 1):
+        g[(round(x0 + (x1 - x0) * i / n), round(y0 + (y1 - y0) * i / n))] = c
+
+
+def monitor_icon(light=False):
+    colors = dict(COLORS_LIGHT if light else COLORS)
+    colors.update(D=(22, 26, 34), P=(80, 200, 110), r=(226, 70, 70), y=(240, 200, 60),
+                  g=(80, 190, 100), T=(79, 88, 105) if light else (200, 205, 214))
+    g = {}
+    _put(g, SSH_TERM, 1, 3)
+    for a, b in zip(PULSE, PULSE[1:]):
+        _line(g, a, b, "P")
+    return _tile(_draw(g, colors, SHADE_LIGHT if light else SHADE))
 
 
 # ---- Re-center sticks -----------------------------------------------------------------------
