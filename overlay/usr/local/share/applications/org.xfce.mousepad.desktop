@@ -1,0 +1,21 @@
+# Handtop: Mousepad's own entry (/usr/share/applications/org.xfce.mousepad.desktop) under the name
+# "Text Editor" in the app drawer. Same desktop id, so this copy replaces the package's one;
+# translations dropped, everything else unchanged.
+[Desktop Entry]
+Version=1.0
+Name=Text Editor
+Comment=Simple Text Editor (Mousepad)
+GenericName=Text Editor
+Exec=mousepad %U
+Icon=org.xfce.mousepad
+Terminal=false
+StartupNotify=true
+Type=Application
+Categories=Utility;TextEditor;GTK;
+MimeType=text/plain;application/x-zerosize;
+Actions=preferences;
+Keywords=Edit;Text;Simple;XFCE;Lightweight;Fast;mousepad;notepad;
+
+[Desktop Action preferences]
+Name=Text Editor Preferences
+Exec=mousepad --preferences

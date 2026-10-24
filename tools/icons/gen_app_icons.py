@@ -6,7 +6,7 @@ sharp in the app drawer).
                                diagonally, rainbow stripes) with BT waves, a USB plug and an RG35XX H.
   app-display.png              Display: a monitor with an HDMI cable to an RG35XX H (no glass, fills the grid).
   app-ssh.png                  Enable SSH: a terminal saying "SSH" (white) over a ">_" prompt, and a key (no glass).
-  (terminal_icon, files_icon: default-app icons, written by gen_default_app_icons.py)
+  (terminal_icon, files_icon, notepad_icon: default-app icons, written by gen_default_app_icons.py)
   app-recenter.png             Re-center sticks: a stick well seen from above with a crosshair, a faint
                                drifted knob up-right and a blue arrow back to the knob in the centre (no glass).
   All are 27x27 art x2 + 1 px margin = exactly 56x56, the app drawer's icon size.
@@ -266,6 +266,46 @@ def files_icon(light=False):
     im = Image.new("RGBA", (EN, EN), (0, 0, 0, 0))
     for xy, c in g.items():
         im.putpixel(xy, FOLDER_COLORS[c] + (255,))
+    return _tile(im)
+
+
+# ---- Text Editor (default app: Mousepad) ----------------------------------------------------
+# A yellow legal pad: dark binding with spiral rings on top, ruled lines and a red margin line,
+# shaded right and bottom edges. One set for both themes. Written under the icon name
+# "org.xfce.mousepad" by gen_default_app_icons.py.
+NOTEPAD_COLORS = {"Y": (250, 214, 92), "y": (214, 172, 56), "L": (198, 160, 62), "M": (222, 92, 80),
+                  "B": (118, 58, 50), "b": (84, 40, 36), "R": (200, 205, 214), "r": (128, 137, 152)}
+NOTEPAD_W = 19
+
+
+def _notepad_rows():
+    rows = []
+    rings = "".join("R" if x in (3, 7, 11, 15) else "." for x in range(NOTEPAD_W))
+    rows.append(rings)                                            # rings above the binding
+    for i in range(3):                                            # binding, rings crossing it
+        band = "B" if i < 2 else "b"
+        rows.append("".join("r" if x in (3, 7, 11, 15) and i == 0 else band for x in range(NOTEPAD_W)))
+    for y in range(20):                                           # paper
+        row = []
+        for x in range(NOTEPAD_W):
+            if x == NOTEPAD_W - 1 or y == 19:
+                row.append("y")
+            elif x == 3:
+                row.append("M")
+            elif y % 3 == 2:
+                row.append("L")
+            else:
+                row.append("Y")
+        rows.append("".join(row))
+    return rows
+
+
+def notepad_icon(light=False):
+    g = {}
+    _put(g, _notepad_rows(), 4, 2)
+    im = Image.new("RGBA", (EN, EN), (0, 0, 0, 0))
+    for xy, c in g.items():
+        im.putpixel(xy, NOTEPAD_COLORS[c] + (255,))
     return _tile(im)
 
 
