@@ -10,15 +10,16 @@ files and .desktop entries stay untouched:
 scalable directory; the PNG is used at its own size there.
 
   foot         Terminal: the Enable SSH terminal without text and key, with a big ">_" prompt
+  org.xfce.thunar  Files (Thunar): a blue folder with a sheet of paper, one set for both themes
 
 Usage: python3 gen_default_app_icons.py <icons folder>    (e.g. overlay/usr/local/share/icons)
 """
 import os
 import sys
 
-from gen_app_icons import terminal_icon
+from gen_app_icons import files_icon, terminal_icon
 
-ICONS = {"foot": terminal_icon}
+ICONS = {"foot": terminal_icon, "org.xfce.thunar": files_icon}
 
 
 if __name__ == "__main__":
