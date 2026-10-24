@@ -6,7 +6,7 @@ sharp in the app drawer).
                                diagonally, rainbow stripes) with BT waves, a USB plug and an RG35XX H.
   app-display.png              Display: a monitor with an HDMI cable to an RG35XX H (no glass, fills the grid).
   app-ssh.png                  Enable SSH: a terminal saying "SSH" (white) over a ">_" prompt, and a key (no glass).
-  (terminal_icon, files_icon, notepad_icon, browser_icon, monitor_icon: default-app icons, written by gen_default_app_icons.py)
+  (terminal_icon, files_icon, notepad_icon, browser_icon, monitor_icon, code_icon: default-app icons, written by gen_default_app_icons.py)
   app-recenter.png             Re-center sticks: a stick well seen from above with a crosshair, a faint
                                drifted knob up-right and a blue arrow back to the knob in the centre (no glass).
   All are 27x27 art x2 + 1 px margin = exactly 56x56, the app drawer's icon size.
@@ -383,6 +383,34 @@ def monitor_icon(light=False):
     _put(g, SSH_TERM, 1, 3)
     for a, b in zip(PULSE, PULSE[1:]):
         _line(g, a, b, "P")
+    return _tile(_draw(g, colors, SHADE_LIGHT if light else SHADE))
+
+
+# ---- Code Editor (default app: micro) -------------------------------------------------------
+# The Terminal frame with short, indented lines of syntax-coloured code. Dark and light versions
+# like Terminal. Written under the icon name "micro" by gen_default_app_icons.py (the overlay's
+# micro.desktop names it; the package points at an SVG file instead of an icon name).
+CODE_LINES = [(0, [("a", 4), ("b", 6)]),            # (indent, [(colour, length), ...]), one every 2 rows
+              (1, [("b", 3), ("G", 2), ("e", 7)]),
+              (1, [("f", 5), ("G", 3)]),
+              (2, [("e", 9)]),
+              (1, [("a", 3), ("b", 5)]),
+              (0, [("G", 2)])]
+
+
+def code_icon(light=False):
+    colors = dict(COLORS_LIGHT if light else COLORS)
+    colors.update(D=(22, 26, 34), G=(232, 234, 238), r=(226, 70, 70), y=(240, 200, 60),
+                  g=(80, 190, 100), T=(79, 88, 105) if light else (200, 205, 214),
+                  a=(198, 120, 221), b=(97, 175, 239), e=(152, 195, 121), f=(229, 192, 123))
+    g = {}
+    _put(g, SSH_TERM, 1, 3)
+    for row, (indent, segments) in enumerate(CODE_LINES):
+        x = 3 + indent * 2
+        for c, n in segments:
+            for i in range(n):
+                g[(x + i, 6 + row * 2)] = c
+            x += n + 1
     return _tile(_draw(g, colors, SHADE_LIGHT if light else SHADE))
 
 

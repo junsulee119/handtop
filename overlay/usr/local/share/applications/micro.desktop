@@ -1,0 +1,18 @@
+# Handtop: micro's own entry (/usr/share/applications/micro.desktop) under the name "Code Editor" in
+# the app drawer. Same desktop id, so this copy replaces the package's one; translations dropped.
+# Icon by name ("micro", Handtop pixel art) instead of the package's SVG file path. Started in its
+# own foot window with app id "micro" (instead of Terminal=true), so the taskbar and the title bar
+# show the Code Editor icon instead of the Terminal one. No quoted arguments in Exec: nwg-drawer
+# splits Exec on spaces and does not handle quotes.
+[Desktop Entry]
+Name=Code Editor
+GenericName=Text Editor
+Comment=Edit text files in a terminal (micro)
+Icon=micro
+Type=Application
+Categories=Utility;TextEditor;Development;
+Keywords=text;editor;syntax;terminal;code;micro;
+Exec=foot --app-id=micro micro %F
+StartupNotify=false
+Terminal=false
+MimeType=text/plain;text/x-chdr;text/x-csrc;text/x-c++hdr;text/x-c++src;text/x-java;text/x-dsrc;text/x-pascal;text/x-perl;text/x-python;application/x-php;application/x-httpd-php3;application/x-httpd-php4;application/x-httpd-php5;application/xml;text/html;text/css;text/x-sql;text/x-diff;
