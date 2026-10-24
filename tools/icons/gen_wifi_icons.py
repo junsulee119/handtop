@@ -33,10 +33,10 @@ THEMES = {                                      # folder, ink, faint (rgb, alpha
 }
 INDEX = """[Icon Theme]
 Name=Handtop-Light
-Comment=Handtop light theme: taskbar icons drawn for a light background (rg35xxh-theme light)
+Comment=Handtop light theme: taskbar and default-app icons drawn for a light background (rg35xxh-theme light)
 Inherits=Adwaita,hicolor
 Hidden=true
-Directories=22x22/apps,24x24/apps
+Directories=22x22/apps,24x24/apps,scalable/apps
 
 [22x22/apps]
 Size=22
@@ -47,6 +47,13 @@ Type=Threshold
 Size=24
 Context=Applications
 Type=Threshold
+
+[scalable/apps]
+Size=56
+MinSize=8
+MaxSize=512
+Context=Applications
+Type=Scalable
 """
 CX, CY = 11, 18                                 # centre of the arcs (the dot's bottom row)
 RADII = ((5, 6), (9, 10), (13, 14))             # 2 px arcs
