@@ -16,6 +16,7 @@ scalable directory; the PNG is used at its own size there.
   htop               System Monitor (htop): the Terminal frame with a green heartbeat line
   micro              Code Editor (micro): the Terminal frame with syntax-coloured code lines
   qpdfview           PDF Viewer (qpdfview): a page with a red "PDF" band; light version outlined
+  xarchiver          Archive Manager (Xarchiver): the File Manager folder with a zipper
 
 Window title bars: labwc looks the icon up at exactly 22 px, where the package's own 22x22 file
 would win over our scalable one, so a 22x22 copy (smoothly scaled down from the 56 px icon, dark set
@@ -28,12 +29,12 @@ import sys
 
 from PIL import Image
 
-from gen_app_icons import browser_icon, code_icon, files_icon, monitor_icon, notepad_icon, pdf_icon, terminal_icon
+from gen_app_icons import archive_icon, browser_icon, code_icon, files_icon, monitor_icon, notepad_icon, pdf_icon, terminal_icon
 
 ICONS = {"foot": terminal_icon, "org.xfce.thunar": files_icon,
          "org.xfce.mousepad": notepad_icon, "chromium": browser_icon,
          "htop": monitor_icon, "micro": code_icon,
-         "qpdfview": pdf_icon}
+         "qpdfview": pdf_icon, "xarchiver": archive_icon}
 
 
 if __name__ == "__main__":

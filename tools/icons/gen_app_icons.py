@@ -6,7 +6,7 @@ sharp in the app drawer).
                                diagonally, rainbow stripes) with BT waves, a USB plug and an RG35XX H.
   app-display.png              Display: a monitor with an HDMI cable to an RG35XX H (no glass, fills the grid).
   app-ssh.png                  Enable SSH: a terminal saying "SSH" (white) over a ">_" prompt, and a key (no glass).
-  (terminal_icon, files_icon, notepad_icon, browser_icon, monitor_icon, code_icon, pdf_icon: default-app icons, written by gen_default_app_icons.py)
+  (terminal_icon, files_icon, notepad_icon, browser_icon, monitor_icon, code_icon, pdf_icon, archive_icon: default-app icons, written by gen_default_app_icons.py)
   app-recenter.png             Re-center sticks: a stick well seen from above with a crosshair, a faint
                                drifted knob up-right and a blue arrow back to the knob in the centre (no glass).
   All are 27x27 art x2 + 1 px margin = exactly 56x56, the app drawer's icon size.
@@ -460,6 +460,29 @@ def pdf_icon(light=False):
     im = Image.new("RGBA", (EN, EN), (0, 0, 0, 0))
     for xy, c in g.items():
         im.putpixel(xy, PDF_COLORS[c] + (255,))
+    return _tile(im)
+
+
+# ---- Archive Manager (default app: Xarchiver) -----------------------------------------------
+# The File Manager folder with a zipper down the front panel ("zipped folder"). One set for both
+# themes. Written under the icon name "xarchiver" by gen_default_app_icons.py.
+ARCHIVE_COLORS = dict(FOLDER_COLORS, Z=(70, 78, 94), z=(200, 205, 214))
+
+
+def archive_icon(light=False):
+    g = {}
+    _put(g, FOLDER, 0, 3)
+    x = 13
+    for y in range(11, 18):                               # teeth alternating left / right
+        g[(x, y)] = "Z"
+        g[(x - 1 if y % 2 else x + 1, y)] = "z"
+    for y in range(18, 22):                               # the pull tab with its slot
+        for dx in (-1, 0, 1):
+            g[(x + dx, y)] = "z"
+    g[(x, 19)] = g[(x, 20)] = "Z"
+    im = Image.new("RGBA", (EN, EN), (0, 0, 0, 0))
+    for xy, c in g.items():
+        im.putpixel(xy, ARCHIVE_COLORS[c] + (255,))
     return _tile(im)
 
 
