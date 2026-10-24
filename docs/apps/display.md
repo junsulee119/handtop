@@ -1,0 +1,15 @@
+# Display
+
+External display over mini HDMI and the **Display** app (`rg35xxh-display`). Verified 2026-10-08 (hot-plug, 1080p60) and 2026-10-21 (mode list, 240 Hz).
+
+## How it works
+
+- Works with hot-plug: a 1080p monitor came up at 1920×1080 60 Hz, scale 1; taskbar, pointer and windows all fine. No HDMI audio device (only the analog codec appears in ALSA).
+- kanshi profiles: `handheld` (DSI-1 only, runs `rg35xxh-display apply`), `docked` (HDMI-A-1 + DSI-1, runs `rg35xxh-display connected`).
+- **Display app** (`rg35xxh-display`, one drawer entry "Display"; replaced the three "Display: …" entries in 2026-10). On connect it opens on the **handheld** as a layer-shell overlay; while it is open only the handheld screen is on (flag `$XDG_RUNTIME_DIR/rg35xxh-display-picker`), so the pointer cannot end up on the monitor. A 5 s countdown, restarted by any pointer movement or key, then keeps the saved layout; picking a card applies at once. Unplugging closes it. Drawn with cairo (pixel-art illustrations of each layout), follows the dark/light theme; `--preview FILE` renders it to a PNG.
+- Layouts (`~/.config/rg35xxh/display-mode`, also `rg35xxh-display set monitor|extend|mirror`):
+  - **monitor** (default): handheld screen off (backlight off too). Pressing X turns it on as a full-screen keyboard panel — see [the on-screen keyboard](../services/on-screen-keyboard.md).
+  - **extend**: handheld screen **below** the monitor, centred (x = (monitor width − 640) / 2, y = monitor height): the pointer crosses off the monitor's bottom edge in its middle third.
+  - **mirror**: the monitor switches to 640×480 at the same position as the handheld, so both show the same picture (the monitor scales it up).
+- **Resolution / refresh rate**: lists of the monitor's modes (largest first, refresh rates per resolution; the preferred mode marked) with scroll bars. **Test** turns the monitor on in that mode, apart from the handheld (x = 4000, no shared edge), and asks "Keep this mode?" for 15 s; otherwise it switches back. Kept modes are stored per monitor (make + model + serial) in `~/.config/rg35xxh/display-modes.json`; otherwise the preferred mode. Refresh rates are passed exactly as listed (`1920x1080@239.998Hz`): wlr-randr calls a rounded value an "unknown mode". Verified 2026-10-21: 1080p 240 Hz on a Hansung TFG24F24P runs a real 570 MHz TMDS / TCON clock (60 Hz: 148.5 MHz).
+- **Pointer speed per screen**: after each layout change the tool writes the enabled outputs and a speed factor (diagonal ÷ 800, the handheld's; 1080p ≈ 2.75) to `$XDG_RUNTIME_DIR/rg35xxh-pointer-layout`. The input daemon follows the pointer over that layout (its own relative motion, clamped like wlroots) and scales the stick / D-pad speed by the factor of the screen it is on (`display_speed_scale` in `input.conf`, 0 = off). It moves the pointer to the layout's top-left corner when a two-screen layout starts, so the estimate starts exact; its virtual mouse has no libinput acceleration (labwc `rc.xml`), so the estimate stays exact. Motion from other mice is not seen.

@@ -4,7 +4,7 @@
 # on vendor-specific interfaces. The wired Xbox 360 controller interface carries such a descriptor
 # (type 0x21, 17 bytes, describing its endpoints); stock FunctionFS only knows 0x21 as the 9-byte
 # HID descriptor and rejects it, and without it Windows' Xbox driver loads but never talks to the
-# device. See docs/bt-controller.md (wired mode).
+# device. See docs/apps/external-controller.md (Wired Controller mode).
 #
 # Needs the ROCKNIX kernel tree built by 06b-cedrus.sh (same tree, so symbol versions match).
 # The copy registers as filesystem "functionfs_xinput" and USB function "ffsxi", so it sits next

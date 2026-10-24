@@ -45,3 +45,12 @@ Everything Debian/systemd and our design need is present:
 1. Allwinner BROM loads U-Boot SPL from 8 KiB on the SD card (`u-boot-sunxi-with-spl.bin`, ROCKNIX DDR4 build).
 2. U-Boot reads `extlinux/extlinux.conf` from the FAT partition, loads `/KERNEL` and `/dtb.img`.
 3. Kernel mounts the Debian ext4 root partition and starts systemd.
+
+## Charging while off (2026-10-09)
+
+Plugging in the charger used to **switch the device on** (the AXP717 PMIC powers up on VBUS insertion and the old bootloader booted Linux).
+
+Fixed by moving the hardware layer to **ROCKNIX 20261001**, whose DDR4 U-Boot has the charge-only boot patch ([ROCKNIX PR #3364](https://github.com/ROCKNIX/distribution/pull/3364), merged 2026-09-22; `CONFIG_AXP_DISABLE_BOOT_ON_POWERON=y` in `anbernic_rg35xx_h700_lpddr4_defconfig`). In early SPL it checks the AXP717: if the power-on was caused by plugging in USB power and a battery is present, it powers straight back off; the PMIC keeps charging while off. The power button still boots normally.
+
+- Upstream tested on an RG34XX-SP (same H700/LPDDR4 U-Boot config). **Verified on the RG35XX H (2026-10-16, image `705c5ce`):** a charger plugged into a switched-off device keeps it off and charging; the power button boots it.
+- DDR3 boards (v0.1.2+) use ROCKNIX's DDR3 U-Boot; whether it includes the charge-only boot change is not confirmed yet.

@@ -1,8 +1,10 @@
-# BT Controller mode
+# External Controller
 
-Use the handheld as a **Bluetooth gamepad** for a PC or phone (v0.2.0; shows up as an Xbox Wireless Controller since the next release).
+**Apps → External Controller** (`rg35xxh-external-controller`): use the handheld as a game controller for a PC or phone. **Bluetooth** (BT Controller mode, `rg35xxh-btpad`; v0.2.0, an Xbox Wireless Controller since the next release) or **USB cable** (Wired Controller mode, `rg35xxh-usbpad`), with a status screen (`rg35xxh-controller-screen`) while it runs.
 
-## Use
+## Bluetooth: BT Controller mode
+
+### Use
 
 1. On the handheld: **Apps → External Controller**. The handheld switches to BT Controller mode (the taskbar's input-mode icon shows a controller with signal waves, blue with rainbow stripes) and appears as **"Handtop Gamepad"**.
 2. First time only, on the other device: Bluetooth → add device → **Handtop Gamepad** (Windows: Settings → Bluetooth & devices → Add device → Bluetooth). No PIN.
@@ -17,7 +19,7 @@ Next time, just open BT Controller again: the paired device reconnects by itself
 
 **Updating from v0.2.0:** the handheld now presents itself as an Xbox controller, and Windows remembers the old (generic) description per pairing. Remove "Handtop Gamepad" on the PC once and pair it again. Windows may also list a second "Handtop Gamepad" with a phone icon: that is the handheld's normal Bluetooth identity; ignore or remove it.
 
-## What the other device sees
+### What the other device sees
 
 An **Xbox Wireless Controller** (Series X|S, model 1914) over Bluetooth LE. Windows loads its own Xbox driver for it (Device Manager: "Bluetooth LE XINPUT compatible input device"), so XInput-only games work directly, and **game vibration plays on the handheld's motor** (through the same safety gate as Wired Controller mode, see "Vibration safety"). Buttons go by position, Xbox layout: the handheld's bottom button is Xbox A, the right one B, left X, top Y; Select = View, Start = Menu. Battery level is reported too.
 
@@ -25,13 +27,13 @@ Tested on Windows 11 (2026-10-21): driver, all controls, vibration. Android and 
 
 Fallback: `RG35XXH_BTPAD_PROFILE=generic` in the service's environment (`systemctl edit rg35xxh-btpad`) gives the v0.2.0 behaviour, a generic BLE gamepad (buttons 1–10, hat, X/Y, Z/Rz, Rx/Ry for the triggers) with no vibration; re-pair after switching.
 
-## Trade-off: classic Bluetooth pauses
+### Trade-off: classic Bluetooth pauses
 
 While BT Controller mode is on, the handheld's Bluetooth is **BLE only**. Accessories connected *to* the handheld over **BLE** keep working; **classic Bluetooth** accessories (many keyboards and mice, older Xbox One controllers) pause and come back when the mode ends.
 
 Why: with classic Bluetooth on, Windows also derives a classic pairing key from the BLE pairing and later reconnects over classic Bluetooth, where there is no gamepad (it connects, but no input arrives).
 
-## How it works
+### How it works
 
 - `rg35xxh-btpad` (root, `rg35xxh-btpad.service`, not started at boot) registers a GATT application with BlueZ over D-Bus: HID service 0x1812 (report map, input report with notifications, output report, HID information, control point, protocol mode) and battery service 0x180F; a BLE advertisement (gamepad appearance 0x03C4, 30–60 ms interval); and a just-works pairing agent. Newly paired devices are marked trusted.
 - **Xbox identity.** Windows picks its Xbox BLE driver (`xinputhid.inf`) by the PnP ID in the Device Information service, and only for product 0x0B13 or 0x0B20–0x0B27 from vendor 0x045E. BlueZ publishes that service itself (default `1d6b:0246`, from `DeviceID` in `main.conf`), so on start btpad writes a copy of `/etc/bluetooth/main.conf` with `DeviceID = usb:045e:0b13:0509` to `/run/rg35xxh-btpad/main.conf`, adds a runtime drop-in (`/run/systemd/system/bluetooth.service.d/50-rg35xxh-btpad.conf`, `bluetoothd -f` that file) and restarts bluetoothd; on exit it removes both and restarts it again (`ExecStopPost=rg35xxh-btpad --restore` does the same after a crash). The unit only `Wants=` bluetooth.service, so the restart does not stop it.
@@ -58,9 +60,8 @@ It takes no input (every button goes to the other device) and hides the mouse po
 
 Data: `rg35xxh-btpad` publishes JSON lines on `/run/rg35xxh-extpad-status.sock` (root:input 0660): `transport`, `state` (pairing / waiting / connected), `device`, `rssi`, `rate`, `report` (the 9-byte HID report, at most ~30 updates/s). The host is the paired device that is not itself an input device (BlueZ icon not `input-*`, no HID service); the last connected one is remembered in `/var/lib/rg35xxh/btpad-last-host`.
 
-Planned: dim the backlight after a while (no button can wake it, since they all go to the other device; it would brighten again on a connection change).
 
-## Wired Controller mode (USB cable)
+## USB cable: Wired Controller mode
 
 **Apps → External Controller → USB cable.** The handheld becomes a **wired Xbox 360 controller** for a PC: Windows uses its built-in Xbox driver (no install), XInput-only games work directly, and the PC reads the controls at ~1000 reports/s. Vibration requested by the game is played on the handheld's motor. The handheld charges from the PC at the same time. Select + Start + L1 + R1 ends it, like BT Controller mode; the taskbar shows the wired icon and the status screen says "Connected to PC (USB)".
 
@@ -86,7 +87,3 @@ The motor is driven by ROCKNIX's joypad driver (`rocknix-singleadc-joypad`, meml
 - Gamepad mode: effects uploaded by games are copied and queued through the same gate; a length-0 (endless) effect is capped to 1 s and refreshed the same way.
 
 Tested: 1, 10 and 100 requests/s (100/s for 20 s, ~2000 requests) with the handheld staying responsive; then real "infinite" vibration from Windows.
-
-## Planned
-
-- Test the Xbox identity on Android, Linux, macOS/iOS.

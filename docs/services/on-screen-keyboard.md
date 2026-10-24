@@ -1,5 +1,7 @@
 # On-Screen Keyboard
 
+Part of the input daemon ([input-daemon.md](input-daemon.md), `src/inputd/rg35xxh_inputd/osk.py`).
+
 Design of the built-in on-screen keyboard (OSK). It is part of the input daemon (`src/inputd/rg35xxh_inputd/osk.py`), so the daemon always knows whether it is open and can route the D-pad and A to it.
 
 ## Goals

@@ -30,7 +30,7 @@ Status: **v0.2.0**, developed and tested on the RG35XX H.
 - Chromium with uBlock Origin Lite (installed automatically on first launch when online); zram + 2 GB swap file
 - Boot logs written to the FAT partition, readable from any PC
 
-Full control map: [docs/input-mapping.md](docs/input-mapping.md).
+Full control map: [docs/services/input-daemon.md](docs/services/input-daemon.md).
 
 ## Install
 
@@ -64,7 +64,7 @@ There is no HDMI audio.
 
 ## External Controller (Bluetooth or USB cable)
 
-Use the handheld as a game controller for your PC or phone: **Apps → External Controller**. **Bluetooth**: pair **"Handtop Gamepad"** from the other device (first time only; it reconnects by itself afterwards). The taskbar's input-mode icon turns blue with rainbow stripes while it is on; press Select + Start + L1 + R1 to stop. Unlike gamepad mode, apps on the handheld don't see the controls. The handheld's screen shows the connection, a live view of the controls and the battery while it is on. It shows up as an Xbox Wireless Controller (Xbox-only games work, game vibration on the handheld; after updating from v0.2.0, remove and re-pair it on the PC once); while it is on, classic-Bluetooth accessories connected to the handheld pause. Details: [docs/bt-controller.md](docs/bt-controller.md).
+Use the handheld as a game controller for your PC or phone: **Apps → External Controller**. **Bluetooth**: pair **"Handtop Gamepad"** from the other device (first time only; it reconnects by itself afterwards). The taskbar's input-mode icon turns blue with rainbow stripes while it is on; press Select + Start + L1 + R1 to stop. Unlike gamepad mode, apps on the handheld don't see the controls. The handheld's screen shows the connection, a live view of the controls and the battery while it is on. It shows up as an Xbox Wireless Controller (Xbox-only games work, game vibration on the handheld; after updating from v0.2.0, remove and re-pair it on the PC once); while it is on, classic-Bluetooth accessories connected to the handheld pause. Details: [docs/apps/external-controller.md](docs/apps/external-controller.md).
 
 **USB cable**: connect the handheld's right USB-C port (OTG2/DC) to a PC and pick USB cable. It shows up as a wired Xbox 360 controller (works with Xbox-only games, game vibration on the handheld), and the handheld charges meanwhile. One connection (Bluetooth or cable) at a time.
 

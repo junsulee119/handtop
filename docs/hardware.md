@@ -24,7 +24,7 @@ Sources: decompiled `sun50i-h700-anbernic-rg35xx-h.dtb` from ROCKNIX 20260901, l
 - **No video-engine node** in the ROCKNIX DTB → we add it with an overlay and build the Cedrus driver ourselves; hardware decoding works (see `video-decode.md`). Upstream DT support lands in 7.4.
 - **HDMI enabled** (`hdmi@6000000` okay); ROCKNIX's HDMI patch is merged upstream in 7.2.
 - **USB:** OTG controller (`dr_mode = "otg"`) plus host controllers enabled. Keyboard/hub goes on the host port, charging on the other.
-- **Sleep is disabled by ROCKNIX** on H700 ("Sleep is currently broken") — see `power-and-sleep.md`.
+- **Sleep is disabled by ROCKNIX** on H700 ("Sleep is currently broken") — see [apps/power-menu.md](apps/power-menu.md).
 
 ## Input device
 
@@ -48,3 +48,10 @@ All buttons and sticks are one device: **"H700 Gamepad"** (driver `rocknix-singl
 | R / Reset (right edge, under Power) | Hardware reset — not visible to Linux, cannot be mapped |
 
 Face-button layout is Nintendo-style (A right, B bottom, X top, Y left). Kernel codes do not follow the labels for X/Y; the input daemon maps by the verified codes.
+
+## Wi-Fi power save (v0.1.1)
+
+- The Wi-Fi chip (RTL8821CS, `rtw88_8821cs` driver over SDIO) could stall with power save on: the kernel logged `failed to get tx report from firmware` and from then on no traffic passed, while NetworkManager still showed the link as connected. Only a reboot recovered it.
+- Power save is therefore **off** during normal use: `/etc/NetworkManager/conf.d/50-rg35xxh-wifi-powersave.conf` (`wifi.powersave = 2`). NetworkManager applies it on every connect, including after resume. Check with `/usr/sbin/iw dev wlan0 get power_save`.
+- Screen-off mode (`rg35xxh-lowpower`, [apps/power-menu.md](apps/power-menu.md)) still turns power save on while the screen is off and turns it off again afterwards.
+- Test (2026-10-16): 41 min awake after a sleep/wake, one ping per second from the LAN — 2463/2463 answered, median 1.6 ms, no driver errors. Before the fix the stall appeared about 6 minutes after a wake.

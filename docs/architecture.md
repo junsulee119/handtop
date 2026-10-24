@@ -9,7 +9,7 @@
 | Bootloader (U-Boot), kernel, device trees, kernel modules, firmware blobs | Taken unmodified from a released ROCKNIX H700 image |
 | Root filesystem (system, desktop, apps) | **Debian 13 "trixie"** arm64, built by us (debootstrap) |
 | Device-specific userspace quirks (audio mixer, governors, LEDs, etc.) | Ported from ROCKNIX's `/usr/lib/autostart/quirks/platforms/H700/` |
-| Input daemon + on-screen keyboard | Written for this project (see `input-mapping.md`) |
+| Input daemon + on-screen keyboard | Written for this project (see [services/input-daemon.md](services/input-daemon.md)) |
 
 ### Why this approach
 
