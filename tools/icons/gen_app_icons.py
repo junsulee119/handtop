@@ -6,7 +6,7 @@ sharp in the app drawer).
                                diagonally, rainbow stripes) with BT waves, a USB plug and an RG35XX H.
   app-display.png              Display: a monitor with an HDMI cable to an RG35XX H (no glass, fills the grid).
   app-ssh.png                  Enable SSH: a terminal saying "SSH" (white) over a ">_" prompt, and a key (no glass).
-  (terminal_icon: the default terminal's icon, written by gen_default_app_icons.py)
+  (terminal_icon, files_icon: default-app icons, written by gen_default_app_icons.py)
   app-recenter.png             Re-center sticks: a stick well seen from above with a crosshair, a faint
                                drifted knob up-right and a blue arrow back to the knob in the centre (no glass).
   All are 27x27 art x2 + 1 px margin = exactly 56x56, the app drawer's icon size.
@@ -239,6 +239,34 @@ def terminal_icon(light=False):
         for y in (13, 14):
             g[(x, y)] = "G"
     return _tile(_draw(g, colors, SHADE_LIGHT if light else SHADE))
+
+
+# ---- Files (default app: Thunar) ------------------------------------------------------------
+# A classic blue folder filling the grid: back with a tab, a sheet of paper peeking out, the front
+# panel with a light top edge. One blue set for both themes (like Bluetooth). Written under the icon
+# name "org.xfce.thunar" by gen_default_app_icons.py.
+FOLDER_COLORS = {"B": (52, 92, 158), "F": (86, 140, 214), "H": (159, 195, 255), "S": (44, 76, 132),
+                 "P": (236, 239, 244), "p": (190, 198, 212)}
+FOLDER = (["..BBBBBBBB................",
+           ".BBBBBBBBBB...............",
+           ".BBBBBBBBBBBBBBBBBBBBBBBBB.",
+           ".BBBBBBBBBBBBBBBBBBBBBBBBB.",
+           ".BBPPPPPPPPPPPPPPPPPPPPPBB.",
+           ".BBPPPPPPPPPPPPPPPPPPPPPBB.",
+           ".BBPppppppppppppppppppPPBB.",
+           ".HHHHHHHHHHHHHHHHHHHHHHHHH."]
+          + [".FFFFFFFFFFFFFFFFFFFFFFFFF."] * 11
+          + [".SSSSSSSSSSSSSSSSSSSSSSSSS.",
+             "..SSSSSSSSSSSSSSSSSSSSSSS.."])
+
+
+def files_icon(light=False):
+    g = {}
+    _put(g, FOLDER, 0, 3)
+    im = Image.new("RGBA", (EN, EN), (0, 0, 0, 0))
+    for xy, c in g.items():
+        im.putpixel(xy, FOLDER_COLORS[c] + (255,))
+    return _tile(im)
 
 
 # ---- Re-center sticks -----------------------------------------------------------------------
