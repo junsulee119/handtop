@@ -1,0 +1,16 @@
+# Handtop: htop's own entry (/usr/share/applications/htop.desktop) under the name "System Monitor"
+# in the app drawer. Same desktop id, so this copy replaces the package's one; translations dropped.
+# Started in its own foot window with app id "htop" (instead of Terminal=true), so the taskbar and
+# the title bar show the System Monitor icon instead of the Terminal one. No quoted arguments in Exec:
+# nwg-drawer splits Exec on spaces and does not handle quotes.
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=System Monitor
+GenericName=Process Viewer
+Comment=Show System Processes (htop)
+Icon=htop
+Exec=foot --app-id=htop htop
+Terminal=false
+Categories=System;Monitor;
+Keywords=system;process;task;monitor;htop;
