@@ -1,0 +1,86 @@
+#!/bin/sh
+# Toasts when a drive is plugged in or pulled out: another SD card in TF2 or a USB stick.
+#   rg35xxh-drive-notify add <kernel name>       e.g. mmcblk1, sda
+#   rg35xxh-drive-notify remove <kernel name>:<0|1>   1 = a volume was still mounted
+# Started by rg35xxh-drive-notify@<name>.service (wanted by udev when a disk appears) and
+# rg35xxh-drive-removed@<name>.service (started by udev when it goes); rules in
+# /etc/udev/rules.d/72-rg35xxh-udisks.rules.
+# add: records what the drive is (/run/rg35xxh-drives/<name>; also for a card present at boot)
+#      and shows it to the desktop user; tapping the toast opens the file manager, where the
+#      volumes wait under Devices, ready to mount (udisks2).
+# remove: says which drive went, and warns if one of its volumes was still mounted (checked by the
+#         udev rule itself, before udisks cleans the mount up).
+# Nobody logged in: no toast.
+set -u
+mode="$1"
+name="${2%%:*}"          # remove: "<disk>:<1 if a volume was still mounted>" (from the udev rule)
+was_mounted=0
+case "$2" in *:1) was_mounted=1 ;; esac
+dev="/dev/$name"
+state="/run/rg35xxh-drives"
+rec="$state/$name"
+
+# The desktop user: the active session on seat0. Sets user/uid, or fails.
+desktop_user() {
+  sess=$(loginctl show-seat seat0 -p ActiveSession --value 2>/dev/null)
+  [ -n "$sess" ] || return 1
+  user=$(loginctl show-session "$sess" -p Name --value 2>/dev/null)
+  uid=$(loginctl show-session "$sess" -p User --value 2>/dev/null)
+  [ -n "$user" ] && [ -n "$uid" ]
+}
+as_user() {
+  run="/run/user/$uid"
+  runuser -u "$user" -- env XDG_RUNTIME_DIR="$run" DBUS_SESSION_BUS_ADDRESS="unix:path=$run/bus" \
+    WAYLAND_DISPLAY="${WAYLAND_DISPLAY:-wayland-0}" "$@"
+}
+
+if [ "$mode" = remove ]; then
+  [ -r "$rec" ] || exit 0                    # not one we announced (e.g. Handtop's own card)
+  # Inserting a card can bounce (remove + add within a moment): only a drive that stays gone
+  # counts as removed.
+  sleep 1
+  [ -b "$dev" ] && exit 0
+  what=$(sed -n 1p "$rec")
+  body=$(sed -n 2p "$rec")
+  rm -f "$rec"
+  if [ "$was_mounted" = 1 ]; then
+    title="$what removed without ejecting"
+    body="$body
+Unsaved changes on it may be lost. Eject it in Files first next time."
+    urgency=critical
+  else
+    title="$what removed"
+    urgency=normal
+  fi
+  desktop_user || exit 0
+  as_user notify-send -a Files -u "$urgency" -t 6000 "$title" "$body"
+  exit 0
+fi
+
+[ -b "$dev" ] || exit 0
+udevadm settle -t 5 2>/dev/null
+# Handtop's own card never gets a toast.
+lsblk -nro LABEL "$dev" 2>/dev/null | grep -qxE 'RG35XXHBOOT|rg35xxh-root' && exit 0
+# Only drives with something to mount.
+vols=$(lsblk -nro FSTYPE "$dev" 2>/dev/null | grep -c .)
+[ "$vols" -gt 0 ] || exit 0
+
+case "$name" in
+  mmcblk*) what="SD card" ;;
+  *)       what="USB drive" ;;
+esac
+size=$(lsblk -dnro SIZE "$dev" 2>/dev/null | sed 's/\([KMGT]\)$/ \1iB/')   # lsblk is binary: 59.4G -> 59.4 GiB
+labels=$(lsblk -nro LABEL "$dev" 2>/dev/null | grep . | head -3 | paste -sd, - | sed 's/,/, /g')
+[ "$vols" -eq 1 ] && v="1 volume" || v="$vols volumes"
+body="$size, $v${labels:+: $labels}"
+mkdir -p "$state"
+printf '%s\n%s\n' "$what" "$body" > "$rec"
+
+desktop_user || exit 0
+choice=$(as_user notify-send -a Files -t 8000 -A "default=Open in Files" --wait \
+           "$what inserted" "$body
+Tap to open in Files")
+# Started in the user's own service manager: anything left in this service's cgroup is killed
+# when the service ends, which would close the window again at once.
+[ "$choice" = default ] && as_user systemd-run --user --quiet --collect thunar >/dev/null 2>&1
+exit 0

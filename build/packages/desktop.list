@@ -30,6 +30,14 @@ blueman
 # Apps
 foot
 thunar
+# Click-to-mount in Thunar's sidebar: other SD card (TF2), USB sticks. udisks2 mounts for the
+# logged-in user (polkit), gvfs shows the drives in Thunar; exfatprogs/dosfstools to check and
+# format exFAT/FAT (the kernel itself reads exFAT, FAT, ext4, NTFS, btrfs).
+udisks2
+gvfs
+exfatprogs
+dosfstools
+eject                    # udisks ejects USB sticks with it (SD cards: /usr/local/sbin/eject wrapper)
 mousepad
 chromium                  # browser: about half Firefox's CPU when scrolling on this device (docs/desktop.md)
 imv

@@ -1,0 +1,8 @@
+[Unit]
+Description=Toast for a removed drive (%i)
+# Started by udev when a disk goes away (72-rg35xxh-udisks.rules).
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/rg35xxh-drive-notify remove %i
+TimeoutStartSec=30

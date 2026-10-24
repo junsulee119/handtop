@@ -1,0 +1,12 @@
+#!/bin/sh
+# eject wrapper for udisks2 (Thunar's eject button). udisks marks SD cards "ejectable", but an SD
+# slot has nothing to eject: after the unmount, the real eject fails on every method (CD-ROM,
+# SCSI, floppy, tape) and Thunar shows "Failed to eject" although the card is already safe to
+# pull. For SD cards (mmcblk*) this just flushes and succeeds; anything else (USB sticks, optical
+# drives) goes to the real eject. /usr/local/sbin comes before /usr/bin in udisksd's PATH.
+for a in "$@"; do
+  case "$a" in
+    /dev/mmcblk[0-9]*) sync; exit 0 ;;
+  esac
+done
+exec /usr/bin/eject "$@"

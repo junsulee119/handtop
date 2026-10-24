@@ -1,0 +1,8 @@
+[Unit]
+Description=Toast for a newly plugged drive (%i)
+# Wanted by udev when a disk appears (72-rg35xxh-udisks.rules).
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/rg35xxh-drive-notify add %i
+TimeoutStartSec=60

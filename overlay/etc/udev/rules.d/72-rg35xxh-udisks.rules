@@ -1,0 +1,13 @@
+# Keep Handtop's own partitions out of the file manager's device list (udisks2 / gvfs): the boot
+# partition and the root filesystem are already mounted and must not be unmounted or ejected from
+# Thunar. Matched by filesystem label, so it holds whichever slot the system card is in.
+# Other cards (TF2) and USB sticks still show up, ready to mount with a click.
+ENV{ID_FS_LABEL}=="RG35XXHBOOT|rg35xxh-root", ENV{UDISKS_IGNORE}="1"
+
+# A disk plugged in or pulled out (SD card in TF2, USB stick): toasts in the desktop session; the
+# "inserted" one opens the file manager when tapped (rg35xxh-drive-notify). Handtop's own card is
+# skipped by the script.
+ACTION=="add", SUBSYSTEM=="block", ENV{DEVTYPE}=="disk", KERNEL=="mmcblk[0-9]|sd[a-z]", TAG+="systemd", ENV{SYSTEMD_WANTS}+="rg35xxh-drive-notify@%k.service"
+# On removal, whether a volume was still mounted is checked right here: udev runs this before
+# udisks hears of the removal and cleans the mount up. Passed on as <disk>:<0|1>.
+ACTION=="remove", SUBSYSTEM=="block", ENV{DEVTYPE}=="disk", KERNEL=="mmcblk[0-9]|sd[a-z]", RUN+="/bin/sh -c 'grep -q ^/dev/%k /proc/mounts && m=1 || m=0; exec /usr/bin/systemctl --no-block start rg35xxh-drive-removed@%k:$$m.service'"
