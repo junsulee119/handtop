@@ -8,6 +8,7 @@ Placement: always on the handheld screen. With an HDMI monitor in "monitor only"
 handheld screen is off; showing the keyboard turns it on (rg35xxh-display osk on) and the
 keyboard fills it as a full-screen keyboard panel; hiding it turns the screen off again.
 """
+import os
 import subprocess
 
 import gi
@@ -36,19 +37,41 @@ ROWS = [
 ]
 MODIFIERS = {"SHIFT": "KEY_LEFTSHIFT", "CTRL": "KEY_LEFTCTRL", "ALT": "KEY_LEFTALT"}
 
-CSS = b"""
-#rg-osk { background: #141820; padding: 3px; }
-#rg-osk button { min-height: 30px; padding: 0; margin: 1px; border-radius: 5px;
-                 background: #2b3240; color: #e8eaee; border: 1px solid #3a4456;
-                 font: 13px "Noto Sans"; box-shadow: none; }
-#rg-osk button.sel { background: #3d5a8a; border-color: #8fb4ff; }
-#rg-osk button.latched { background: #6a4d1f; }
-#rg-osk button.sel.latched { background: #8a6a2f; border-color: #ffd28f; }
-#rg-osk.panel { padding: 4px; }
-#rg-osk.panel button { font: 600 24px "Noto Sans"; border-radius: 8px; margin: 2px;
-                       min-width: 0; padding: 0; }
-#rg-osk.panel button.word { font: 600 14px "Noto Sans"; }
+# Colours per Handtop theme (rg35xxh-theme writes ~/.config/rg35xxh/theme); the keyboard re-reads
+# the choice each time it is shown, so a theme switch needs no daemon restart.
+PALETTES = {
+    "dark":  dict(bg="#141820", key="#2b3240", border="#3a4456", fg="#e8eaee",
+                  sel="#3d5a8a", sel_border="#8fb4ff", sel_fg="#e8eaee",
+                  latch="#6a4d1f", latch_sel="#8a6a2f", latch_border="#ffd28f"),
+    "light": dict(bg="#d5dbe5", key="#f8f9fb", border="#b9c1ce", fg="#2b303b",
+                  sel="#c9dbff", sel_border="#3d68b0", sel_fg="#1a2a4a",
+                  latch="#ffe2a8", latch_sel="#ffd28f", latch_border="#8a6a2f"),
+}
+CSS = """
+#rg-osk {{ background: {bg}; padding: 3px; }}
+#rg-osk button {{ min-height: 30px; padding: 0; margin: 1px; border-radius: 5px;
+                 background: {key}; color: {fg}; border: 1px solid {border};
+                 font: 13px "Noto Sans"; box-shadow: none; text-shadow: none; }}
+#rg-osk button label {{ color: {fg}; text-shadow: none; }}
+#rg-osk button.sel {{ background: {sel}; border-color: {sel_border}; }}
+#rg-osk button.sel label {{ color: {sel_fg}; }}
+#rg-osk button.latched {{ background: {latch}; }}
+#rg-osk button.sel.latched {{ background: {latch_sel}; border-color: {latch_border}; }}
+#rg-osk.panel {{ padding: 4px; }}
+#rg-osk.panel button {{ font: 600 24px "Noto Sans"; border-radius: 8px; margin: 2px;
+                       min-width: 0; padding: 0; }}
+#rg-osk.panel button.word {{ font: 600 14px "Noto Sans"; }}
 """
+
+
+def _theme():
+    path = os.path.join(os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config"),
+                        "rg35xxh", "theme")
+    try:
+        with open(path) as f:
+            return "light" if f.read().strip() == "light" else "dark"
+    except OSError:
+        return "dark"
 
 
 class OnScreenKeyboard:
@@ -62,9 +85,10 @@ class OnScreenKeyboard:
         self.panel = False          # full-screen keyboard panel on the handheld (monitor-only mode)
         self._wait = None
 
-        prov = Gtk.CssProvider()
-        prov.load_from_data(CSS)
-        Gtk.StyleContext.add_provider_for_screen(Gdk.Screen.get_default(), prov,
+        self.css = Gtk.CssProvider()
+        self.theme = None
+        self._apply_theme()
+        Gtk.StyleContext.add_provider_for_screen(Gdk.Screen.get_default(), self.css,
                                                  Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
         self.win = Gtk.Window()
         self.win.set_name("rg-osk")
@@ -94,6 +118,12 @@ class OnScreenKeyboard:
         grid.show_all()
         self._highlight()
 
+    def _apply_theme(self):
+        theme = _theme()
+        if theme != self.theme:
+            self.theme = theme
+            self.css.load_from_data(CSS.format(**PALETTES[theme]).encode())
+
     # ------------------------------------------------------------- visibility
     @property
     def visible(self):
@@ -107,6 +137,7 @@ class OnScreenKeyboard:
 
     def show(self):
         self.shown = True
+        self._apply_theme()
         self.panel = _display_status() == "monitor docked"
         if self.panel:
             subprocess.run(["rg35xxh-display", "osk", "on"], check=False, timeout=5)

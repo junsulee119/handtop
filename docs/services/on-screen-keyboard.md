@@ -60,7 +60,16 @@ Switching is done by `rg35xxh-display osk on|off` (see `desktop.md` → External
 | Word keys (Tab, Ctrl, Alt, Space, Hide) | 13 px | 14 px semi-bold (so 12 columns fit 640 px) |
 | Corners / gaps | 5 px / 1 px | 8 px / 2 px |
 
-Colours: background `#141820`, keys `#2b3240` with `#3a4456` border, text `#e8eaee`; highlight `#3d5a8a` / `#8fb4ff` (blue); latched modifier `#6a4d1f` (amber), highlighted + latched `#8a6a2f` / `#ffd28f`. Same palette as the volume (blue) and brightness (amber) pop-up bars.
+Colours follow the Handtop theme (`~/.config/rg35xxh/theme`, re-read every time the keyboard is shown, so a theme switch needs no restart; `PALETTES` in `osk.py`):
+
+| | Dark | Light |
+|---|---|---|
+| Background | `#141820` | `#d5dbe5` |
+| Keys / border / text | `#2b3240` / `#3a4456` / `#e8eaee` | `#f8f9fb` / `#b9c1ce` / `#2b303b` |
+| Highlight (blue) | `#3d5a8a`, border `#8fb4ff` | `#c9dbff`, border `#3d68b0`, text `#1a2a4a` |
+| Latched modifier (amber) | `#6a4d1f`; highlighted `#8a6a2f` / `#ffd28f` | `#ffe2a8`; highlighted `#ffd28f` / `#8a6a2f` |
+
+Blue and amber match the volume and brightness pop-up bars.
 
 ## Implementation notes
 

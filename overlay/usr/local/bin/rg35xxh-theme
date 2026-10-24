@@ -232,8 +232,8 @@ def gui():
     box.pack_start(row, True, True, 0)
     note = Gtk.Label(xalign=0, wrap=True, max_width_chars=60)
     note.set_markup("<small>Changes the taskbar, app drawer, power menu, notifications, window title bars "
-                    "and apps (open apps may need a restart). Terminal, volume bars and on-screen keyboard "
-                    "stay dark for now.</small>")
+                    "and apps (open apps may need a restart), and the on-screen keyboard. The terminal "
+                    "and the volume bars stay dark.</small>")
     box.pack_start(note, False, False, 0)
 
     buttons = {}
