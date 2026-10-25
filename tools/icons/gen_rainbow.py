@@ -49,9 +49,16 @@ def render(icon, sat, val, per_stripe):
             im.putpixel((x, y), M.rgb(accent) + (255,))
         elif c in M.COLORS:
             im.putpixel((x, y), M.rgb(M.COLORS[c]) + (255,))
+    # The 1 px halo around the drawing (where the stripes stop) is an opaque dark outline, so the
+    # white handheld stays visible on a light background too (External Controller mode picker).
+    if external and HALO:
+        for (x, y) in halo - set(g):
+            if 0 <= x < N and 0 <= y < N and M.coverage(x, y, 1, 3.5) >= 0.99:
+                im.putpixel((x, y), M.rgb(OUTLINE) + (255,))
     return im
 
 HALO, ALPHA = True, 0.7
+OUTLINE = "#161a22"            # halo colour (dark, opaque)
 VARIANTS = [("gradient .55", 0.55, 0.50, False),
             ("gradient .65", 0.65, 0.50, False),
             ("gradient .65 brighter", 0.65, 0.58, False)]
