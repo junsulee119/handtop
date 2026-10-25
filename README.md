@@ -1,5 +1,12 @@
 # Handtop
 
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="media/logo/handtop-wordmark-dark.png">
+    <img src="media/logo/handtop-wordmark-light.png" width="420" alt="Handtop logo: a pixel-art RG35XX H showing a desktop, a keyboard and a mouse pointer">
+  </picture>
+</p>
+
 A full Debian desktop for the **Anbernic RG35XX H**. It turns the handheld into a pocket
 Linux computer: SSH, Moonlight remote desktop, Tailscale, a web browser, a terminal,
 an external monitor over mini HDMI, and everything else Debian's arm64 archive offers.
