@@ -7,8 +7,9 @@
   "modules-left": ["custom/apps", "wlr/taskbar"],
   "modules-right": ["image#inputmode", "tray", "image#battery", "battery", "clock", "custom/power"],
 
-  "custom/apps":  { "format": "☰ Apps", "tooltip": false, "on-click": "rg35xxh-drawer" },
-  "custom/power": { "format": "⏻", "tooltip": false, "on-click": "rg35xxh-power-menu" },
+  // Apps / power: text-free pixel icons as CSS backgrounds (panel-apps.png, panel-power[-light].png)
+  "custom/apps":  { "format": "Apps", "tooltip": false, "on-click": "rg35xxh-drawer" },
+  "custom/power": { "format": " ", "tooltip": false, "on-click": "rg35xxh-power-menu" },
   // Input-mode icon (desktop / gamepad / BT Controller); rg35xxh-inputd sends SIGRTMIN+8 on change,
   // the daemon also drives the shake of the old icon. Bar 32 px = 1 px border + 31 px:
   // 4 px above and below the 23 px icon (with the 1 px margin-top in style.css).
@@ -25,7 +26,7 @@
     "on-click-middle": "close",
     "on-click-right": "minimize"
   },
-  "tray": { "icon-size": 23, "spacing": 6 },   // 23 px: Handtop's pixel-art tray icons (Bluetooth) stay sharp
+  "tray": { "icon-size": 23, "spacing": 8 },   // 23 px: Handtop's pixel-art tray icons (Bluetooth) stay sharp
   "battery": {
     "bat": "battery",
     "interval": 30,

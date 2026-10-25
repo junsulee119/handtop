@@ -38,7 +38,7 @@ Chosen over LXQt-on-labwc (heavier) and sfwbar (smaller community) for low RAM a
 - Boot → getty auto-login on tty1 → labwc. Logging out restarts the session; after 3 failed starts a shell is left on tty1.
 - System-wide defaults in `/etc/xdg/` (labwc, waybar, mako, foot, kanshi); per-user overrides go in `~/.config/`.
 - Normal windows open **maximized** (640×480 screen); dialogs keep their size.
-- Panel: `☰ Apps` (launcher) · open windows · input-mode icon · tray (Bluetooth, Wi-Fi, Tailscale; pixel-art icons from `tools/icons`) · battery · clock · `⏻` (power menu). Volume and brightness show in the pop-up bar ([services/osd.md](services/osd.md)).
+- Panel: **Apps** (launcher; blue block with a pixel-art 3×3 app grid) · open windows · input-mode icon · tray (Bluetooth, Wi-Fi, Tailscale; pixel-art icons from `tools/icons`) · battery · clock · power (red pixel-art power symbol on the bar, opens the power menu). Even gaps: 8 px between status icons, 12 px around the battery / clock text. Volume and brightness show in the pop-up bar ([services/osd.md](services/osd.md)).
 - Launcher: `rg35xxh-drawer` (4 columns, 56 px icons, no categories/file search). Power menu: `rg35xxh-power-menu` ([apps/power-menu.md](apps/power-menu.md)). Theme: [apps/theme.md](apps/theme.md).
 - Physical keyboard: Super+D apps, Super+Enter terminal, Super+E files, Super+X power menu, Alt+F4 close, Print screenshot.
 - **No xdg-desktop-portal**: it delayed Waybar startup (portal activation timeouts) and is only needed for screen sharing/Flatpak; GTK apps use their own file dialogs.

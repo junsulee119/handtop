@@ -1,4 +1,4 @@
-{ "label": "shutdown",  "action": "systemctl poweroff", "text": "Shut down", "keybind": "s" }
+{ "label": "sleep",     "action": "rg35xxh-sleep",      "text": "Sleep",     "keybind": "z" }
 { "label": "logout",    "action": "labwc --exit",       "text": "Log out",   "keybind": "l" }
 { "label": "reboot",    "action": "systemctl reboot",   "text": "Restart",   "keybind": "r" }
-{ "label": "sleep",     "action": "rg35xxh-sleep",      "text": "Sleep",     "keybind": "z" }
+{ "label": "shutdown",  "action": "systemctl poweroff", "text": "Shut down", "keybind": "s" }

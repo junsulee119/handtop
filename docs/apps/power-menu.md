@@ -1,12 +1,12 @@
 # Power menu and sleep
 
-Power button, the power menu (`rg35xxh-power-menu`, wlogout: Shut down / Restart / Log out / Sleep), sleep (`rg35xxh-sleep`) and auto-sleep (`rg35xxh-autosleep`).
+Power button, the power menu (`rg35xxh-power-menu`, wlogout: Sleep / Restart / Log out / Shut down), sleep (`rg35xxh-sleep`) and auto-sleep (`rg35xxh-autosleep`).
 
 ## Power button
 
 | Action | Result |
 |---|---|
-| Tap | Power menu (shut down / restart / log out / sleep) |
+| Tap | Power menu: Sleep, Restart / Log out, Shut down (2×2; the highlight starts on Sleep, Shut down is last). Pixel-art icons, one colour per action (blue moon, amber arrow, grey door, red power symbol; white on the highlighted button in the dark theme), `tools/icons/gen_power_icons.py` |
 | Hold 3 s | Clean shutdown (`systemctl poweroff`) with feedback, see below |
 | Hold ~8–10 s | PMIC hardware power cut — last resort, not configurable, may corrupt the SD card |
 | R (Reset) button | Instant hardware reset — not visible to Linux |

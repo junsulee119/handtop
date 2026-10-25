@@ -1,12 +1,20 @@
+/* Power menu, dark theme. Shown Sleep, Restart / Log out, Shut down (wlogout fills column by column,
+   so the layout file lists sleep, logout, reboot, shutdown): the highlight starts on Sleep
+   and Shut down is last. Pixel-art icons (tools/icons/gen_power_icons.py, 72 px, shown 1:1), one
+   colour per action; white on the highlighted button. */
 * { background-image: none; box-shadow: none; font-family: "Noto Sans"; }
 window { background-color: rgba(20, 24, 32, 0.92); }
 button {
   color: #e8eaee; font-size: 20px;
   background-color: #2b3240; border: 2px solid #3a4456; border-radius: 12px;
-  background-repeat: no-repeat; background-position: center 30%; background-size: 30%;
+  background-repeat: no-repeat; background-position: center 32%; background-size: 72px 72px;
 }
 button:focus, button:hover { background-color: #3d5a8a; border-color: #8fb4ff; outline-style: none; }
-#shutdown  { background-image: image(url("/usr/share/wlogout/icons/shutdown.png")); }
-#reboot    { background-image: image(url("/usr/share/wlogout/icons/reboot.png")); }
-#logout    { background-image: image(url("/usr/share/wlogout/icons/logout.png")); }
-#sleep     { background-image: image(url("/usr/share/wlogout/icons/suspend.png")); }
+#sleep     { background-image: image(url("/usr/local/share/rg35xxh/icons/power-sleep.png")); }
+#reboot    { background-image: image(url("/usr/local/share/rg35xxh/icons/power-reboot.png")); }
+#logout    { background-image: image(url("/usr/local/share/rg35xxh/icons/power-logout.png")); }
+#shutdown  { background-image: image(url("/usr/local/share/rg35xxh/icons/power-shutdown.png")); }
+#sleep:focus, #sleep:hover       { background-image: image(url("/usr/local/share/rg35xxh/icons/power-sleep-focus.png")); }
+#reboot:focus, #reboot:hover     { background-image: image(url("/usr/local/share/rg35xxh/icons/power-reboot-focus.png")); }
+#logout:focus, #logout:hover     { background-image: image(url("/usr/local/share/rg35xxh/icons/power-logout-focus.png")); }
+#shutdown:focus, #shutdown:hover { background-image: image(url("/usr/local/share/rg35xxh/icons/power-shutdown-focus.png")); }

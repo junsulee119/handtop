@@ -1,7 +1,8 @@
 /* Light theme (rg35xxh-theme light): the dark style.css with light colours on top. */
 @import url("file:///etc/xdg/waybar/style.css");
 window#waybar { background: #eceff4; color: #2b303b; border-top: 1px solid #c9ced8; }
-#custom-apps, #custom-power { color: #ffffff; }
+#custom-apps { color: #ffffff; }
+#custom-power { background-image: url("/usr/local/share/rg35xxh/icons/panel-power-light.png"); }
 #taskbar button { color: #2b303b; }
 #taskbar button.active { background: #c9d6ee; }
 #battery.warning { color: #a36b00; }

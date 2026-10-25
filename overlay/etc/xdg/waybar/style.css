@@ -1,12 +1,16 @@
 * { font-family: "Noto Sans", "Noto Sans Symbols 2"; font-size: 12px; min-height: 0; border: none; border-radius: 0; }
 window#waybar { background: #1a1e26; color: #e8eaee; border-top: 1px solid #333a48; }
-#custom-apps { background: #3d5a8a; padding: 0 10px; font-weight: bold; }
-#custom-power { background: #8a3d3d; padding: 0 12px; font-size: 15px; }
+#custom-apps { background: #3d5a8a url("/usr/local/share/rg35xxh/icons/panel-apps.png") no-repeat 9px 50%;
+               padding: 0 10px 0 31px; font-weight: bold; }
+#custom-power { background: url("/usr/local/share/rg35xxh/icons/panel-power.png") no-repeat 50% 50%;
+                min-width: 24px; padding: 0 12px; }
 #taskbar button { padding: 0 4px; color: #e8eaee; }
 #taskbar button.active { background: #2b3a55; }
-#tray, #battery, #clock { padding: 0 6px; }
-#image.battery { padding: 0 0 0 6px; margin-top: 1px; }   /* icon, then the % (#battery) */
-#battery { padding-left: 0; }
-#image.inputmode { padding: 0 4px; margin-top: 1px; }   /* centres the 23 px icon in the 31 px under the border */
+/* even gaps: 8 px between status icons, 12 px around the battery / clock text */
+#tray { padding: 0 8px; }
+#clock { padding: 0 12px; }
+#image.battery { padding: 0 0 0 12px; margin-top: 1px; }   /* icon, then the % (#battery) */
+#battery { padding: 0; }
+#image.inputmode { padding: 0 0 0 8px; margin-top: 1px; }   /* centres the 23 px icon in the 31 px under the border */
 #battery.warning { color: #ffcc66; }
 #battery.critical { color: #ff6b6b; }
