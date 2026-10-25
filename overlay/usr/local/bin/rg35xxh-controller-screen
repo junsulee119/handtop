@@ -48,22 +48,22 @@ PART, PART_EDGE = (0.09, 0.10, 0.12), (0.34, 0.36, 0.42)      # black buttons, l
 LABEL_COL = {"X": (0.36, 0.52, 1.0), "Y": (0.35, 0.82, 0.42), "A": (0.95, 0.30, 0.30), "B": (0.98, 0.85, 0.25)}
 LIT, LIT_EDGE = (0.62, 0.76, 1.0), (0.85, 0.91, 1.0)
 
-# Handheld palettes. "detailed" = the frozen v1 drawing (solid, like the real black handheld).
-# "simple" = hologram: translucent light-blue body, whitish-blue outlines and contours, transparent
-# controls that fill in brighter when pressed. Colours may carry alpha (4th value).
+# Handheld palettes, one per Handtop theme. "dark" = solid, like the real black handheld.
+# "light" = hologram: translucent blue body, deep-blue outlines and contours, transparent controls
+# that fill in when pressed (reads on the light background). Colours may carry alpha (4th value).
 PALETTES = {
-    "detailed": {"BODY": BODY, "BODY_EDGE": BODY_EDGE, "BODY_SHADE": BODY_SHADE, "PART": PART,
-                 "PART_EDGE": PART_EDGE, "LIT": LIT, "LIT_EDGE": LIT_EDGE, "BEZEL": (0.05, 0.05, 0.06),
-                 "BEZEL_EDGE": (0.24, 0.26, 0.30), "SCREEN": (0.03, 0.04, 0.05), "LED": (0.30, 0.85, 0.40),
-                 "CAP": (0.12, 0.13, 0.15), "FACE": LABEL_COL, "LABEL": None, "LABEL_LIT": BG},
-    "simple": {"BODY": (0.55, 0.75, 1.0, 0.16), "BODY_EDGE": (0.82, 0.91, 1.0, 0.95),
-               "BODY_SHADE": (0.55, 0.75, 1.0, 0.06), "PART": (0.55, 0.75, 1.0, 0.10),
-               "PART_EDGE": (0.82, 0.91, 1.0, 0.85), "LIT": (0.86, 0.94, 1.0, 0.80),
-               "LIT_EDGE": (1.0, 1.0, 1.0, 1.0), "BEZEL": (0.55, 0.75, 1.0, 0.0),
-               "BEZEL_EDGE": (0.82, 0.91, 1.0, 0.45), "SCREEN": (0.03, 0.05, 0.09, 0.70),
-               "LED": (0.82, 0.91, 1.0, 0.95), "CAP": (0.55, 0.75, 1.0, 0.10),
-               "FACE": {k: (0.86, 0.94, 1.0, 0.80) for k in "XYAB"},
-               "LABEL": (0.82, 0.91, 1.0), "LABEL_LIT": (0.10, 0.16, 0.28)},
+    "dark": {"BODY": BODY, "BODY_EDGE": BODY_EDGE, "BODY_SHADE": BODY_SHADE, "PART": PART,
+             "PART_EDGE": PART_EDGE, "LIT": LIT, "LIT_EDGE": LIT_EDGE, "BEZEL": (0.05, 0.05, 0.06),
+             "BEZEL_EDGE": (0.24, 0.26, 0.30), "SCREEN": (0.03, 0.04, 0.05), "LED": (0.30, 0.85, 0.40),
+             "CAP": (0.12, 0.13, 0.15), "FACE": LABEL_COL, "LABEL": None, "LABEL_LIT": (0.071, 0.082, 0.110)},
+    "light": {"BODY": (0.24, 0.41, 0.69, 0.10), "BODY_EDGE": (0.18, 0.33, 0.60, 0.95),
+              "BODY_SHADE": (0.24, 0.41, 0.69, 0.05), "PART": (0.24, 0.41, 0.69, 0.08),
+              "PART_EDGE": (0.18, 0.33, 0.60, 0.85), "LIT": (0.24, 0.41, 0.69, 0.75),
+              "LIT_EDGE": (0.10, 0.20, 0.42, 1.0), "BEZEL": (0.24, 0.41, 0.69, 0.0),
+              "BEZEL_EDGE": (0.18, 0.33, 0.60, 0.45), "SCREEN": (0.03, 0.05, 0.09, 0.85),
+              "LED": (0.18, 0.33, 0.60, 0.95), "CAP": (0.24, 0.41, 0.69, 0.08),
+              "FACE": {k: (0.24, 0.41, 0.69, 0.75) for k in "XYAB"},
+              "LABEL": (0.18, 0.33, 0.60), "LABEL_LIT": (0.94, 0.96, 1.0)},
 }
 
 
@@ -74,6 +74,25 @@ def src(cr, c):
     else:
         cr.set_source_rgb(*c)
 TEXT, DIM, OK, WARN = (0.91, 0.92, 0.93), (0.58, 0.62, 0.69), (0.55, 0.85, 0.62), (1.0, 0.80, 0.40)
+# Text drawn on the handheld's own (always dark) screen and body keeps these colours in both themes.
+SCREEN_TEXT, SCREEN_DIM, SCREEN_OK, SCREEN_WARN = TEXT, DIM, OK, WARN
+
+
+def _theme():
+    path = os.path.join(os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config"),
+                        "rg35xxh", "theme")
+    try:
+        with open(path) as f:
+            return "light" if f.read().strip() == "light" else "dark"
+    except OSError:
+        return "dark"
+
+
+LIGHT = _theme() == "light"      # Handtop theme (rg35xxh-theme); read once at start
+if LIGHT:                        # light background, dark ink (the drawn handheld stays as it is)
+    BG = (0.875, 0.894, 0.925)                                   # #dfe4ec, the light wallpaper
+    TEXT, DIM, OK, WARN = (0.17, 0.19, 0.23), (0.40, 0.44, 0.51), (0.15, 0.52, 0.27), (0.72, 0.43, 0.05)
+SUFFIX = "-light" if LIGHT else ""   # light-theme icon files (inputmode-*-light.png, battery-*-light.png)
 ACCENT = {"bt": (0.37, 0.50, 0.74), "usb": (0.75, 0.54, 0.36)}
 
 # HID report (rg35xxh-btpad): bytes 0-1 buttons, 2 hat (0-7, 8 = centre), 3-6 sticks LX LY RX RY,
@@ -117,10 +136,9 @@ def handheld_monitor():
 
 
 class Screen(Gtk.Window):
-    def __init__(self, style="detailed"):
+    def __init__(self):
         super().__init__()
-        self.style = style            # "detailed" (frozen v1 drawing) or "simple" (hologram)
-        self.pal = PALETTES[style]
+        self.pal = PALETTES["light" if LIGHT else "dark"]
         GtkLayerShell.init_for_window(self)
         GtkLayerShell.set_layer(self, GtkLayerShell.Layer.OVERLAY)
         GtkLayerShell.set_namespace(self, "rg35xxh-controller-screen")
@@ -345,7 +363,7 @@ class Screen(Gtk.Window):
         # D-pad (upper left): one plus shape, 2*A+1 px long and T px thick (both odd, so the
         # centre pixel is DPAD itself). Edge = the 1 px ring between the plus and the plus inset
         # by 1 px (even-odd), fill = the inset plus: no seam where the bars cross, and nothing is
-        # painted twice (matters for the translucent "simple" style).
+        # painted twice (matters for the translucent light-theme style).
         cx, cy = DPAD
         A, T = 20, 13
         h = T // 2
@@ -407,7 +425,8 @@ class Screen(Gtk.Window):
         if charging:
             seq = self.battery_frames(bars)
             bars = seq[self.bat_tick % len(seq)]
-        name = "battery" + ("-charging" if charging else "") + ("-low" if cap <= 20 else "") + f"-{bars}.png"
+        name = ("battery" + ("-charging" if charging else "") + ("-low" if cap <= 20 else "")
+                + f"-{bars}{SUFFIX}.png")
         if name not in self.bat_icons:
             try:
                 self.bat_icons[name] = cairo.ImageSurface.create_from_png(f"{ICONS}/{name}")
@@ -438,7 +457,7 @@ class Screen(Gtk.Window):
 
     def draw_header(self, cr):
         transport = self.st.get("transport", "bt")
-        path = f"{ICONS}/inputmode-{'bt' if transport == 'bt' else 'wired'}.png"
+        path = f"{ICONS}/inputmode-{'bt' if transport == 'bt' else 'wired'}{SUFFIX}.png"
         if (self.icon is None or self.icon_path != path) and os.path.exists(path):
             self.icon = cairo.ImageSurface.create_from_png(path)
             self.icon_path = path
@@ -481,16 +500,16 @@ class Screen(Gtk.Window):
         # link info on the drawn handheld's own screen (canvas screen at 110,70 100x76 -> x2)
         x, y = (SCR[0] + SCR[2] / 2) * 2, SCR[1] * 2
         if self.st.get("state") != "connected":
-            self.text(cr, "Handtop", x, y + 112, 18, DIM, bold=True, align="center")
+            self.text(cr, "Handtop", x, y + 112, 18, SCREEN_DIM, bold=True, align="center")
             return
         rate = self.st.get("rate", 0)
         rssi = self.st.get("rssi")
-        self.text(cr, f"{rate}", x, y + 78, 34, TEXT, bold=True, align="center")
-        self.text(cr, "reports/s", x, y + 98, 13, DIM, align="center")
+        self.text(cr, f"{rate}", x, y + 78, 34, SCREEN_TEXT, bold=True, align="center")
+        self.text(cr, "reports/s", x, y + 98, 13, SCREEN_DIM, align="center")
         if rssi is not None:
             q = "strong" if rssi >= -70 else "good" if rssi >= -85 else "weak"
-            self.text(cr, f"signal {q}", x, y + 140, 15, OK if q != "weak" else WARN, align="center")
-            self.text(cr, f"{rssi} dBm", x, y + 158, 12, DIM, align="center")
+            self.text(cr, f"signal {q}", x, y + 140, 15, SCREEN_OK if q != "weak" else SCREEN_WARN, align="center")
+            self.text(cr, f"{rssi} dBm", x, y + 158, 12, SCREEN_DIM, align="center")
 
     def draw_footer(self, cr):
         # face-button labels on top of the pixel art (crisp text)
@@ -500,7 +519,7 @@ class Screen(Gtk.Window):
             self.text_mid(cr, label, x * 2 + 1, y * 2 + 1, 15,
                           P["LABEL_LIT"] if lit else (P["LABEL"] or LABEL_COL[label]), bold=True)
         for label, (x, y) in (("SELECT", SELECT), ("START", START)):
-            self.text(cr, label, x * 2, y * 2 - 13, 9, P["LABEL"] or DIM, align="center")
+            self.text(cr, label, x * 2, y * 2 - 13, 9, P["LABEL"] or SCREEN_DIM, align="center")
         self.text(cr, "Select + Start + L1 + R1 to stop", W / 2, 448, 15, DIM, align="center")
 
 
@@ -521,14 +540,7 @@ def battery():
 if __name__ == "__main__":
     if not GtkLayerShell.is_supported():
         sys.exit("rg35xxh-controller-screen: layer-shell not available")
-    style = "simple" if "--simple" in sys.argv else "detailed"
-    try:          # per-user choice: "simple" in ~/.config/rg35xxh/controller-screen
-        with open(os.path.expanduser("~/.config/rg35xxh/controller-screen")) as f:
-            if f.read().strip() == "simple":
-                style = "simple"
-    except OSError:
-        pass
-    win = Screen(style)
+    win = Screen()
     if "--demo" in sys.argv:          # fixed sample state, for screenshots / checking the drawing
         win.connect_status = lambda: False
         usb = "--usb" in sys.argv

@@ -56,6 +56,8 @@ While the mode is on, the handheld's screen shows a full-screen status page (`rg
 - **Link info** on the drawn handheld's screen: HID reports sent per second (0 while nothing changes) and the BLE signal strength (`btmgmt conn-info`; strong ≥ −70 dBm, good ≥ −85 dBm, else weak).
 - **Handheld battery** (top right) and **"Select + Start + L1 + R1 to stop"**.
 
+**Themes:** follows the Handtop theme (read when the screen opens). Dark: dark background, the handheld drawn solid like the real black one. Light: light background (`#dfe4ec`), dark text, the light taskbar icons, and the handheld as a hologram in deep-blue ink (translucent body, outlines, controls fill in when pressed). Text on the drawn handheld's screen keeps its light colours in both themes.
+
 It takes no input (every button goes to the other device) and hides the mouse pointer. `rg35xxh-controller-screen --demo` shows it with a fixed sample state. Volume (Vol) and brightness (F + Vol) still work in this mode: the input daemon handles those keys itself in every mode, and F is never sent to the other device.
 
 Data: `rg35xxh-btpad` publishes JSON lines on `/run/rg35xxh-extpad-status.sock` (root:input 0660): `transport`, `state` (pairing / waiting / connected), `device`, `rssi`, `rate`, `report` (the 9-byte HID report, at most ~30 updates/s). The host is the paired device that is not itself an input device (BlueZ icon not `input-*`, no HID service); the last connected one is remembered in `/var/lib/rg35xxh/btpad-last-host`.
