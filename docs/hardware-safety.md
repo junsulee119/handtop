@@ -18,7 +18,7 @@ Where they come from:
 1. **Every program that holds hardware has a clean exit that releases it in order:** stop what is running first (motor, USB transfers, advertising), then free it (erase effects, remove the gadget), then let go (ungrab, close).
 2. **The clean exit runs on every way out:** `SIGTERM`/`SIGINT`/`SIGHUP`, errors, a lost device, a lost connection, and a stop that arrives during start-up. Install the signal handling before taking hardware, and make the release step idempotent: run it twice, or after a partial set-up, without harm.
 3. **A failed set-up unwinds itself.** Wrap the whole set-up, not only the main loop, so a failure halfway releases what was already taken (*review: Wired controller mode*). Also clean up leftovers of an earlier run before starting.
-4. **Re-opening a device is an exit too.** Release before close, then reset everything that belonged to the old handle, such as effect IDs (*review: Re-center sticks*).
+4. **Re-opening a device is an exit too.** Release before close, then reset everything that belonged to the old handle, such as effect IDs. The input daemon's `_release_effects()` does this for the clean exit and the stick re-centre. (*review: Re-center sticks*, done)
 
 ## 3. Nothing may end or freeze a hardware owner behind its back
 
@@ -38,7 +38,7 @@ Where they come from:
 
 1. **Every vibration effect has a fixed length**; no endless effects (length 0). Long vibrations are re-triggered while wanted.
 2. **Hardware updates go through the motor gate:** at most one per `MOTOR_INTERVAL`, strengths rounded to `MOTOR_LEVELS`, and effects uploaded once and then only played or stopped.
-3. **Stop before erase, erase before close**, on every path (see 2).
+3. **Stop before erase, erase before close**, on every path (see 2), including leaving gamepad mode (the games' effects).
 
 ## 6. Power states and radios
 
@@ -47,7 +47,11 @@ Where they come from:
 3. **Do as little to the radio as possible.** Wi-Fi and Bluetooth share one chip (RTL8821CS, rtw88). Power-cycling Bluetooth or restarting `bluetoothd` can stall Wi-Fi, which takes SSH with it. Changes there get a stress test (enter and leave 10 times while pinging the handheld) (*review*).
 4. **Nothing writes to the power chip, regulators or charging limits** (`axp*`, `regulator`, `input_current_limit`, `/dev/mem`, `i2cset`) without a documented reason and a recovery plan. As of 2026-10-26, nothing in Handtop does.
 
-## 7. Testing on the device
+## 7. Trade-offs are decided, not assumed
+
+A safety fix can cost user experience: a feature refused in some mode, an extra wait, a power state that is skipped and drains the battery. **Before implementing such a fix, describe the trade-off and the options (including keeping the current behaviour) and let the user or maintainer decide.** Record the decision in the component's doc. See also "Trade-offs" in [../AGENTS.md](../AGENTS.md).
+
+## 8. Testing on the device
 
 1. **Test the stop and start path by hand first:** stop the piece several times, check its log and that input still works, and only then test a log-out, a mode switch or a reboot.
 2. **Run `sync` before any test that may freeze the device**, and say so beforehand.
@@ -64,4 +68,5 @@ Use it when a change touches anything in the first paragraph:
 - [ ] Do all signals go to exactly one, intended process that handles them? (4)
 - [ ] Vibration: fixed length, through the gate? (5)
 - [ ] Which other power states or modes can be active at the same time, and is that combination tested? (6)
-- [ ] Hand test of the stop/start path done, `sync` before the risky test, committed only after it passed? (7)
+- [ ] Does the fix cost anything the user would notice? If so, was it described and decided before implementing? (7)
+- [ ] Hand test of the stop/start path done, `sync` before the risky test, committed only after it passed? (8)

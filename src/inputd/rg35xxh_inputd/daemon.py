@@ -247,6 +247,43 @@ class Daemon:
             except OSError as e:
                 log.warning("rumble not available: %s", e)
 
+    def _release_effects(self):
+        """Motor first: stop every vibration effect on the gamepad, then erase it (Handtop's own
+        haptics, the PC's levels, the games' effects) and forget the ids. Called before the
+        gamepad is closed (clean exit, stick re-centre), so nothing is left to the kernel's
+        teardown while it may still be playing (docs/hardware-safety.md, rule 2). Safe on a
+        half-built daemon. The motor gate's state is reset too; the PC's wanted level is kept
+        (re-applied on its next request)."""
+        for name in ("motor_timer", "motor_refresh_timer"):
+            tid = getattr(self, name, None)
+            if tid:
+                GLib.source_remove(tid)
+                setattr(self, name, None)
+        for name in ("motor_game_active", "motor_game_endless", "motor_pending_upload", "motor_pending_play"):
+            if getattr(self, name, None) is not None:
+                getattr(self, name).clear()
+        g = getattr(self, "gamepad", None)
+        ids = [i for i in [getattr(self, "haptic_id", None), *getattr(self, "step_ids", {}).values(),
+                           *getattr(self, "motor_ext_ids", {}).values(), *getattr(self, "pad_ff", {}).values()]
+               if i is not None]
+        if g is not None and ids:
+            for eid in ids:
+                try:
+                    g.write(E.EV_FF, eid, 0)
+                except OSError as e:
+                    log.debug("stop effect %d: %s", eid, e)
+            time.sleep(0.05)
+            for eid in ids:
+                try:
+                    g.erase_effect(eid)
+                except OSError as e:
+                    log.debug("erase effect %d: %s", eid, e)
+        self.haptic_id = None
+        self.step_ids = {}
+        self.motor_ext_ids = {}
+        self.motor_ext_applied = 0
+        self.pad_ff = {}
+
     def _magnitude(self, strength):
         scale = max(0.0, min(1.0, self.core.s["haptic_strength"]))
         return int(round(strength * scale * 0xFFFF))
@@ -272,6 +309,7 @@ class Daemon:
             return True
         log.info("re-centre: reopening %s", g.path)
         path = g.path
+        self._release_effects()    # effects live on this file handle: stop + erase them first
         wid = self.watches.pop(g.fd, None)
         if wid:
             GLib.source_remove(wid)
@@ -281,7 +319,7 @@ class Daemon:
             pass
         g.close()
         self.devices.remove(g)
-        self.pad_ff = {}           # effects lived on the old file handle
+        self.gamepad = None
         time.sleep(0.2)
         try:
             g = evdev.InputDevice(path)
@@ -294,6 +332,8 @@ class Daemon:
         self.devices.append(g)
         self._setup_gamepad()
         self._watch(g)
+        if self.motor_ext_want:           # the PC still wants vibration (Wired / BT): re-apply it
+            self._motor_kick()
 
         # Verify: sample the axes for ~0.5 s and correct what is still off-centre.
         samples = {code: [] for code in HW_AXES}
@@ -352,11 +392,20 @@ class Daemon:
     def _destroy_pad(self):
         if self.pad:
             GLib.source_remove(self.pad_watch)
-            for phys in self.pad_ff.values():
+            phys_ids = list(self.pad_ff.values())
+            for phys in phys_ids:                  # stop first, then erase (motor first)
+                try:
+                    self.gamepad.write(E.EV_FF, phys, 0)
+                except (OSError, AttributeError):
+                    pass
+            for phys in phys_ids:
                 try:
                     self.gamepad.erase_effect(phys)
-                except OSError:
+                except (OSError, AttributeError):
                     pass
+            self.pad_ff = {}
+            self.motor_game_active.clear()
+            self.motor_game_endless.clear()
             self.pad.close()
             self.pad = None
             log.info("desktop mode: virtual pad removed")
@@ -1103,30 +1152,14 @@ class Daemon:
             os.unlink(HEARTBEAT)                    # disarm the watchdog: exiting, not hung
         except FileNotFoundError:                   # (not armed yet: stopped during start-up)
             pass
-        for name in ("motor_timer", "motor_refresh_timer", "ui_retry"):
-            if get(name):
-                step(name, GLib.source_remove, get(name))
-                setattr(self, name, None)
-        for name in ("motor_game_active", "motor_game_endless", "motor_pending_upload", "motor_pending_play"):
-            if get(name) is not None:
-                get(name).clear()
+        if get("ui_retry"):
+            step("ui_retry", GLib.source_remove, get("ui_retry"))
+            self.ui_retry = None
         if get("bt"):
             step("external controller", self._bt_close)   # stops + frees the PC's vibration levels
+        step("vibration effects", self._release_effects)    # stop, then erase all (games' too)
         if get("pad"):
-            step("virtual pad", self._destroy_pad)          # frees the games' effects
-        g = get("gamepad")
-        if g is not None:
-            ids = [i for i in [get("haptic_id"), *get("step_ids", {}).values(),
-                               *get("motor_ext_ids", {}).values()] if i is not None]
-            for eid in ids:
-                step("stop effect %d" % eid, g.write, E.EV_FF, eid, 0)
-            if ids:
-                time.sleep(0.05)
-            for eid in ids:
-                step("erase effect %d" % eid, g.erase_effect, eid)
-            self.haptic_id = None
-            self.step_ids = {}
-            self.motor_ext_ids = {}
+            step("virtual pad", self._destroy_pad)
         if get("touch") is not None:
             step("touch", self._touch_close)
         if get("ui") is not None:
