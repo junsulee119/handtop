@@ -1,0 +1,4 @@
+[Icon Theme]
+Name=Handtop
+Comment=Handtop pixel-art cursors (tools/icons/gen_cursors.py)
+Inherits=Adwaita

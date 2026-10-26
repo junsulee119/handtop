@@ -3,6 +3,6 @@ font-name='Noto Sans 9'
 document-font-name='Noto Sans 9'
 monospace-font-name='Noto Sans Mono 9'
 icon-theme='Adwaita'
-cursor-theme='Adwaita'
+cursor-theme='Handtop'
 cursor-size=24
 color-scheme='prefer-dark'
