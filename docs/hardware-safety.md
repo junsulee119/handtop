@@ -25,7 +25,8 @@ Where they come from:
 1. **No display connection in a process that holds hardware.** GDK ends its process with `_exit()` the moment the Wayland display goes away (every log-out), with no cleanup. Windows and other UI go in a child process, driven by messages (see `ui.py`). The same goes for any library that can `abort()` or `_exit()` on its own.
 2. **No `Gtk.main()`.** Quitting it from a signal handler deadlocks; use `GLib.MainLoop`.
 3. **Nothing on the input path blocks without a bound.** Every subprocess gets a `timeout=`, and writes to helper processes are non-blocking (drop the message rather than wait).
-4. **Whatever takes the power button must be watched.** The input daemon grabs the power key, so logind's "hold to power off" backup never sees it. If the daemon hangs, the only way out is the hardware power cut, which is the one that latched the power chip. A process that grabs input needs a watchdog that restarts it when it stops responding: the input daemon's is in its wrapper, `rg35xxh-inputd` (heartbeat counter, suspend-safe). (*review*, done)
+4. **Never wait for a systemd job from inside your own unit's stop.** A `systemctl restart other.service` run (and waited for) while your unit is stopping can deadlock: systemd may hold that job until your stop finishes, while your stop waits for the job, until the stop timeout kills you with `SIGKILL`. Queue it instead (`systemctl --no-block …`). Found in BT Controller mode, 2026-10-26.
+5. **Whatever takes the power button must be watched.** The input daemon grabs the power key, so logind's "hold to power off" backup never sees it. If the daemon hangs, the only way out is the hardware power cut, which is the one that latched the power chip. A process that grabs input needs a watchdog that restarts it when it stops responding: the input daemon's is in its wrapper, `rg35xxh-inputd` (heartbeat counter, suspend-safe). (*review*, done)
 
 ## 4. Signals reach exactly the intended process
 
@@ -45,7 +46,7 @@ Where they come from:
 
 1. **Power-state changes check the others.** Before suspending, turning the screen off, taking CPU cores offline or switching a controller mode, check which of the others is active. Either combine them deliberately and test the combination, or refuse. Example: auto-sleep never suspends during Screen off, which has cores 1–3 offline (*review*, done; [apps/power-menu.md](apps/power-menu.md)).
 2. **Restore on every path:** a power state entered by one session must be undone if that session ends (log-out, crash).
-3. **Do as little to the radio as possible.** Wi-Fi and Bluetooth share one chip (RTL8821CS, rtw88). Power-cycling Bluetooth or restarting `bluetoothd` can stall Wi-Fi, which takes SSH with it. Changes there get a stress test (enter and leave 10 times while pinging the handheld) (*review*).
+3. **Do as little to the radio as possible.** Wi-Fi and Bluetooth share one chip (RTL8821CS, rtw88). Power-cycling Bluetooth or restarting `bluetoothd` can stall Wi-Fi, which takes SSH with it. Changes there get a stress test (enter and leave 10 times while pinging the handheld) (*review*, done 2026-10-26: BT Controller mode 20 times on and off, 340/340 pings answered, worst 13.5 ms, no new rtw88 errors).
 4. **Nothing writes to the power chip, regulators or charging limits** (`axp*`, `regulator`, `input_current_limit`, `/dev/mem`, `i2cset`) without a documented reason and a recovery plan. As of 2026-10-26, nothing in Handtop does.
 
 ## 7. Trade-offs are decided, not assumed

@@ -709,7 +709,14 @@ def xbox_identity(on):
                 pass
         log("bluetoothd: original identity")
     subprocess.run(["systemctl", "daemon-reload"])
-    subprocess.run(["systemctl", "restart", "bluetooth.service"])
+    if on:
+        subprocess.run(["systemctl", "restart", "bluetooth.service"])
+    else:
+        # Queued, not waited for: when this runs during our own unit's stop (systemctl stop, a
+        # switch to Wired mode, shutdown, ExecStopPost), systemd holds the bluetooth restart
+        # until our stop has finished, and waiting for it deadlocked until the 90 s stop timeout
+        # killed us (SIGKILL). Found by the BT stress test, 2026-10-26.
+        subprocess.run(["systemctl", "--no-block", "restart", "bluetooth.service"])
     unblock_bt()
     if on:                       # let bluetoothd bring the adapter up before we change its settings
         for _ in range(50):
