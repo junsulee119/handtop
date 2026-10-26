@@ -8,7 +8,7 @@ OLD=$(cat "$R/rg35xxh-autostart.pgid" 2>/dev/null)
 ME=$(ps -o pgid= -p $$ | tr -d ' ')
 [ -n "$OLD" ] && [ "$OLD" != "$ME" ] \
   && ps -eo pgid=,args= | awk -v g="$OLD" '$1 == g' | grep -q "labwc/autostart" \
-  && kill -TERM -- "-$OLD" 2>/dev/null          # only if that group still is an old autostart
+  && kill -TERM "-$OLD" 2>/dev/null   # (no "--": dash, which runs this, rejects it) only if that group still is an old autostart
 echo "$ME" > "$R/rg35xxh-autostart.pgid"
 echo 0 > "$R/rg35xxh-session-starts"   # labwc is up: reset the failed-start counter (zz-rg35xxh-session.sh)
 dbus-update-activation-environment --systemd WAYLAND_DISPLAY XDG_CURRENT_DESKTOP >/dev/null 2>&1
@@ -22,6 +22,9 @@ rg35xxh-themed mako >"$L/mako.log" 2>&1 &   # (a ~/.config/mako/config still win
 lxpolkit >"$L/lxpolkit.log" 2>&1 &
 nm-applet --indicator >"$L/nm-applet.log" 2>&1 &
 rg35xxh-bluetooth --watch >"$L/bluetooth.log" 2>&1 &   # taskbar Bluetooth icon (no blueman applet)
-command -v tailscale >/dev/null && tailscale systray >"$L/tailscale-systray.log" 2>&1 &   # Tailscale tray icon
+# Tailscale tray icon: only once Waybar's tray host is up (tailscale systray gives up for good
+# when nobody hosts tray icons yet: no icon at all after some boots)
+command -v tailscale >/dev/null && { gdbus wait --session --timeout 30 org.kde.StatusNotifierWatcher; \
+  exec tailscale systray; } >"$L/tailscale-systray.log" 2>&1 &
 . /etc/rg35xxh/power.conf 2>/dev/null   # auto-sleep after AUTOSLEEP_MINUTES without input (0 = off)
 [ "${AUTOSLEEP_MINUTES:-0}" -gt 0 ] && swayidle -w timeout $((AUTOSLEEP_MINUTES * 60)) rg35xxh-autosleep >>"$L/autosleep.log" 2>&1 &
