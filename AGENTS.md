@@ -13,6 +13,18 @@ Code here runs on a handheld with a fragile kernel driver stack. A careless chan
 - Never write to the power chip, regulators or charging limits (`axp*`, `regulator`, `input_current_limit`, `/dev/mem`, `i2cset`).
 - Never run the input daemon, or anything that opens `/dev/input` or `/dev/uinput`, inside the build chroot or on the build host.
 
+## Trade-offs: ask before you implement
+
+When a fix or a design choice works against intended behaviour or makes the experience worse, **stop before implementing it**: describe the trade-off to the user or maintainer and let them decide. This covers, for example:
+
+- a feature that is lost or limited;
+- an extra step, a slower path or a new confirmation;
+- a changed default;
+- something on screen that gets hidden or covered;
+- a cost in battery life, memory or speed.
+
+A safety fix is no exception: it is still their call how much experience to give up for it. Lay out the options, including keeping the current behaviour, with what each costs, and recommend one. In a PR, list every trade-off under its own heading in the description, with the decision and who made it; never let one slip in silently. Record accepted trade-offs in the component's doc (for example: with both open, the on-screen keyboard covers the launcher's bottom rows).
+
 ## Repository layout
 
 | Path | What |
@@ -64,7 +76,7 @@ Code here runs on a handheld with a fragile kernel driver stack. A careless chan
 - Commit subject: `Area: what changed` (for example `Input daemon: …`, `Session: …`, `build: …`, `Docs: …`), under about 90 characters.
 - Commit body: the problem, the cause, the fix (one bullet per change), and **how it was tested** (on the device or not).
 - One topic per PR. Don't mix a refactor with a behaviour change.
-- The PR description includes: what and why; how it was tested (unit tests, QEMU or headless, device model); the hardware-safety checklist with answers, if the change touches anything listed under "Read this first".
+- The PR description includes: what and why; **trade-offs** and who decided them (see "Trade-offs: ask before you implement"); how it was tested (unit tests, QEMU or headless, device model); the hardware-safety checklist with answers, if the change touches anything listed under "Read this first".
 
 ## Do not
 
@@ -72,3 +84,4 @@ Code here runs on a handheld with a fragile kernel driver stack. A careless chan
 - Do not add endless or rapidly re-uploaded vibration effects; all vibration goes through the input daemon's motor gate.
 - Do not start a second instance of something that owns a device, and do not kill a hardware owner without waiting for it to exit.
 - Do not merge hardware-facing changes that were only tested in QEMU or headless.
+- Do not implement a trade-off against intended behaviour or the user experience without the user's or maintainer's decision.
