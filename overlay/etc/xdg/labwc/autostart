@@ -21,7 +21,7 @@ rg35xxh-battery --animate >"$L/battery.log" 2>&1 &   # taskbar battery icon (cha
 rg35xxh-themed mako >"$L/mako.log" 2>&1 &   # (a ~/.config/mako/config still wins)
 lxpolkit >"$L/lxpolkit.log" 2>&1 &
 nm-applet --indicator >"$L/nm-applet.log" 2>&1 &
-blueman-applet >"$L/blueman.log" 2>&1 &
+rg35xxh-bluetooth --watch >"$L/bluetooth.log" 2>&1 &   # taskbar Bluetooth icon (no blueman applet)
 command -v tailscale >/dev/null && tailscale systray >"$L/tailscale-systray.log" 2>&1 &   # Tailscale tray icon
 . /etc/rg35xxh/power.conf 2>/dev/null   # auto-sleep after AUTOSLEEP_MINUTES without input (0 = off)
 [ "${AUTOSLEEP_MINUTES:-0}" -gt 0 ] && swayidle -w timeout $((AUTOSLEEP_MINUTES * 60)) rg35xxh-autosleep >>"$L/autosleep.log" 2>&1 &

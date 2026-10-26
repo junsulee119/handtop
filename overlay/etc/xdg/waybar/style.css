@@ -11,6 +11,7 @@ window#waybar { background: #1a1e26; color: #e8eaee; border-top: 1px solid #333a
 #clock { padding: 0 12px; }
 #image.battery { padding: 0 0 0 12px; margin-top: 1px; }   /* icon, then the % (#battery) */
 #battery { padding: 0; }
-#image.inputmode { padding: 0 0 0 8px; margin-top: 1px; }   /* centres the 23 px icon in the 31 px under the border */
+#image.inputmode { padding: 0 0 0 8px; margin-top: 1px; }
+#image.bluetooth { padding: 0 0 0 8px; margin-top: 1px; }   /* centres the 23 px icon in the 31 px under the border */
 #battery.warning { color: #ffcc66; }
 #battery.critical { color: #ff6b6b; }

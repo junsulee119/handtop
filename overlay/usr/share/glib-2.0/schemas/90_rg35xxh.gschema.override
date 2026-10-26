@@ -6,3 +6,9 @@ icon-theme='Adwaita'
 cursor-theme='Handtop'
 cursor-size=24
 color-scheme='prefer-dark'
+
+[org.blueman.general]
+# blueman's applet runs only while Bluetooth Manager is open (rg35xxh-bluetooth --manager); its
+# tray icon (StatusIcon -> blueman-tray; ShowConnected and StatusNotifierItem pull it in) would
+# duplicate Handtop's own taskbar Bluetooth icon
+plugin-list=['!StatusIcon', '!ShowConnected', '!StatusNotifierItem']

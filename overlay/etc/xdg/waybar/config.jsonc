@@ -5,7 +5,7 @@
   "height": 32,
   "spacing": 4,
   "modules-left": ["custom/apps", "wlr/taskbar"],
-  "modules-right": ["image#inputmode", "tray", "image#battery", "battery", "clock", "custom/power"],
+  "modules-right": ["image#inputmode", "image#bluetooth", "tray", "image#battery", "battery", "clock", "custom/power"],
 
   // Apps / power: text-free pixel icons as CSS backgrounds (panel-apps.png, panel-power[-light].png)
   "custom/apps":  { "format": "Apps", "tooltip": false, "on-click": "rg35xxh-drawer" },
@@ -17,6 +17,9 @@
   // followed by the percentage from the battery module.
   "image#battery": { "exec": "rg35xxh-battery", "size": 20, "interval": 30, "signal": 9 },
   "image#inputmode": { "exec": "rg35xxh-inputmode", "size": 23, "interval": 10, "signal": 8 },
+  // Bluetooth: own icon instead of blueman's tray (rg35xxh-bluetooth; --watch sends signal 10)
+  "image#bluetooth": { "exec": "rg35xxh-bluetooth", "size": 23, "interval": 60, "signal": 10,
+                       "on-click": "rg35xxh-bluetooth --manager", "tooltip": false },
 
   "wlr/taskbar": {
     "format": "{icon}",

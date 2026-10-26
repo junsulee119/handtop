@@ -1,0 +1,69 @@
+#!/bin/sh
+# Bluetooth on the taskbar without blueman's always-running applet + tray (~55 MB of memory).
+#   rg35xxh-bluetooth            Waybar image module "image#bluetooth": prints the icon for the
+#                                current state (Handtop pixel art, gen_bt_icons.py): off (or
+#                                blocked), on, on + a device connected (green dot)
+#   rg35xxh-bluetooth --watch    started by the labwc autostart: follows BlueZ's signals
+#                                (adapter powered, device connected / disconnected, bluetoothd
+#                                restarted) and tells Waybar to redraw the icon at once. Also
+#                                remembers whether you turned Bluetooth off (bluetoothd alone
+#                                switches it on at every start) and turns it off again at log-in
+#   rg35xxh-bluetooth --manager  taskbar click: the Bluetooth Manager window. blueman's applet
+#                                runs only while it is open (pairing agent, notifications) and
+#                                without its own tray icon (its StatusIcon plugin is switched off
+#                                in the gsettings defaults, 90_rg35xxh.gschema.override)
+ICONS=/usr/local/share/icons/hicolor/22x22/status
+SIG=10                          # Waybar "signal" of image#bluetooth
+SAVED="$HOME/.local/state/rg35xxh-bluetooth-power"   # "off" after you switched it off
+
+state() {
+  for r in /sys/class/rfkill/rfkill*; do
+    [ "$(cat "$r/type" 2>/dev/null)" = bluetooth ] && [ "$(cat "$r/soft" 2>/dev/null)" = 1 ] && { echo off; return; }
+  done
+  case "$(busctl get-property org.bluez /org/bluez/hci0 org.bluez.Adapter1 Powered 2>/dev/null)" in
+    "b true") ;;
+    *) echo off; return ;;
+  esac
+  [ -n "$(bluetoothctl devices Connected 2>/dev/null)" ] && echo connected || echo on
+}
+
+case "${1:-}" in
+  "")
+    case "$(state)" in
+      off) echo "$ICONS/blueman-disabled.png" ;;
+      connected) echo "$ICONS/blueman-active.png" ;;
+      *) echo "$ICONS/blueman-tray.png" ;;
+    esac ;;
+  --watch)
+    if [ "$(cat "$SAVED" 2>/dev/null)" = off ]; then      # your choice from the last session
+      i=0
+      until busctl get-property org.bluez /org/bluez/hci0 org.bluez.Adapter1 Powered >/dev/null 2>&1 \
+            || [ $i -ge 30 ]; do sleep 1; i=$((i + 1)); done
+      bluetoothctl power off >/dev/null 2>&1
+    fi
+    while :; do
+      pkill -RTMIN+$SIG -x waybar          # (also after bluetoothd restarts: BT Controller mode)
+      gdbus monitor --system --dest org.bluez 2>/dev/null | while read -r line; do
+        case "$line" in
+          *Powered*)
+            pkill -RTMIN+$SIG -x waybar
+            # remember on / off, but not the off / on of External Controller mode's set-up
+            [ -e "$XDG_RUNTIME_DIR/rg35xxh-bt-mode" ] || [ -e "$XDG_RUNTIME_DIR/rg35xxh-wired-mode" ] \
+              || { [ "$(state)" = off ] && echo off || echo on; } > "$SAVED" ;;
+          *\'Connected\'*|*InterfacesAdded*|*InterfacesRemoved*) pkill -RTMIN+$SIG -x waybar ;;
+        esac
+      done
+      sleep 2
+    done ;;
+  --manager)
+    started=
+    if ! pgrep -x -f "/usr/bin/python3 /usr/bin/blueman-applet" >/dev/null; then
+      blueman-applet >/dev/null 2>&1 &
+      started=$!
+      sleep 1
+    fi
+    blueman-manager >/dev/null 2>&1
+    [ -n "$started" ] && kill "$started" 2>/dev/null
+    ;;
+  *) echo "usage: rg35xxh-bluetooth [--watch|--manager]" >&2; exit 2 ;;
+esac
