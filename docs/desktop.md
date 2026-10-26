@@ -22,13 +22,17 @@ Sway (ROCKNIX's default) is a keyboard-driven tiling WM — unsuitable for gamep
 - OpenGL/GLES via Panfrost (Mesa) for the compositor and GL apps (browser rendering, Moonlight).
 - **Hardware video decode for Moonlight** (H.264/HEVC, up to 1080p60) via the Cedrus V4L2 stateless decoder — see [video-decode.md](video-decode.md). Other players (mpv, browsers) still decode on the CPU.
 
+## Session start and log out
+
+Auto-login on tty1 starts labwc (`/etc/profile.d/zz-rg35xxh-session.sh`); **Log out** ends labwc, getty logs in again and a fresh session starts. labwc runs `/etc/xdg/labwc/autostart` in its own process group. Wayland clients (Waybar, applets, …) end with labwc, but the helpers that are not (input daemon loop, battery icon animation, Tailscale tray) would outlive it: so each autostart first stops the previous session's process group (its id is kept in `$XDG_RUNTIME_DIR/rg35xxh-autostart.pgid`) and resets the failed-start counter that `zz-rg35xxh-session.sh` uses (3 failed starts in a row leave a shell on tty1). Found 2026-10-26: after a log-out the taskbar showed two Tailscale icons and two input daemons were running.
+
 ## Shell components: Waybar + nwg-drawer + wlogout
 
 | Role | Tool | Notes |
 |---|---|---|
 | Panel | **Waybar** | Bottom taskbar, classic-desktop styling: open windows, clock, battery, tray |
 | Launcher | **nwg-drawer** | Full-screen app icon grid — usable with mouse/D-pad (type-to-search launchers rejected: no keyboard) |
-| Power menu | **wlogout** | Full-screen large buttons: Shut down / Log out / Restart / Sleep. Opened by Power (tap) |
+| Power menu | **wlogout** | Full-screen large buttons: Sleep, Restart / Log out, Shut down. Opened by Power (tap) |
 | Notifications | **mako** | |
 
 Chosen over LXQt-on-labwc (heavier) and sfwbar (smaller community) for low RAM and gamepad-friendly large targets.

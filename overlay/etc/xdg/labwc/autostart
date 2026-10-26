@@ -1,5 +1,16 @@
 # labwc session autostart (system default; a user file in ~/.config/labwc overrides it)
 L="$HOME/.local/state/session"; mkdir -p "$L" "$HOME/.cache"
+# After a log-out, the helpers that are not Wayland clients (input daemon loop, battery icon
+# animation, Tailscale tray) outlive labwc: stop the previous session's whole process group
+# (labwc starts each autostart in its own session) before starting new ones.
+R="${XDG_RUNTIME_DIR:-/tmp}"
+OLD=$(cat "$R/rg35xxh-autostart.pgid" 2>/dev/null)
+ME=$(ps -o pgid= -p $$ | tr -d ' ')
+[ -n "$OLD" ] && [ "$OLD" != "$ME" ] \
+  && ps -eo pgid=,args= | awk -v g="$OLD" '$1 == g' | grep -q "labwc/autostart" \
+  && kill -TERM -- "-$OLD" 2>/dev/null          # only if that group still is an old autostart
+echo "$ME" > "$R/rg35xxh-autostart.pgid"
+echo 0 > "$R/rg35xxh-session-starts"   # labwc is up: reset the failed-start counter (zz-rg35xxh-session.sh)
 dbus-update-activation-environment --systemd WAYLAND_DISPLAY XDG_CURRENT_DESKTOP >/dev/null 2>&1
 (while :; do rg35xxh-inputd >>"$L/inputd.log" 2>&1; sleep 2; done) &
 rg35xxh-osd >"$L/osd.log" 2>&1 &     # volume / brightness bar, left edge (src/osd)
