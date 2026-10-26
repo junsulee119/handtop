@@ -339,75 +339,89 @@ class Pad:
 
 
 def main():
+    # Everything from the first step that touches the USB controller is inside the try: a set-up
+    # that fails halfway (no UDC, FunctionFS refused, endpoint not opening) still unbinds and
+    # removes the gadget (docs/hardware-safety.md, rule 2.3). gadget_down() copes with any stage.
     loop = GLib.MainLoop()
-    status = Status()
-    pad = Pad(status, lambda: (loop.quit(), False)[1])
     fds = []
-    gadget_up()
-    ep0 = os.open(f"{FFS}/ep0", os.O_RDWR)
-    fds.append(ep0)
-    os.write(ep0, descriptors())
-    os.write(ep0, struct.pack("<IIII", 2, 16, 0, 0))     # no strings
-    udc = os.listdir("/sys/class/udc")[0]
-    w(f"{G}/UDC", udc)
-    log("USB gadget on", udc, "(right USB-C port, OTG2/DC)")
-    ep_in = os.open(f"{FFS}/ep1", os.O_RDWR)
-    ep_out = os.open(f"{FFS}/ep2", os.O_RDWR)
-    fds += [ep_in, ep_out]
-
-    def ep0_events():
-        while True:
-            try:
-                ev = os.read(ep0, 12 * 4)
-            except OSError:
-                return
-            for i in range(0, len(ev), 12):
-                setup, etype = ev[i:i + 8], ev[i + 8]
-                if etype == 2:                                   # ENABLE: PC configured us
-                    GLib.idle_add(lambda: status.update(state="connected", device=HOST_NAME) and False)
-                    log("connected to a PC")
-                elif etype in (1, 3, 5):                         # UNBIND / DISABLE / SUSPEND
-                    GLib.idle_add(lambda: status.update(state="cable", device=None) and False)
-                elif etype == 6:                                 # RESUME
-                    GLib.idle_add(lambda: status.update(state="connected", device=HOST_NAME) and False)
-                elif etype == 4:                                 # vendor requests: not needed, stall
-                    try:
-                        os.read(ep0, 0) if setup[0] & 0x80 else os.write(ep0, b"")
-                    except OSError:
-                        pass
-
-    def ep_out_reader():
-        while True:
-            try:
-                d = os.read(ep_out, 64)
-            except OSError:
-                time.sleep(0.5)
-                continue
-            if len(d) >= 5 and d[0] == 0x00 and d[1] == 0x08:    # rumble: 00 08 00 big small ...
-                pad.rumble_request(d[3], d[4])
-
-    for fn, args in ((ep0_events, ()), (ep_out_reader, ()), (pad.writer, (ep_in,))):
-        threading.Thread(target=fn, args=args, daemon=True).start()
-
-    def no_pad():
-        if pad.conn is None:
-            log("input daemon did not connect within 60 s: stopping")
-            loop.quit()
-        return False
-    GLib.timeout_add_seconds(60, no_pad)
-
-    def rate():
-        status.update(rate=pad.sent)
-        pad.sent = 0
-        return True
-    GLib.timeout_add_seconds(1, rate)
-    for sig in (signal.SIGTERM, signal.SIGINT):
-        GLib.unix_signal_add(GLib.PRIORITY_DEFAULT, sig, lambda *a: (loop.quit(), False)[1])
+    status = pad = None
     try:
+        status = Status()
+        pad = Pad(status, lambda: (loop.quit(), False)[1])
+        gadget_up()
+        ep0 = os.open(f"{FFS}/ep0", os.O_RDWR)
+        fds.append(ep0)
+        os.write(ep0, descriptors())
+        os.write(ep0, struct.pack("<IIII", 2, 16, 0, 0))     # no strings
+        udcs = os.listdir("/sys/class/udc")
+        if not udcs:
+            raise RuntimeError("no USB device controller (UDC) found")
+        udc = udcs[0]
+        w(f"{G}/UDC", udc)
+        log("USB gadget on", udc, "(right USB-C port, OTG2/DC)")
+        if os.environ.get("RG35XXH_USBPAD_TEST_FAIL"):     # testing: fail right after binding
+            raise RuntimeError("test failure after binding the gadget (RG35XXH_USBPAD_TEST_FAIL)")
+        ep_in = os.open(f"{FFS}/ep1", os.O_RDWR)
+        fds.append(ep_in)
+        ep_out = os.open(f"{FFS}/ep2", os.O_RDWR)
+        fds.append(ep_out)
+
+        def ep0_events():
+            while True:
+                try:
+                    ev = os.read(ep0, 12 * 4)
+                except OSError:
+                    return
+                for i in range(0, len(ev), 12):
+                    setup, etype = ev[i:i + 8], ev[i + 8]
+                    if etype == 2:                                   # ENABLE: PC configured us
+                        GLib.idle_add(lambda: status.update(state="connected", device=HOST_NAME) and False)
+                        log("connected to a PC")
+                    elif etype in (1, 3, 5):                         # UNBIND / DISABLE / SUSPEND
+                        GLib.idle_add(lambda: status.update(state="cable", device=None) and False)
+                    elif etype == 6:                                 # RESUME
+                        GLib.idle_add(lambda: status.update(state="connected", device=HOST_NAME) and False)
+                    elif etype == 4:                                 # vendor requests: not needed, stall
+                        try:
+                            os.read(ep0, 0) if setup[0] & 0x80 else os.write(ep0, b"")
+                        except OSError:
+                            pass
+
+        def ep_out_reader():
+            while True:
+                try:
+                    d = os.read(ep_out, 64)
+                except OSError:
+                    time.sleep(0.5)
+                    continue
+                if len(d) >= 5 and d[0] == 0x00 and d[1] == 0x08:    # rumble: 00 08 00 big small ...
+                    pad.rumble_request(d[3], d[4])
+
+        for fn, args in ((ep0_events, ()), (ep_out_reader, ()), (pad.writer, (ep_in,))):
+            threading.Thread(target=fn, args=args, daemon=True).start()
+
+        def no_pad():
+            if pad.conn is None:
+                log("input daemon did not connect within 60 s: stopping")
+                loop.quit()
+            return False
+        GLib.timeout_add_seconds(60, no_pad)
+
+        def rate():
+            status.update(rate=pad.sent)
+            pad.sent = 0
+            return True
+        GLib.timeout_add_seconds(1, rate)
+        for sig in (signal.SIGTERM, signal.SIGINT):
+            GLib.unix_signal_add(GLib.PRIORITY_DEFAULT, sig, lambda *a: (loop.quit(), False)[1])
         loop.run()
     finally:
-        pad.close()
-        status.close()
+        for part in (pad, status):
+            if part is not None:
+                try:
+                    part.close()
+                except Exception as e:
+                    log("close:", e)
         gadget_down(fds)
 
 

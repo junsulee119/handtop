@@ -17,7 +17,7 @@ Where they come from:
 
 1. **Every program that holds hardware has a clean exit that releases it in order:** stop what is running first (motor, USB transfers, advertising), then free it (erase effects, remove the gadget), then let go (ungrab, close).
 2. **The clean exit runs on every way out:** `SIGTERM`/`SIGINT`/`SIGHUP`, errors, a lost device, a lost connection, and a stop that arrives during start-up. Install the signal handling before taking hardware, and make the release step idempotent: run it twice, or after a partial set-up, without harm.
-3. **A failed set-up unwinds itself.** Wrap the whole set-up, not only the main loop, so a failure halfway releases what was already taken (*review: Wired controller mode*). Also clean up leftovers of an earlier run before starting.
+3. **A failed set-up unwinds itself.** Wrap the whole set-up, not only the main loop, so a failure halfway releases what was already taken (*review: Wired controller mode*, done). Also clean up leftovers of an earlier run before starting.
 4. **Re-opening a device is an exit too.** Release before close, then reset everything that belonged to the old handle, such as effect IDs. The input daemon's `_release_effects()` does this for the clean exit and the stick re-centre. (*review: Re-center sticks*, done)
 
 ## 3. Nothing may end or freeze a hardware owner behind its back
