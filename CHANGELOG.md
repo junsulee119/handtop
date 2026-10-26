@@ -9,6 +9,24 @@
 - **Extend** puts the handheld **below** the monitor (centred) instead of to its right.
 - **Pointer speed follows the screen:** on a monitor the stick / D-pad pointer moves faster in proportion to its size (1080p ≈ 2.75×; `display_speed_scale`, 0 = off). The handheld's pointer no longer gets libinput acceleration, so its speed is exactly what `input.conf` says.
 - D-pad pointer speed is now **half of the stick's** top speed (`dpad_speed_ratio = 0.5`, 225 px/s; it was a fixed 286 px/s) and follows `pointer_max_speed`. An older `dpad_speed` (px/s) in your own config is still understood.
+- **Log out cleans up the previous session safely.** In v0.2.0 a log-out left the old session's helpers running (a second input daemon, a second Tailscale icon). Stopping them is new, and its first version froze the whole handheld during development (never released): the old input daemon, which owns the gamepad and vibration motor, was killed while the new one took over. Now there is one daemon at a time, it releases the hardware cleanly on every stop, the next session waits for it, and its on-screen keyboard runs in a separate process so a log-out can't cut it short. If a handheld ever shows only a solid red LED and won't boot, see `docs/flashing.md`.
+- **"Controls restarted":** if the input daemon ever stops responding, it is restarted within about 10 s (before, every button including Power stayed dead).
+- **Safety review of everything that touches hardware** (`docs/hardware-safety.md`, plus `AGENTS.md` for contributors). Fixes from it: Re-center sticks and leaving gamepad mode stop vibration before releasing it; a failed Wired Controller start no longer leaves the USB port set up; switching from BT Controller to USB cable (or shutting down) while the Bluetooth mode is on no longer hangs for 90 s; External Controller says so if the input daemon isn't running.
+- **Screen off** (from a terminal, `rg35xxh-screen-off`) never auto-sleeps any more, so SSH and downloads keep running. At 20 % battery (not charging) the screen comes back on with a warning that stays until tapped and a vibration; at 5 % it shuts down cleanly.
+- **Hardware video decoding in mpv and FFmpeg** (H.264, HEVC, MPEG-2, VP8 on the Cedrus VPU, zero-copy) through a V4L2 request-API FFmpeg build (PR #3). Details: `docs/video-decode.md`.
+- **Click-to-mount** for the TF2 card and USB sticks in Files (no password), with "inserted" / "removed" toasts; tapping "inserted" opens Files. Eject on SD cards works.
+- **BT Controller mode:** no more stick lag on Windows (shorter Bluetooth interval, reports paced); survives a Bluetooth soft block.
+- **New look:**
+  - Handtop logo, carved logo wallpapers (dark / light), and an animated boot screen: the logo's keyboard types while the live boot log scrolls beside it.
+  - Pixel-art mouse cursor (dark-outlined, Adwaita for the rest); applies after logging out and back in.
+  - Power menu: pixel-art icons, order Sleep, Restart / Log out, Shut down. Taskbar: Apps button with a 3x3 grid, red power button, even spacing.
+  - Default apps renamed with pixel-art icons: Terminal, File Manager, Text Editor, Web Browser, System Monitor, Code Editor, PDF Viewer, Archive Manager (also in window title bars).
+  - Wi-Fi and Bluetooth tray icons in pixel art; terminal colours softened to Handtop's palette; the BT / wired input-mode icons got a dark outline.
+  - The External Controller status screen follows the theme: solid in dark, hologram in light.
+- **On-screen keyboard:** laid out like a real keyboard (staggered rows, Enter and Backspace in their usual places, ↑ above ↓), light theme, a press trace on every typed key, hold A to repeat, L2 = Shift while it is open, badges for the shoulder buttons' keys. It now stays on top of the Apps screen (covering its bottom rows).
+- **Volume / brightness bar** rewritten as a small native program (pixel-font level, vertical at the left edge).
+- **Bluetooth taskbar icon** without blueman's tray applet (~55 MB less memory): tap for Bluetooth Manager; Bluetooth off is remembered across reboots.
+- The Tailscale tray icon no longer goes missing after some boots.
 
 ## v0.2.0
 
