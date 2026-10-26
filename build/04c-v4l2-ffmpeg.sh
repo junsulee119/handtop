@@ -111,16 +111,18 @@ chroot_mount
 in_chroot "ldconfig"
 [[ "$(in_chroot "command -v ffmpeg")" == "/usr/bin/ffmpeg" ]] || die "ffmpeg in PATH is not /usr/bin/ffmpeg"
 [[ "$(in_chroot "ffmpeg -version")" == *"${KWIBOO_PIN:0:7}"* ]] || die "patched ffmpeg is not the installed one"
-in_chroot "ffmpeg -hide_banner -hwaccels" | grep -qw v4l2request || die "installed ffmpeg has no v4l2request hwaccel"
-in_chroot "ffmpeg -hide_banner -decoders" | grep -qw libdav1d || die "installed ffmpeg has no dav1d decoder"
+in_chroot "ffmpeg -hide_banner -hwaccels" | grep -w v4l2request >/dev/null || die "installed ffmpeg has no v4l2request hwaccel"
+in_chroot "ffmpeg -hide_banner -decoders" | grep -w libdav1d >/dev/null || die "installed ffmpeg has no dav1d decoder"
 
+# (grep without -q below: -q stops reading at the first match, the long ffmpeg list then dies of
+# SIGPIPE, and with pipefail the check fails although the match was found.)
 # The distro build has these; without them the replacement is a downgrade
 # (no https in libavformat, no common encoders, no subtitle rendering).
-in_chroot "ffmpeg -hide_banner -protocols" | grep -qw https || die "installed ffmpeg has no https protocol (gnutls)"
+in_chroot "ffmpeg -hide_banner -protocols" | grep -w https >/dev/null || die "installed ffmpeg has no https protocol (gnutls)"
 for enc in libx264 libmp3lame libopus libvorbis libvpx; do
-  in_chroot "ffmpeg -hide_banner -encoders" | grep -qw "$enc" || die "installed ffmpeg has no $enc encoder"
+  in_chroot "ffmpeg -hide_banner -encoders" | grep -w "$enc" >/dev/null || die "installed ffmpeg has no $enc encoder"
 done
-in_chroot "ffmpeg -hide_banner -filters" | grep -qw ass || die "installed ffmpeg has no ass filter (libass)"
+in_chroot "ffmpeg -hide_banner -filters" | grep -w ass >/dev/null || die "installed ffmpeg has no ass filter (libass)"
 
 # -init_hw_device alone just prints the usage screen; give it something to do.
 # An unregistered type fails with "unknown device type" (exit 234).
@@ -133,7 +135,7 @@ in_chroot "ffmpeg -hide_banner -v error -init_hw_device v4l2request -f lavfi -i 
 drm_ok=0
 for _ in 1 2 3; do
   in_chroot "ldconfig"
-  if in_chroot "mpv --hwdec=help" | grep -qw drm; then drm_ok=1; break; fi
+  if in_chroot "mpv --hwdec=help" | grep -w drm >/dev/null; then drm_ok=1; break; fi
   sleep 1
 done
 if [ "$drm_ok" != 1 ]; then
@@ -152,7 +154,7 @@ done
 [ -n "$hold" ] || die "none of the libav packages are installed, cannot hold them"
 in_chroot "apt-mark hold $hold"
 for p in $hold; do
-  in_chroot "apt-mark showhold" | grep -qw "$p" || die "apt-mark hold did not take for $p"
+  in_chroot "apt-mark showhold" | grep -w "$p" >/dev/null || die "apt-mark hold did not take for $p"
 done
 
 in_chroot "apt-get purge -y -qq ${DEV_PKGS[*]} && apt-get autoremove -y -qq --purge && apt-get clean"
