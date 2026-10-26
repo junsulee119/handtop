@@ -1,5 +1,11 @@
 [Desktop Entry]
 Type=Application
 Name=mpv
+GenericName=Media Player
+Comment=Play a video or audio file
+Exec=mpv -- %U
+Icon=mpv
+Terminal=false
 NoDisplay=true
-Hidden=false
+Categories=AudioVideo;Video;Player;
+MimeType=video/mp4;video/x-matroska;video/webm;video/quicktime;video/x-msvideo;video/mpeg;video/mp2t;video/ogg;video/x-theora+ogg;audio/mpeg;audio/mp3;audio/flac;audio/x-flac;audio/ogg;audio/x-wav;audio/wav;audio/mp4;audio/x-m4a;audio/x-mpegurl;

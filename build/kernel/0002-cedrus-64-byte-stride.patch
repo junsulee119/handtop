@@ -1,0 +1,72 @@
+From: handtop <handtop@localhost>
+Subject: [PATCH] staging: media: sunxi: cedrus: use a 64-byte aligned output stride
+
+A DRM PRIME consumer that hands the decoded picture straight to the GPU
+only imports linear surfaces whose stride and plane offsets are 64-byte
+aligned.  Mali (through panfrost) refuses anything else:
+
+  MESA: panfrost: rejecting image due to unsupported offset or stride alignment
+
+and the frame never reaches the screen -- mpv keeps its clear colour, so
+the picture is a flat rectangle.  The stride the VPU writes with is
+programmable (VE_PRIMARY_FB_LINE_STRIDE), so align the capture stride to
+64 bytes instead of 16.  That keeps the stride and the chroma plane offset
+64-byte aligned for every picture width, and zero-copy playback then works
+for all of them instead of only for widths that are a multiple of 64.
+
+The stride register is now programmed from the negotiated bytesperline, so
+the driver and the hardware cannot disagree about the layout.
+
+---
+--- a/drivers/staging/media/sunxi/cedrus/cedrus_hw.c
++++ b/drivers/staging/media/sunxi/cedrus/cedrus_hw.c
+@@ -79,7 +79,6 @@
+ void cedrus_dst_format_set(struct cedrus_dev *dev,
+ 			   struct v4l2_pix_format *fmt)
+ {
+-	unsigned int width = fmt->width;
+ 	unsigned int height = fmt->height;
+ 	u32 chroma_size;
+ 	u32 reg;
+@@ -89,7 +88,7 @@
+ 	case V4L2_PIX_FMT_NV21:
+ 	case V4L2_PIX_FMT_YUV420:
+ 	case V4L2_PIX_FMT_YVU420:
+-		chroma_size = ALIGN(width, 16) * ALIGN(height, 16) / 2;
++		chroma_size = fmt->bytesperline * ALIGN(height, 16) / 2;
+
+ 		switch (fmt->pixelformat) {
+ 		case V4L2_PIX_FMT_NV12:
+@@ -111,8 +110,8 @@
+ 		reg = chroma_size / 2;
+ 		cedrus_write(dev, VE_PRIMARY_CHROMA_BUF_LEN, reg);
+
+-		reg = VE_PRIMARY_FB_LINE_STRIDE_LUMA(ALIGN(width, 16)) |
+-		      VE_PRIMARY_FB_LINE_STRIDE_CHROMA(ALIGN(width, 16) / 2);
++		reg = VE_PRIMARY_FB_LINE_STRIDE_LUMA(fmt->bytesperline) |
++		      VE_PRIMARY_FB_LINE_STRIDE_CHROMA(fmt->bytesperline / 2);
+ 		cedrus_write(dev, VE_PRIMARY_FB_LINE_STRIDE, reg);
+
+ 		break;
+--- a/drivers/staging/media/sunxi/cedrus/cedrus_video.c
++++ b/drivers/staging/media/sunxi/cedrus/cedrus_video.c
+@@ -153,8 +153,17 @@
+ 	case V4L2_PIX_FMT_NV21:
+ 	case V4L2_PIX_FMT_YUV420:
+ 	case V4L2_PIX_FMT_YVU420:
+-		/* 16-aligned stride. */
+-		bytesperline = ALIGN(width, 16);
++		/*
++		 * 64-aligned stride.  A DRM PRIME consumer that hands the
++		 * decoded picture straight to the GPU (Mali, through
++		 * panfrost) only imports linear surfaces whose stride and
++		 * plane offsets are 64-byte aligned; anything else is
++		 * refused ("rejecting image due to unsupported offset or
++		 * stride alignment") and the frame never reaches the
++		 * screen.  Aligning here keeps the stride and the chroma
++		 * plane offset 64-byte aligned for every picture width.
++		 */
++		bytesperline = ALIGN(width, 64);
+
+ 		/* 16-aligned height. */
+ 		height = ALIGN(height, 16);
