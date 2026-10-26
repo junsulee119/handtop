@@ -1,0 +1,11 @@
+[Unit]
+Description=Give the screen back to the text console once the desktop runs
+After=getty@tty1.service rg35xxh-bootlogo.service
+
+[Service]
+# simple, not oneshot: it waits for labwc, and multi-user.target must not wait for it
+Type=simple
+ExecStart=/usr/local/sbin/rg35xxh-bootlogo done
+
+[Install]
+WantedBy=multi-user.target

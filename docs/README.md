@@ -29,6 +29,7 @@ How Handtop works on the RG35XX H. One document per app or background service; g
 | [services/input-daemon.md](services/input-daemon.md) | Input daemon: button mapping, desktop / gamepad modes, mode-change feedback |
 | [services/on-screen-keyboard.md](services/on-screen-keyboard.md) | On-screen keyboard (part of the input daemon) |
 | [services/osd.md](services/osd.md) | Volume / brightness bar |
+| [services/boot-screen.md](services/boot-screen.md) | Boot screen: logo with typing animation and the live boot log |
 | [services/boot-services.md](services/boot-services.md) | Boot and system services (hardware setup, first boot, Wi-Fi import, boot logs, ...) |
 
 ## System

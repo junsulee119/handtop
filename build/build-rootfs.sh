@@ -14,5 +14,6 @@ bash ./06b-cedrus.sh
 bash ./06c-ffs-xinput.sh
 bash ./07-desktop.sh
 bash ./07b-osd.sh
+bash ./07c-bootsplash.sh
 bash ./08-input.sh
 bash ./09-services.sh

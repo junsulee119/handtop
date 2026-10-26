@@ -1,0 +1,14 @@
+[Unit]
+Description=Handtop boot screen (logo, typing animation, boot log)
+# As early as possible: the root file system (with the logo) is mounted by the kernel already.
+DefaultDependencies=no
+Before=sysinit.target shutdown.target
+Conflicts=shutdown.target
+ConditionPathExists=/dev/fb0
+
+[Service]
+Type=simple
+ExecStart=/usr/local/sbin/rg35xxh-bootlogo show
+
+[Install]
+WantedBy=sysinit.target

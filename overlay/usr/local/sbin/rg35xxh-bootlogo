@@ -1,0 +1,33 @@
+#!/bin/sh
+# Boot screen on the handheld from early boot until the desktop takes over, instead of console text.
+#   show  (rg35xxh-bootlogo.service, very early): detach the text console from the framebuffer so
+#         nothing draws over it (no login text, no cursor), put the still logo into /dev/fb0 at
+#         once, then run the animated boot screen (rg35xxh-bootsplash: typing keys + boot log),
+#         which keeps running until stopped.
+#   done  (rg35xxh-bootlogo-done.service): once labwc owns the display, give the framebuffer back
+#         to the text console, so logging out or a failed desktop start shows text again. Also done
+#         after 60 s without labwc (a failed start must not leave a blank screen).
+IMG=/usr/local/share/rg35xxh/bootlogo.xrgb.gz
+
+fbcon() {   # fbcon() 0|1: unbind / bind the framebuffer console
+  for v in /sys/class/vtconsole/vtcon*; do
+    grep -q "frame buffer" "$v/name" 2>/dev/null && echo "$1" > "$v/bind"
+  done
+}
+
+case "$1" in
+  show)
+    [ -e /dev/fb0 ] && [ -r "$IMG" ] || exit 0
+    fbcon 0
+    zcat "$IMG" > /dev/fb0
+    [ -x /usr/local/bin/rg35xxh-bootsplash ] && exec /usr/local/bin/rg35xxh-bootsplash
+    ;;
+  done)
+    i=0
+    while [ $i -lt 120 ] && ! pgrep -x labwc >/dev/null; do sleep 0.5; i=$((i + 1)); done
+    sleep 2            # labwc has the display by now; the console stays hidden behind it
+    systemctl stop rg35xxh-bootlogo.service     # the animation (nothing of it is visible any more)
+    fbcon 1
+    ;;
+  *) echo "usage: rg35xxh-bootlogo show|done" >&2; exit 2 ;;
+esac
