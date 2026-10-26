@@ -1,7 +1,9 @@
 #!/bin/sh
 # Re-center the analog sticks: asks the input daemon to make the stick driver measure the
 # centre again (see rg35xxh-inputd, "stick re-centre"). Keep your hands off the sticks.
-PID=$(pgrep -f '^python3 -m rg35xxh_inputd' | head -1)
+# Exact command line: only the daemon itself (not its wrapper or its on-screen keyboard process,
+# which would die from SIGUSR1; docs/hardware-safety.md rule 4). One daemon at a time (lock).
+PID=$(pgrep -x -f 'python3 -m rg35xxh_inputd\.daemon' | head -1)
 if [ -z "$PID" ]; then
   notify-send -t 4000 "Re-center sticks" "Input daemon is not running"; exit 1
 fi

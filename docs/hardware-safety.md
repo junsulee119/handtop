@@ -29,7 +29,7 @@ Where they come from:
 
 ## 4. Signals reach exactly the intended process
 
-1. **Find targets exactly:** an exact command line (`^python3 -m rg35xxh_inputd\.daemon$`), a PID file, or the lock holder. Never a loose `pkill -f`/`pgrep -f` prefix that can also match a helper, or the command you are typing (*review*).
+1. **Find targets exactly:** an exact command line (`^python3 -m rg35xxh_inputd\.daemon$`), a PID file, or the lock holder. Never a loose `pkill -f`/`pgrep -f` prefix that can also match a helper, or the command you are typing. `pgrep -x -f` / `pkill -x -f` match the whole command line. (*review*: External Controller and Re-center sticks, done)
 2. **Send a process only signals it handles.** An unhandled `SIGUSR1`/`SIGUSR2` or real-time signal kills it by default.
 3. **Real-time signals only to a Waybar that has been running for at least 3 s** (it dies on one that arrives before its handlers are installed). Every sender checks the process age.
 4. **Scripts that run under `/bin/sh` are dash:** `kill -- -PGID` fails there. Test such scripts with `dash`, not `bash`.
