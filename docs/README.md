@@ -8,6 +8,7 @@ How Handtop works on the RG35XX H. One document per app or background service; g
 |---|---|
 | [flashing.md](flashing.md) | Flashing the SD card and first boot |
 | [building.md](building.md) | Building the image, testing and debugging |
+| [hardware-safety.md](hardware-safety.md) | **Rules for changes** to code that holds hardware, changes power states or starts / stops those processes; checklist |
 
 ## Apps (Apps menu / power button)
 
