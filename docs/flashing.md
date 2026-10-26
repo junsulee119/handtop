@@ -25,6 +25,7 @@ Use **Eject** before removing the card.
 5. Login (sudo): user `rg`, password `rg35xxh`. **SSH is off** until you turn it on with Apps → **Enable SSH**, which first asks you to choose your own password.
 
 ## If something is wrong
+- **Solid red LED, black screen, no backlight, even with a known-good card:** the power chip (AXP717) can stay latched after a hard freeze and a forced power-off. Unplug the charger, open the back, disconnect the battery connector for about 30 s, reconnect it and power on. Letting the battery drain completely works too, only slower.
 - **No LED / completely unresponsive:** RG35XX H units shipped with either DDR4 or DDR3 RAM. If the standard image does nothing at all, flash the `-DDR3` image instead (or build with `RAM_TYPE=DDR3`).
 - Logs: `logs\boot-NNNN.txt` on RG35XXHBOOT (written 60 s and 3 min after boot).
 - No picture at all: a USB-to-serial adapter on the UART header (115200 baud) shows the boot messages.

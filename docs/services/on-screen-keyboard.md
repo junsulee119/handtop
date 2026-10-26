@@ -1,8 +1,8 @@
 # On-Screen Keyboard
 
-Part of the input daemon ([input-daemon.md](input-daemon.md), `src/inputd/rg35xxh_inputd/osk.py`).
+Part of the input daemon ([input-daemon.md](input-daemon.md), `src/inputd/rg35xxh_inputd/osk.py`); the window runs in the daemon's display process (`ui.py`).
 
-Design of the built-in on-screen keyboard (OSK). It is part of the input daemon (`src/inputd/rg35xxh_inputd/osk.py`), so the daemon always knows whether it is open and can route the D-pad and A to it.
+Design of the built-in on-screen keyboard (OSK). It is part of the input daemon (`src/inputd/rg35xxh_inputd/osk.py`), so the daemon always knows whether it is open and can route the D-pad and A to it. The GTK window itself lives in a separate child process (`ui.py`, JSON lines over stdin/stdout): the daemon keeps no display connection, so a log-out cannot end it before its clean exit (see [input-daemon.md](input-daemon.md#stopping-restarting-one-instance)).
 
 ## Goals
 
@@ -19,7 +19,7 @@ Design of the built-in on-screen keyboard (OSK). It is part of the input daemon 
 | A | Type the highlighted key (the button bound to `click_left`; A by default). Held: the key repeats after 0.5 s, every 0.06 s (not Shift / Ctrl / Alt / Hide), with the modifiers it was typed with |
 | L2 | Shift (same as the ⇧ key) while the keyboard is open; its desktop binding is skipped then |
 | L1 / R1 / R2 | Esc / Enter / Backspace (physical shortcuts still work while it is open) |
-| Left stick | Still moves the pointer; keys can also be clicked with the pointer |
+| Left stick | Still moves the pointer. The keys are not clicked with the pointer (intended): A is both left click and the keyboard's type button, so a pointer click on a key would make one press do two things. Type with the D-pad and A |
 | Hide key | Same as X |
 
 Moving up/down keeps the horizontal position (picks the key whose centre is closest) and wraps from the top row to the bottom row and back. Left/right wraps around within a row. The highlight starts on `g`.
@@ -40,7 +40,7 @@ Alt  Hide  [        Space        ]  ←  ↓  →
 
 Character keys (letters, digits, symbols, Space) are brighter; special keys (Esc, Tab, Enter, ⌫, ⇧, Ctrl, Alt, arrows, Hide) are darker and bluer.
 
-- **Press trace:** a typed key goes dark (pressed in, unlike the bright highlight) and fades back over 0.35 s when it comes up, so each press is visible even when the highlight has already moved on. With A it stays pressed in while A is held (also during key repeat); with L1 / R1 / R2 the key they type (Esc / Enter / ⌫ by default) does the same while the shoulder button is held; a pointer click flashes it briefly. L2 shows as Shift latching (amber).
+- **Press trace:** a typed key goes dark (pressed in, unlike the bright highlight) and fades back over 0.35 s when it comes up, so each press is visible even when the highlight has already moved on. With A it stays pressed in while A is held (also during key repeat); with L1 / R1 / R2 the key they type (Esc / Enter / ⌫ by default) does the same while the shoulder button is held. L2 shows as Shift latching (amber).
 - **Shift / Ctrl / Alt are one-shot (latched):** press once, they apply to the next key, then release. Latched keys are shown in amber; Shift also switches the labels to their shifted form (`1` → `!`, `a` → `A`).
 - Ctrl+C etc. work by latching Ctrl, then typing the letter.
 
@@ -83,7 +83,7 @@ Blue and amber match the volume and brightness pop-up bars.
 
 ## Implementation notes
 
-- GTK 3 window with gtk-layer-shell, namespace `rg35xxh-osk`, keyboard interactivity **none**.
+- GTK 3 window with gtk-layer-shell, namespace `rg35xxh-osk`, keyboard interactivity **none**, **overlay** layer. On the top layer it was hidden under the app launcher (nwg-drawer runs with `-ovl`, an overlay surface). Trade-off: with both open, the keyboard covers the launcher's bottom rows (fine: close the keyboard to reach them).
 - Layer-shell properties (monitor, layer, anchors, exclusive zone) only apply when the window is mapped, so the window is re-mapped on every show. In panel mode it waits (up to 1.5 s) for the handheld output to appear before mapping.
 - `visible` is tracked by the keyboard itself (`shown`), not by GTK, because in panel mode the window appears a moment after X is pressed and the D-pad must already be routed to the keyboard.
 - Keys are emitted as complete taps (press + release) with the latched modifiers held around them.

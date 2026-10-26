@@ -41,7 +41,7 @@
 - **Right stick:** logarithmic curve (`log(1+9x)/log(10)`) — a small push already scrolls at a useful rate, levelling off at 8.4 notches/s at full tilt (0.7× of the original 12 after device testing).
 - **D-pad pointer:** digital, half of the left stick's top speed (`dpad_speed_ratio = 0.5`, so 225 px/s with the default 450); it follows if `pointer_max_speed` is changed. The pointer has no libinput acceleration (labwc `rc.xml`), so these are real px/s. On an HDMI display both are scaled by its size (`display_speed_scale`).
 - **Vol / F + Vol held:** repeats after 0.4 s, then every 0.12 s (works in desktop and gamepad mode). A pop-up bar ([osd.md](osd.md)) shows the level on the left edge of the screen, vertically, with the number on top: blue for volume, amber for brightness. Brightness steps 10% and never goes below 5%.
-- **On-screen keyboard:** custom ([on-screen-keyboard.md](on-screen-keyboard.md)), part of the input daemon, so the daemon always knows whether it is open. Left stick still moves the pointer while it is open.
+- **On-screen keyboard:** custom ([on-screen-keyboard.md](on-screen-keyboard.md)), part of the input daemon, so the daemon always knows whether it is open (its window runs in the daemon's display process, see below). Left stick still moves the pointer while it is open.
 - **Copy/paste:** daemon checks the focused app. Terminals get Ctrl+Shift+C / Ctrl+Shift+V; other apps Ctrl+C / Ctrl+V (Ctrl+C in a terminal would kill the running program). Bash bracketed paste must stay enabled so an accidental R3 paste cannot execute a command. Hold-to-paste can be added later if accidental stick clicks are a problem.
 - **Gamepad mode:** virtual controller uses standard Xbox layout **by position** (bottom button = Xbox A). F is not forwarded (would open Xbox Game Bar on Windows). Rumble from Moonlight can be forwarded to the motor.
 - **Start in gamepad mode:** short tap is sent to the PC as Start; only a 1 s hold switches back.
@@ -60,8 +60,31 @@
 - Sleep (power menu or 10 min idle): tap Power to wake; see [../apps/power-menu.md](../apps/power-menu.md).
 - Power held 1–3 s and released: cancelled (no menu, no shutdown).
 - Copy/paste: Ctrl+Shift+C/V when the active window is a terminal (foot, xterm, …), else Ctrl+C/V.
-- On-screen keyboard: US layout, 5 rows (`~ 1–0 ⌫ / Tab q–p - / a–l ; ' \ / ⇧ z–m , . / ↑ / Ctrl Alt Space = [ ] ← ↓ → Hide`); can also be clicked with the pointer. Physical L1/R1/R2 still give Esc/Enter/Backspace while it is open.
+- On-screen keyboard: US layout, 5 rows (`~ 1–0 ⌫ / Tab q–p - / a–l ; ' \ / ⇧ z–m , . / ↑ / Ctrl Alt Space = [ ] ← ↓ → Hide`). Physical L1/R1/R2 still give Esc/Enter/Backspace while it is open.
 - Config (`input.conf`): `[settings]` speeds, dead zone, scroll curve (`scroll_log_k`), Vol repeat timing, hold times; `[desktop]` button actions (`none, click_left/right/middle, key:KEY_*, copy, paste, osk_toggle, mode_gamepad, power_menu`); `[hardware]` axis inversion. The boot-partition copy overrides `/etc/rg35xxh/input.conf` completely, so it must be refreshed when defaults change.
+
+## Stopping, restarting, one instance
+
+The daemon owns the vibration motor, and the motor's kernel driver (`rocknix-singleadc-joypad`, ff-memless + PWM work) can lock up the **whole handheld**, not just the daemon. So how the daemon stops matters as much as what it does while running.
+
+- **Clean exit:** `SIGTERM` / `SIGINT` / `SIGHUP` (and any error) end the main loop, then `cleanup()` in `daemon.py` releases everything itself, one step at a time: motor timers off, external controller closed (PC vibration levels stopped and erased), virtual pad removed (game effects erased), every Handtop effect stopped and then erased, ungrab and close every device, close the virtual mouse/keyboard, clear the mode flags. The log ends with `clean exit: gamepad, vibration and virtual devices released`.
+- **One instance:** the daemon takes a lock (`$XDG_RUNTIME_DIR/rg35xxh-inputd.lock`, `flock`) before opening any device. A second daemon waits up to 10 s for the first to be gone, then refuses to start (the session's restart loop tries again 2 s later). The kernel drops the lock only when the holder's process has ended, so two daemons never hold the gamepad at the same time.
+- **No display connection in the daemon:** GDK ends a process with `_exit()` the moment its Wayland display goes away (every log-out: `Gdk-Message: Error reading events from display: Broken pipe`), which would skip `cleanup()`. So everything that needs GTK, the on-screen keyboard and the pointer-hiding touch target, runs in a child process, `rg35xxh_inputd.ui` (`ui.py`), driven over its stdin/stdout (one JSON array per line). The daemon restarts it if it ends (2 s, doubling up to 60 s), and it exits by itself when its stdin closes, however the daemon ended. At a log-out the UI process dies with the display; the daemon keeps running until the next session stops it cleanly.
+- **Main loop:** a plain `GLib.MainLoop` in both processes. Quitting PyGObject's `Gtk.main()` from a signal handler deadlocks (7 of 8 tries on the device); the daemon then hangs with every device still grabbed, so all input is dead.
+- **At log-out** the next session's autostart sends `SIGTERM` to the previous session's process group and waits until it is gone (up to 5 s, then `SIGKILL`) before starting the new daemon; see [../desktop.md](../desktop.md#session-start-and-log-out).
+
+### Rules for changes
+
+The general rules and checklist are in [../hardware-safety.md](../hardware-safety.md); for this daemon in particular:
+
+1. Anything that stops or restarts the daemon (session scripts, apps, services) sends `SIGTERM` and **waits for the process to end** before starting another one. Never start a new daemon while the old one may still be running, and never `SIGKILL` it as the first step.
+2. New resources the daemon opens (devices, effects, uinput nodes, sockets) are released in `cleanup()` too, motor first.
+3. No GTK, GDK or other display connection in `daemon.py`: anything on screen goes into `ui.py` behind a message. No `Gtk.main()` / `Gtk.main_quit()` anywhere; quit with `self._quit()` / `loop.quit()`.
+4. Test a change to the stop or start path on the device by hand first: stop the daemon several times with `kill -TERM`, check that each stop logs the "released" line and that a new daemon starts, and only then test a real log-out. Run `sync` before any test that may freeze the device.
+
+### Incident: freeze at log-out (2026-10-26)
+
+A session change made each new autostart stop the previous session's process group, which includes the input daemon, with `kill -TERM`. At that time the daemon had no handler for `SIGTERM`, so it died at once and the kernel tore down its vibration effects and grabs, while the new session's daemon was already grabbing the same gamepad and uploading its own effects. Logging out froze the whole handheld: input, Wi-Fi and SSH all stopped. After a forced power-off the power chip stayed latched (solid red LED, no backlight, no boot even from a freshly flashed card) until the battery was disconnected ([../flashing.md](../flashing.md#if-something-is-wrong)). The logs were lost when the card was re-flashed, so the cause is inferred, not proven: it matches the driver's earlier lock-ups (see `MOTOR_INTERVAL` in `daemon.py`). While fixing it, two more problems were found: the deadlock in `Gtk.main()` (even a correct `SIGTERM` handler could not have made the daemon exit), and GDK ending the daemon at every log-out once the on-screen keyboard had been used (no clean exit even with the handler). The fixes are the clean exit, the lock, the waiting autostart and the separate display process above. Verified with a log-out after using the keyboard: the UI process ended with the display, the daemon logged `SIGTERM: clean exit` and `released` 1.5 s later, and only then did the new daemon start.
 
 ## Stick re-centring
 

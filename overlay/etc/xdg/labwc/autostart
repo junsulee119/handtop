@@ -6,9 +6,18 @@ L="$HOME/.local/state/session"; mkdir -p "$L" "$HOME/.cache"
 R="${XDG_RUNTIME_DIR:-/tmp}"
 OLD=$(cat "$R/rg35xxh-autostart.pgid" 2>/dev/null)
 ME=$(ps -o pgid= -p $$ | tr -d ' ')
-[ -n "$OLD" ] && [ "$OLD" != "$ME" ] \
-  && ps -eo pgid=,args= | awk -v g="$OLD" '$1 == g' | grep -q "labwc/autostart" \
-  && kill -TERM "-$OLD" 2>/dev/null   # (no "--": dash, which runs this, rejects it) only if that group still is an old autostart
+alive() { ps -eo pgid= | awk -v g="$1" '$1 == g {f = 1} END {exit !f}'; }
+# Only if that group still is an old autostart. Then WAIT until it is gone: its input daemon
+# stops the motor and releases the gamepad and its vibration effects first (clean exit, see
+# rg35xxh-inputd); a new daemon grabbing the gamepad at that same moment froze the whole
+# handheld once. Last resort after 5 s: SIGKILL (the new daemon still waits for the old one's
+# lock). No "--" after kill: dash, which runs this, rejects it.
+if [ -n "$OLD" ] && [ "$OLD" != "$ME" ] \
+   && ps -eo pgid=,args= | awk -v g="$OLD" '$1 == g' | grep -q "labwc/autostart"; then
+  kill -TERM "-$OLD" 2>/dev/null
+  i=0; while alive "$OLD" && [ $i -lt 50 ]; do sleep 0.1; i=$((i + 1)); done
+  alive "$OLD" && kill -KILL "-$OLD" 2>/dev/null
+fi
 echo "$ME" > "$R/rg35xxh-autostart.pgid"
 echo 0 > "$R/rg35xxh-session-starts"   # labwc is up: reset the failed-start counter (zz-rg35xxh-session.sh)
 dbus-update-activation-environment --systemd WAYLAND_DISPLAY XDG_CURRENT_DESKTOP >/dev/null 2>&1

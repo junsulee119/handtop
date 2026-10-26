@@ -125,7 +125,9 @@ class OnScreenKeyboard:
         self.win.set_name("rg-osk")
         GtkLayerShell.init_for_window(self.win)
         GtkLayerShell.set_namespace(self.win, "rg35xxh-osk")
-        GtkLayerShell.set_layer(self.win, GtkLayerShell.Layer.TOP)
+        # Overlay layer (as the panel mode): the app launcher (nwg-drawer -ovl) is an overlay
+        # surface too, and on the top layer the keyboard stayed hidden under it.
+        GtkLayerShell.set_layer(self.win, GtkLayerShell.Layer.OVERLAY)
         for edge in (GtkLayerShell.Edge.BOTTOM, GtkLayerShell.Edge.LEFT, GtkLayerShell.Edge.RIGHT):
             GtkLayerShell.set_anchor(self.win, edge, True)
         GtkLayerShell.auto_exclusive_zone_enable(self.win)   # windows shrink above it
@@ -207,8 +209,7 @@ class OnScreenKeyboard:
             ctx = self.win.get_style_context()
             (ctx.add_class if self.panel else ctx.remove_class)("panel")
             GtkLayerShell.set_monitor(self.win, mon)
-            GtkLayerShell.set_layer(self.win, GtkLayerShell.Layer.OVERLAY if self.panel
-                                    else GtkLayerShell.Layer.TOP)
+            GtkLayerShell.set_layer(self.win, GtkLayerShell.Layer.OVERLAY)
             GtkLayerShell.set_anchor(self.win, GtkLayerShell.Edge.TOP, self.panel)
             if self.panel:
                 GtkLayerShell.set_exclusive_zone(self.win, -1)   # cover the whole panel
