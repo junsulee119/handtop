@@ -1,4 +1,41 @@
 #!/bin/sh
-# RG35XX H controls -> mouse/keyboard/gamepad. Started by the labwc session (autostart).
+# RG35XX H controls -> mouse/keyboard/gamepad. Started by the labwc session (autostart), which
+# restarts it whenever it ends.
+#
+# Watchdog: the daemon grabs every button, the power key included (logind's "hold to power off"
+# never sees it), so a hung daemon would leave only the power chip's forced cut, which can latch
+# the power chip (docs/hardware-safety.md). The daemon's main loop writes a counter to $HB every
+# second (only while running: not during start-up or its clean exit). If the counter stops
+# changing for MISSES checks in a row (>= 6 s awake; a counter, not a timestamp, so sleep is not a
+# hang), the daemon is asked to stop, then killed after 3 s; the session starts a new one.
+# A stop request for this wrapper (log-out) is passed on to the daemon, and the wrapper waits.
 export PYTHONPATH=/usr/local/lib/rg35xxh-inputd${PYTHONPATH:+:$PYTHONPATH}
-exec python3 -m rg35xxh_inputd.daemon "$@"
+HB="${XDG_RUNTIME_DIR:-/tmp}/rg35xxh-inputd.alive"
+MISSES=3
+log() { echo "$(date '+%F %T') rg35xxh-inputd watchdog: $*" >&2; }
+
+rm -f "$HB"
+python3 -m rg35xxh_inputd.daemon "$@" &
+PID=$!
+trap 'kill -TERM $PID 2>/dev/null' TERM INT HUP
+
+last=; missed=0
+while kill -0 "$PID" 2>/dev/null; do
+  sleep 2 & wait $!     # (wait, unlike sleep, is interrupted by a trapped signal: passed on at once)
+  beat=$(cat "$HB" 2>/dev/null) || { last=; missed=0; continue; }   # not armed
+  if [ "$beat" = "$last" ]; then
+    missed=$((missed + 1))
+  else
+    last=$beat; missed=0
+  fi
+  if [ "$missed" -ge "$MISSES" ]; then
+    log "daemon (pid $PID) stopped responding: restarting it"
+    rm -f "$HB"
+    kill -TERM "$PID" 2>/dev/null
+    i=0; while kill -0 "$PID" 2>/dev/null && [ $i -lt 30 ]; do sleep 0.1; i=$((i + 1)); done
+    kill -0 "$PID" 2>/dev/null && { log "no clean exit within 3 s: killing it"; kill -KILL "$PID"; }
+    notify-send -t 5000 "Controls restarted" "The input daemon stopped responding and was restarted." 2>/dev/null &
+    break
+  fi
+done
+while kill -0 "$PID" 2>/dev/null; do wait "$PID"; done   # (a trapped signal interrupts wait)

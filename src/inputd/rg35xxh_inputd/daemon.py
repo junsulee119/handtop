@@ -1048,6 +1048,9 @@ class Daemon:
 
     def run(self):
         GLib.timeout_add(10, self._tick)
+        self.beats = 0
+        self._heartbeat()
+        GLib.timeout_add(HEARTBEAT_MS, self._heartbeat)
         GLib.unix_signal_add(GLib.PRIORITY_DEFAULT, signal.SIGUSR1, self._recenter)
         GLib.unix_signal_add(GLib.PRIORITY_DEFAULT, signal.SIGUSR2, self._request_bt)
         for sig in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
@@ -1056,6 +1059,20 @@ class Daemon:
         # from a signal handler deadlocked (7 of 8 tries on the device); ui.py avoids it too.
         self._loop = GLib.MainLoop()
         self._loop.run()
+
+    # Watchdog (rg35xxh-inputd wrapper): the daemon grabs every button, the power key included, so
+    # a hung main loop would leave no way to switch the handheld off but the power chip's forced
+    # cut. The main loop writes a counter here every second; the wrapper restarts a daemon whose
+    # counter stops. The file exists only while the main loop runs (not during start-up or the
+    # clean exit), so neither is mistaken for a hang.
+    def _heartbeat(self):
+        self.beats += 1
+        try:
+            with open(HEARTBEAT, "w") as f:
+                f.write(f"{self.beats}\n")
+        except OSError as e:
+            log.warning("heartbeat: %s", e)
+        return True
 
     def _on_term(self, sig):
         log.info("%s: clean exit", signal.Signals(sig).name)
@@ -1072,54 +1089,63 @@ class Daemon:
     # the new one started froze the handheld (input, Wi-Fi, SSH) and needed a battery reset.
     # The single-instance lock (main) makes the next daemon wait until this one is gone.
     def cleanup(self):
+        # Also runs for a daemon that was stopped during start-up (__init__ not finished), so
+        # every attribute may still be missing: read them with get().
         def step(what, fn, *a):
             try:
                 fn(*a)
             except Exception as e:      # keep going: every later step still matters
                 log.warning("clean exit: %s: %s", what, e)
-        for name in ("motor_timer", "motor_refresh_timer"):
-            tid = getattr(self, name, None)
-            if tid:
-                step(name, GLib.source_remove, tid)
+
+        def get(name, default=None):
+            return getattr(self, name, default)
+        try:
+            os.unlink(HEARTBEAT)                    # disarm the watchdog: exiting, not hung
+        except FileNotFoundError:                   # (not armed yet: stopped during start-up)
+            pass
+        for name in ("motor_timer", "motor_refresh_timer", "ui_retry"):
+            if get(name):
+                step(name, GLib.source_remove, get(name))
                 setattr(self, name, None)
-        self.motor_game_active.clear()
-        self.motor_game_endless.clear()
-        self.motor_pending_upload.clear()
-        self.motor_pending_play.clear()
-        if self.bt:
+        for name in ("motor_game_active", "motor_game_endless", "motor_pending_upload", "motor_pending_play"):
+            if get(name) is not None:
+                get(name).clear()
+        if get("bt"):
             step("external controller", self._bt_close)   # stops + frees the PC's vibration levels
-        step("virtual pad", self._destroy_pad)              # frees the games' effects
-        g = self.gamepad
-        if g is not None and E.EV_FF in g.capabilities():
-            ids = [i for i in [self.haptic_id, *self.step_ids.values(), *self.motor_ext_ids.values()]
-                   if i is not None]
+        if get("pad"):
+            step("virtual pad", self._destroy_pad)          # frees the games' effects
+        g = get("gamepad")
+        if g is not None:
+            ids = [i for i in [get("haptic_id"), *get("step_ids", {}).values(),
+                               *get("motor_ext_ids", {}).values()] if i is not None]
             for eid in ids:
                 step("stop effect %d" % eid, g.write, E.EV_FF, eid, 0)
-            time.sleep(0.05)
+            if ids:
+                time.sleep(0.05)
             for eid in ids:
                 step("erase effect %d" % eid, g.erase_effect, eid)
             self.haptic_id = None
             self.step_ids = {}
             self.motor_ext_ids = {}
-        step("touch", self._touch_close)
-        if self.ui_retry:
-            step("ui retry", GLib.source_remove, self.ui_retry)
-            self.ui_retry = None
-        step("on-screen keyboard process", self._ui_stop, "stopped")
-        for d in list(self.devices):
+        if get("touch") is not None:
+            step("touch", self._touch_close)
+        if get("ui") is not None:
+            step("on-screen keyboard process", self._ui_stop, "stopped")
+        for d in list(get("devices", [])):
             step("ungrab %s" % d.path, d.ungrab)
             step("close %s" % d.path, d.close)
         self.devices = []
         self.gamepad = None
         for name in ("mouse", "keyboard"):
-            u = getattr(self, name, None)
-            if u is not None:
-                step(name, u.close)
+            if get(name) is not None:
+                step(name, get(name).close)
         for flag in ("rg35xxh-gamepad-mode", "rg35xxh-bt-mode", "rg35xxh-wired-mode", INPUTMODE_FRAME):
             step(flag, set_flag, flag, False)
         log.info("clean exit: gamepad, vibration and virtual devices released")
 
 
+HEARTBEAT = runtime_flag("rg35xxh-inputd.alive")   # see _heartbeat (watchdog)
+HEARTBEAT_MS = 1000
 LOCK_WAIT = 10.0   # s: how long a new daemon waits for the previous one to finish its clean exit
 
 
@@ -1157,15 +1183,19 @@ def main():
         log.error("another rg35xxh-inputd still runs; not starting a second one")
         sys.exit(1)
     # Until the main loop installs its own handlers: SIGTERM during start-up still exits through
-    # cleanup (Python's default would just die).
-    signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
-    d = None
+    # cleanup (Python's default would just die). The object exists before __init__ runs, so a
+    # half-started daemon is cleaned up too.
+    def early_exit(sig, _frame):
+        log.info("%s during start-up: clean exit", signal.Signals(sig).name)
+        sys.exit(0)
+    for sig in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
+        signal.signal(sig, early_exit)
+    d = Daemon.__new__(Daemon)
     try:
-        d = Daemon()
+        d.__init__()
         d.run()
     finally:
-        if d is not None:
-            d.cleanup()
+        d.cleanup()
         lock.close()
 
 

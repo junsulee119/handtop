@@ -16,7 +16,7 @@ Where they come from:
 ## 2. Every exit path releases the hardware
 
 1. **Every program that holds hardware has a clean exit that releases it in order:** stop what is running first (motor, USB transfers, advertising), then free it (erase effects, remove the gadget), then let go (ungrab, close).
-2. **The clean exit runs on every way out:** `SIGTERM`/`SIGINT`/`SIGHUP`, errors, a lost device, a lost connection. Install the signal handling before taking hardware, and make the release step idempotent: run it twice, or after a partial set-up, without harm.
+2. **The clean exit runs on every way out:** `SIGTERM`/`SIGINT`/`SIGHUP`, errors, a lost device, a lost connection, and a stop that arrives during start-up. Install the signal handling before taking hardware, and make the release step idempotent: run it twice, or after a partial set-up, without harm.
 3. **A failed set-up unwinds itself.** Wrap the whole set-up, not only the main loop, so a failure halfway releases what was already taken (*review: Wired controller mode*). Also clean up leftovers of an earlier run before starting.
 4. **Re-opening a device is an exit too.** Release before close, then reset everything that belonged to the old handle, such as effect IDs (*review: Re-center sticks*).
 
@@ -25,7 +25,7 @@ Where they come from:
 1. **No display connection in a process that holds hardware.** GDK ends its process with `_exit()` the moment the Wayland display goes away (every log-out), with no cleanup. Windows and other UI go in a child process, driven by messages (see `ui.py`). The same goes for any library that can `abort()` or `_exit()` on its own.
 2. **No `Gtk.main()`.** Quitting it from a signal handler deadlocks; use `GLib.MainLoop`.
 3. **Nothing on the input path blocks without a bound.** Every subprocess gets a `timeout=`, and writes to helper processes are non-blocking (drop the message rather than wait).
-4. **Whatever takes the power button must be watched.** The input daemon grabs the power key, so logind's "hold to power off" backup never sees it. If the daemon hangs, the only way out is the hardware power cut, which is the one that latched the power chip. A process that grabs input needs a watchdog that restarts it when it stops responding (*review*).
+4. **Whatever takes the power button must be watched.** The input daemon grabs the power key, so logind's "hold to power off" backup never sees it. If the daemon hangs, the only way out is the hardware power cut, which is the one that latched the power chip. A process that grabs input needs a watchdog that restarts it when it stops responding: the input daemon's is in its wrapper, `rg35xxh-inputd` (heartbeat counter, suspend-safe). (*review*, done)
 
 ## 4. Signals reach exactly the intended process
 
