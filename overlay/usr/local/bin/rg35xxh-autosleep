@@ -8,6 +8,11 @@ log() { echo "$(date '+%F %T') rg35xxh-autosleep: $*"; }
 if [ "$(cat /sys/class/power_supply/axp20x-usb/online 2>/dev/null)" = 1 ] && [ "${AUTOSLEEP_ON_CHARGER:-no}" != yes ]; then
   log "charging, not sleeping"; exit 0
 fi
+# Screen off keeps things running (SSH, downloads): never sleep there. rg35xxh-lowbattery turns
+# the screen back on at low battery and shuts down cleanly before the battery runs flat.
+if [ -e "$XDG_RUNTIME_DIR/rg35xxh-screen-off" ]; then
+  log "Screen off, not sleeping"; exit 0
+fi
 if [ -e "$XDG_RUNTIME_DIR/rg35xxh-gamepad-mode" ] || [ -e "$XDG_RUNTIME_DIR/rg35xxh-bt-mode" ] ||
    [ -e "$XDG_RUNTIME_DIR/rg35xxh-wired-mode" ]; then
   log "gamepad or external controller mode, not sleeping"; exit 0

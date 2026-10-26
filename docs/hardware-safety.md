@@ -39,10 +39,11 @@ Where they come from:
 1. **Every vibration effect has a fixed length**; no endless effects (length 0). Long vibrations are re-triggered while wanted.
 2. **Hardware updates go through the motor gate:** at most one per `MOTOR_INTERVAL`, strengths rounded to `MOTOR_LEVELS`, and effects uploaded once and then only played or stopped.
 3. **Stop before erase, erase before close**, on every path (see 2), including leaving gamepad mode (the games' effects).
+4. **The input daemon is the motor's only owner.** Other programs ask it for a vibration (`$XDG_RUNTIME_DIR/rg35xxh-haptic-request`) instead of opening the gamepad themselves.
 
 ## 6. Power states and radios
 
-1. **Power-state changes check the others.** Before suspending, turning the screen off, taking CPU cores offline or switching a controller mode, check which of the others is active. Either combine them deliberately and test the combination, or refuse. Example: auto-sleep must not suspend while Screen off has cores 1–3 offline unless that combination has been tested (*review*).
+1. **Power-state changes check the others.** Before suspending, turning the screen off, taking CPU cores offline or switching a controller mode, check which of the others is active. Either combine them deliberately and test the combination, or refuse. Example: auto-sleep never suspends during Screen off, which has cores 1–3 offline (*review*, done; [apps/power-menu.md](apps/power-menu.md)).
 2. **Restore on every path:** a power state entered by one session must be undone if that session ends (log-out, crash).
 3. **Do as little to the radio as possible.** Wi-Fi and Bluetooth share one chip (RTL8821CS, rtw88). Power-cycling Bluetooth or restarting `bluetoothd` can stall Wi-Fi, which takes SSH with it. Changes there get a stress test (enter and leave 10 times while pinging the handheld) (*review*).
 4. **Nothing writes to the power chip, regulators or charging limits** (`axp*`, `regulator`, `input_current_limit`, `/dev/mem`, `i2cset`) without a documented reason and a recovery plan. As of 2026-10-26, nothing in Handtop does.

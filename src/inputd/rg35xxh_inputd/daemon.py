@@ -554,6 +554,7 @@ class Daemon:
         now = time.monotonic()
         if self.ticks % 10 == 0:
             self.core.set_screen_off(os.path.exists(runtime_flag("rg35xxh-screen-off")))
+            self._haptic_requests()
             self._layout_reload()
             self.core.set_osk_visible(self.osk_visible)
         self._run(self.core.tick(now))
@@ -760,6 +761,20 @@ class Daemon:
             log.warning("status LED: %s", e)
         spawn("notify-send", "-u", "critical", "-t", "10000", "Shutting down…")
         GLib.timeout_add(600, lambda: spawn("systemctl", "poweroff") or False)
+
+    def _haptic_requests(self):
+        """Other programs ask for a vibration by creating $XDG_RUNTIME_DIR/rg35xxh-haptic-request
+        (e.g. rg35xxh-lowbattery): the motor has one owner, this daemon, and the request plays
+        Handtop's own fixed-length buzz (docs/hardware-safety.md, rules 1 and 5)."""
+        try:
+            os.unlink(runtime_flag("rg35xxh-haptic-request"))
+        except FileNotFoundError:
+            return
+        except OSError as e:
+            log.warning("haptic request: %s", e)
+            return
+        log.info("haptic requested")
+        self._haptic()
 
     def _haptic(self):
         self._play_effect(self.haptic_id)
