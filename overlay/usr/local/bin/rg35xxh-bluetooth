@@ -16,6 +16,17 @@ ICONS=/usr/local/share/icons/hicolor/22x22/status
 SIG=10                          # Waybar "signal" of image#bluetooth
 SAVED="$HOME/.local/state/rg35xxh-bluetooth-power"   # "off" after you switched it off
 
+# Tell Waybar to re-run this script. Only a Waybar that has been up for >= 3 s: a real-time
+# signal that arrives before Waybar has installed its handlers (session start, restart) kills it
+# (as rg35xxh-battery). A Waybar started later runs this script by itself anyway.
+refresh() {
+  for pid in $(pidof waybar); do
+    age=$(ps -o etimes= -p "$pid" 2>/dev/null | tr -d ' ')
+    [ "${age:-0}" -ge 3 ] && env kill -RTMIN+$SIG "$pid" 2>/dev/null
+  done
+  return 0
+}
+
 state() {
   for r in /sys/class/rfkill/rfkill*; do
     [ "$(cat "$r/type" 2>/dev/null)" = bluetooth ] && [ "$(cat "$r/soft" 2>/dev/null)" = 1 ] && { echo off; return; }
@@ -42,15 +53,15 @@ case "${1:-}" in
       bluetoothctl power off >/dev/null 2>&1
     fi
     while :; do
-      pkill -RTMIN+$SIG -x waybar          # (also after bluetoothd restarts: BT Controller mode)
+      refresh                              # (also after bluetoothd restarts: BT Controller mode)
       gdbus monitor --system --dest org.bluez 2>/dev/null | while read -r line; do
         case "$line" in
           *Powered*)
-            pkill -RTMIN+$SIG -x waybar
+            refresh
             # remember on / off, but not the off / on of External Controller mode's set-up
             [ -e "$XDG_RUNTIME_DIR/rg35xxh-bt-mode" ] || [ -e "$XDG_RUNTIME_DIR/rg35xxh-wired-mode" ] \
               || { [ "$(state)" = off ] && echo off || echo on; } > "$SAVED" ;;
-          *\'Connected\'*|*InterfacesAdded*|*InterfacesRemoved*) pkill -RTMIN+$SIG -x waybar ;;
+          *\'Connected\'*|*InterfacesAdded*|*InterfacesRemoved*) refresh ;;
         esac
       done
       sleep 2
