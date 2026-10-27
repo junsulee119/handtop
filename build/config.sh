@@ -2,7 +2,7 @@
 TOP="$(cd "$(dirname "$(realpath "${BASH_SOURCE[0]}")")/.." && pwd)"   # absolute, independent of $HOME/sudo
 WORK="${WORK:-$TOP/work}"
 
-RELEASE_VERSION="0.2.0"            # used in the image name when not building from a git checkout
+RELEASE_VERSION="0.3.0"            # used in the image name when not building from a git checkout
 RAM_TYPE="${RAM_TYPE:-DDR4}"          # DDR4 (default) or DDR3 depending on board revision
 
 ROCKNIX_VERSION="20261001"

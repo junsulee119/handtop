@@ -1,7 +1,8 @@
 # Handtop changelog
 
-## Unreleased
+## v0.3.0
 
+- ⚠️ **Known issue:** Bluetooth is sometimes missing on the first boot after flashing (no adapter: the Bluetooth icon shows it off and External Controller → Bluetooth can't start). Restart once (Power → Restart); it works from then on.
 - **BT Controller mode is now an Xbox controller.** Over Bluetooth the handheld presents itself as an Xbox Wireless Controller (Series X|S, BLE): Windows loads its own Xbox driver, XInput-only games work directly, and **game vibration now works over Bluetooth** too (played on the handheld's motor through the vibration safety gate). Tested on Windows 11. **After updating, remove "Handtop Gamepad" on the PC and pair it again once** (Windows caches the old description). For this, bluetoothd runs with the Xbox controller's device ID while the mode is on and gets its own back afterwards. The v0.2.0 generic gamepad stays available (`RG35XXH_BTPAD_PROFILE=generic`). Details in `docs/apps/external-controller.md`.
 - External Controller app waits a little longer for BT mode to start (bluetoothd restarts).
 - **Display app** (Apps → Display) replaces the three "Display: …" entries. It **opens by itself when a monitor is plugged in**, on the handheld (the monitor stays dark meanwhile so the pointer can't get lost on it): pick Monitor only / Extend / Mirror, or leave it for 5 s (restarted by any input) to keep the last layout. Pixel-art pictures of each layout, dark/light theme, its own app icon (monitor + HDMI cable + RG35XX H).
