@@ -25,6 +25,10 @@ When a fix or a design choice works against intended behaviour or makes the expe
 
 A safety fix is no exception: it is still their call how much experience to give up for it. Lay out the options, including keeping the current behaviour, with what each costs, and recommend one. In a PR, list every trade-off under its own heading in the description, with the decision and who made it; never let one slip in silently. Record accepted trade-offs in the component's doc (for example: with both open, the on-screen keyboard covers the launcher's bottom rows).
 
+## Before every PR: think through the failure scenarios
+
+Go through **[docs/reliability-checklist.md](docs/reliability-checklist.md)** for every piece your change touches: power cut at each write, interrupted by a shutdown, run twice, restart loops, first boot, files edited on Windows or by hand, other units (DDR3, rev6 panel, a card moved to another handheld), failing readings and subprocesses, where a user sees the failure and how to recover from a PC. Write the scenarios that apply, with your answers, in the PR description. Then read your code once more only for failure paths: that pass has found real bugs while the tests were green.
+
 ## Repository layout
 
 | Path | What |
@@ -76,7 +80,7 @@ A safety fix is no exception: it is still their call how much experience to give
 - Commit subject: `Area: what changed` (for example `Input daemon: …`, `Session: …`, `build: …`, `Docs: …`), under about 90 characters.
 - Commit body: the problem, the cause, the fix (one bullet per change), and **how it was tested** (on the device or not).
 - One topic per PR. Don't mix a refactor with a behaviour change.
-- The PR description includes: what and why; **trade-offs** and who decided them (see "Trade-offs: ask before you implement"); how it was tested (unit tests, QEMU or headless, device model); the hardware-safety checklist with answers, if the change touches anything listed under "Read this first".
+- The PR description includes: what and why; **trade-offs** and who decided them (see "Trade-offs: ask before you implement"); how it was tested (unit tests, QEMU or headless, device model); the scenarios from the reliability checklist that apply, with answers; the hardware-safety checklist with answers, if the change touches anything listed under "Read this first".
 
 ## Do not
 
