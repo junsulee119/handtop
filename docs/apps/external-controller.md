@@ -146,7 +146,10 @@ Tested 2026-10-28 on a DDR4 RG35XX H with Windows 11: enumerates as "Handtop Con
 
 **Tested** 2026-10-28 (DDR4 RG35XX H, Windows 11 + Ryujinx): pairing as "Pro Controller", the full setup sequence (device info, lights, SPI reads, vibration on, mode 0x30, Home light, IMU), Mario Kart 8 Deluxe smooth, automatic reconnection after restarting the mode, no sniff mode on the link (btmon), ~66 reports/s. Vibration in Mario Kart froze the handheld: the motor driver bug fixed in [../kernel.md](../kernel.md#rocknix-singleadc-joypadko-replaced-rumble-fix); with the fixed driver, an hour of Mario Kart with vibration (Ryujinx, Enable Rumble) ran without a problem.
 
-**Not known yet:** a real Switch 1 / Switch 2 (the pairing timing in Change Grip/Order is the usual trouble spot: reported for joycontrol on laptops' built-in radios); please report.
+**Not tested yet:**
+- A real Switch 1 / Switch 2 (the pairing timing in Change Grip/Order is the usual trouble spot: reported for joycontrol on laptops' built-in radios); please report.
+- The app's warning with Bluetooth devices actually connected (none were during testing): it should list them and offer Cancel / Start Switch mode.
+- Bluetooth LE mice and keyboards while the mode is on: they should keep working, since BlueZ's "hog" plugin (LE input) stays loaded and only "input" (classic HID) is switched off, but they still drop once when bluetoothd restarts.
 
 ## Vibration safety
 
