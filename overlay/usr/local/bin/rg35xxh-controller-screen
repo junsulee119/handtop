@@ -104,7 +104,7 @@ FACE = {"X": "xy", "A": "xb", "B": "xa", "Y": "xx"}      # physical label -> Xbo
 HAT_DIRS = {0: "u", 1: "ur", 2: "r", 3: "dr", 4: "d", 5: "dl", 6: "l", 7: "ul"}
 
 STATE_TEXT = {
-    "pairing": ("Ready to pair", "On your PC or phone: Bluetooth > Add device > \"Handtop Gamepad\""),
+    "pairing": ("Ready to pair", "On your PC or phone: Bluetooth > Add device > \"Handtop (Xbox)\""),
     "waiting": ("Waiting for {dev}", "Turn on Bluetooth there; it reconnects by itself"),
     "connected": ("Connected to {dev}", None),
     "cable": ("Connect the USB cable", "Right USB-C port (OTG2/DC) to the PC; the handheld charges meanwhile"),

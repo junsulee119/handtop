@@ -13,8 +13,9 @@ forwarded to the input daemon like Wired Controller mode). That needs two things
     the original is restored when the mode ends, also by ExecStopPost after a crash). Windows'
     driver binds only to product 0x0B13 and 0x0B20-0x0B27;
   - the real controller's HID report descriptor, byte for byte (below).
-Windows caches the descriptor per pairing: after switching profiles, remove "Handtop Gamepad" on
-the PC and pair again. Profile "generic" (RG35XXH_BTPAD_PROFILE=generic): the earlier plain HID
+Windows caches the descriptor per pairing: after switching profiles, remove the pad on
+the PC and pair again. Name on the other device: "Handtop (Xbox)" (up to v0.3.0: "Handtop
+Gamepad"; Windows shows the name it saw at pairing until the pad is paired again). Profile "generic" (RG35XXH_BTPAD_PROFILE=generic): the earlier plain HID
 gamepad, no identity change.
 
 Classic Bluetooth (BR/EDR) is switched off while the mode is on: otherwise Windows derives a
@@ -61,7 +62,7 @@ DSC_IFACE = "org.bluez.GattDescriptor1"
 ADV_IFACE = "org.bluez.LEAdvertisement1"
 AGENT_IFACE = "org.bluez.Agent1"
 
-NAME = "Handtop Gamepad"
+PROFILE_NAMES = {"xbox": "Handtop (Xbox)", "generic": "Handtop Gamepad"}   # short: fits the advertisement
 SOCKET = "/run/rg35xxh-extpad.sock"                 # shared with rg35xxh-usbpad (one runs at a time)
 STATUS_SOCKET = "/run/rg35xxh-extpad-status.sock"   # JSON lines for the status screen
 LAST_HOST = "/var/lib/rg35xxh/btpad-last-host"     # "address<TAB>name" of the last connected host
@@ -69,6 +70,7 @@ HID_UUIDS = ("00001124-", "00001812-")              # remote is an input device 
 EVENT = struct.Struct("<HHi")
 APPEARANCE_GAMEPAD = 0x03C4
 PROFILE = os.environ.get("RG35XXH_BTPAD_PROFILE", "xbox")   # "xbox" or "generic"
+NAME = PROFILE_NAMES.get(PROFILE, "Handtop Gamepad")
 XBOX_DEVICE_ID = "usb:045e:0b13:0509"        # Microsoft, Xbox Wireless Controller (model 1914), fw 5.9
 BT_CONF = "/etc/bluetooth/main.conf"
 # Connection interval asked for while BT Controller mode is on (units of 1.25 ms: 7.5-15 ms, like a

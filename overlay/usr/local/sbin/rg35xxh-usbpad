@@ -166,7 +166,7 @@ def gadget_up():
     # Raspberry Pi Zero (dwc2) builds of Switch pads.
     os.makedirs(f"{G}/strings/0x409", exist_ok=True)
     w(f"{G}/strings/0x409/manufacturer", "Handtop")
-    w(f"{G}/strings/0x409/product", "Handtop Controller")
+    w(f"{G}/strings/0x409/product", "Handtop (Switch)" if SWITCH else "Handtop (Xbox)")   # name on the host
     w(f"{G}/strings/0x409/serialnumber", "HANDTOP0001")
     os.makedirs(f"{G}/configs/c.1/strings/0x409", exist_ok=True)
     w(f"{G}/configs/c.1/MaxPower", "500")
