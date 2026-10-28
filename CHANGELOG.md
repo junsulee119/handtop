@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **Battery saver for External Controller.** A switch in the app (off by default): the handheld's screen turns off 30 s after the other device connects, and the status screen draws much less. Vol+/- or Power shows the screen for 10 s; it also comes back if the connection drops. Measured: about half the CPU use in Bluetooth modes (70 % → 33 % of 4 cores in Xbox mode), plus the display and backlight off.
 - **Clearer names on the PC / Switch:** the handheld now shows up as **"Handtop (Xbox)"** (Bluetooth and USB Xbox modes) or **"Handtop (Switch)"** (USB Switch mode); Bluetooth Switch mode has to be called "Pro Controller". Windows keeps showing the old "Handtop Gamepad" for an existing Bluetooth pairing until you remove and pair it again (it works either way).
 - **Bluetooth LE mice and keyboards work.** Most current Bluetooth mice and keyboards (and many gamepads) use Bluetooth LE; they paired and connected but did nothing, because ROCKNIX's kernel lacks the driver BlueZ needs for them (uhid). Handtop now adds it.
 - **Fixed: the handheld could freeze with the motor buzzing** when a game's vibration kept changing strength (Bluetooth, USB and gamepad mode alike). The cause was a locking bug in ROCKNIX's gamepad driver; Handtop now ships a fixed build of it. Details in `docs/kernel.md`, which also lists every kernel-level difference from ROCKNIX.

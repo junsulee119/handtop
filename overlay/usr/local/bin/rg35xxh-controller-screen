@@ -8,21 +8,39 @@ controls (pixel art, drawn at half resolution and scaled 2x like the taskbar ico
 link info and how to stop. Reads JSON lines from the running service's status socket
 (rg35xxh-btpad or rg35xxh-usbpad, also for Switch mode) and closes itself
 when that socket closes (the mode ended). Takes no input: every button goes to the other device.
+
+--saver (Battery saver, chosen in the External Controller app): redraws only when the picture
+changes, at most 15 per second, and switches the handheld's display off (wlopm, DSI-1) 30 s
+after the other device connected. Vol+ / Vol- (also F + Vol) and Power wake it for 10 s: the
+input daemon writes $XDG_RUNTIME_DIR/rg35xxh-extpad-wake on those presses (the only ones not sent
+to the other device), which this watches. It also comes back by itself when the connection
+drops, and always when this window ends (rg35xxh-extpad-dark marks the dark state; the input
+daemon switches the display on if this process died meanwhile).
 """
 import json
 import os
+import signal
 import socket
+import subprocess
 import sys
+import time
 
 import cairo
 import gi
 gi.require_version("Gdk", "3.0")
 gi.require_version("Gtk", "3.0")
 gi.require_version("GtkLayerShell", "0.1")
-from gi.repository import Gdk, GLib, Gtk, GtkLayerShell  # noqa: E402
+from gi.repository import Gdk, Gio, GLib, Gtk, GtkLayerShell  # noqa: E402
 
 STATUS_SOCKET = "/run/rg35xxh-extpad-status.sock"     # rg35xxh-btpad or rg35xxh-usbpad
 ICONS = "/usr/local/share/rg35xxh/icons"
+SAVER = "--saver" in sys.argv          # Battery saver (see the top)
+MAX_FPS = 15                           # Battery saver: redraws per second, at most
+DARK_AFTER_S, WAKE_S = 30, 10          # Battery saver: display off after connecting / after a wake
+RUNTIME = os.environ.get("XDG_RUNTIME_DIR", "/tmp")
+WAKE_FILE = os.path.join(RUNTIME, "rg35xxh-extpad-wake")   # written by the input daemon
+DARK_FLAG = os.path.join(RUNTIME, "rg35xxh-extpad-dark")   # exists while the display is off
+OUTPUT = "DSI-1"                       # the handheld's own display (an HDMI monitor stays on)
 W, H = 640, 480
 PW, PH = W // 2, H // 2          # pixel-art canvas (scaled 2x)
 
@@ -174,6 +192,20 @@ class Screen(Gtk.Window):
         self.bat_icons = {}
         self.bat_tick = 0
         GLib.timeout_add(450, self.battery_tick)       # charging animation (same as the taskbar)
+        # Battery saver
+        self.draw_pending = False
+        self.last_draw = 0.0
+        self.drawn_key = None
+        self.dark = False
+        self.dark_timer = None
+        self.wake_monitor = None
+        if SAVER:
+            try:
+                open(WAKE_FILE, "a").close()
+                self.wake_monitor = Gio.File.new_for_path(WAKE_FILE).monitor_file(Gio.FileMonitorFlags.NONE, None)
+                self.wake_monitor.connect("changed", self.on_wake)
+            except (OSError, GLib.Error) as e:
+                print("rg35xxh-controller-screen: no wake file:", e, file=sys.stderr)
 
     # ------------------------------------------------------------ data
     def connect_status(self):
@@ -200,17 +232,99 @@ class Screen(Gtk.Window):
             return False
         self.buf += data
         *lines, self.buf = self.buf.split(b"\n")
+        old_state = self.st.get("state")
         for line in lines[-1:]:                       # only the newest state matters
             try:
                 self.st = json.loads(line)
             except ValueError:
                 pass
-        self.area.queue_draw()
+        if not SAVER:
+            self.area.queue_draw()
+            return True
+        state = self.st.get("state")
+        if state != old_state:
+            if state == "connected":
+                self.dark_in(DARK_AFTER_S)
+            else:                                     # connection lost / waiting: show it
+                self.cancel_dark()
+                self.light()
+        key = self.visual_key()
+        if key != self.drawn_key:                     # same picture as on screen: skip
+            self.drawn_key = key
+            self.schedule_draw()
         return True
 
     def redraw(self):
-        self.area.queue_draw()
+        if not self.dark:
+            self.area.queue_draw()
         return True
+
+    # ------------------------------------------------------------ battery saver
+    def visual_key(self):
+        """What the picture depends on: stick noise and values that draw the same pixels (the
+        caps move at most 6 px) don't trigger a redraw."""
+        buttons, hat, sticks, trig = self.report()
+        caps = tuple(round((a - 128) / 128 * 6) for a in sticks)
+        st = self.st
+        return (st.get("state"), st.get("device"), st.get("rssi"), st.get("rate"),
+                buttons, hat, caps, trig[0] > 0, trig[1] > 0)
+
+    def schedule_draw(self):
+        """At most MAX_FPS redraws per second; the newest state is drawn at the next slot.
+        Status updates come with every input report (up to hundreds per second): drawing each
+        one kept a core about 20 % busy (measured 2026-10-28), the biggest cost of the mode."""
+        if self.draw_pending or self.dark:
+            return
+        self.draw_pending = True
+        wait = max(0.0, self.last_draw + 1.0 / MAX_FPS - time.monotonic())
+        GLib.timeout_add(int(wait * 1000), self._draw_now)
+
+    def _draw_now(self):
+        self.draw_pending = False
+        self.last_draw = time.monotonic()
+        if not self.dark:
+            self.area.queue_draw()
+        return False
+
+    def dark_in(self, seconds):
+        self.cancel_dark()
+        self.dark_timer = GLib.timeout_add_seconds(seconds, self._go_dark)
+
+    def cancel_dark(self):
+        if self.dark_timer:
+            GLib.source_remove(self.dark_timer)
+            self.dark_timer = None
+
+    def _go_dark(self):
+        self.dark_timer = None
+        if self.dark or self.st.get("state") != "connected":
+            return False
+        self.dark = True
+        try:
+            open(DARK_FLAG, "w").close()
+        except OSError:
+            pass
+        wlopm("--off")
+        return False
+
+    def light(self):
+        if not self.dark:
+            return
+        self.dark = False
+        wlopm("--on")
+        try:
+            os.unlink(DARK_FLAG)
+        except FileNotFoundError:
+            pass
+        self.drawn_key = None
+        self.area.queue_draw()
+
+    def on_wake(self, monitor, f, other, event):
+        if event == Gio.FileMonitorEvent.DELETED:
+            return
+        self.light()
+        if self.st.get("state") == "connected":
+            self.dark_in(WAKE_S)
 
     # ------------------------------------------------------------ drawing
     def on_draw(self, widget, cr):
@@ -539,6 +653,13 @@ class Screen(Gtk.Window):
         self.text(cr, "Select + Start + L1 + R1 to stop", W / 2, 448, 15, DIM, align="center")
 
 
+def wlopm(arg):
+    try:
+        subprocess.run(["wlopm", arg, OUTPUT], timeout=3, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except (OSError, subprocess.SubprocessError) as e:
+        print("rg35xxh-controller-screen: wlopm:", e, file=sys.stderr)
+
+
 def battery():
     try:
         with open("/sys/class/power_supply/battery/capacity") as f:
@@ -567,5 +688,11 @@ if __name__ == "__main__":
                              "switch-bt": "Nintendo Switch"}.get(transport, "JASONPC"),
                   "rate": 1000 if usb else 118, "rssi": None if usb else -64,
                   "report": [(1 << 1) | (1 << 4) | (1 << 7), 0, 2, 200, 90, 128, 128, 0, 255]}
+    for sig in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
+        GLib.unix_signal_add(GLib.PRIORITY_DEFAULT, sig, lambda *a: (Gtk.main_quit(), False)[1])
     win.show_all()
-    Gtk.main()
+    try:
+        Gtk.main()
+    finally:
+        win.cancel_dark()
+        win.light()                       # never leave the handheld's display off

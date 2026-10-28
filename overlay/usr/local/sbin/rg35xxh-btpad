@@ -170,6 +170,8 @@ class Characteristic(dbus.service.Object):
         self.service, self.uuid, self.flags, self.descs = service, uuid, flags, []
         self.value = bytes(value)
         self.notifying = False
+        self.notify_fd = None             # set by AcquireNotify: notifications go straight to bluetoothd
+        self.notify_watch = None
         super().__init__(service.bus, self.path)
         service.chars.append(self)
 
@@ -177,8 +179,11 @@ class Characteristic(dbus.service.Object):
         return dbus.ObjectPath(self.path)
 
     def get_properties(self):
-        return {CHR_IFACE: {"Service": self.service.get_path(), "UUID": self.uuid, "Flags": self.flags,
-                            "Descriptors": dbus.Array([d.get_path() for d in self.descs], signature="o")}}
+        props = {"Service": self.service.get_path(), "UUID": self.uuid, "Flags": self.flags,
+                 "Descriptors": dbus.Array([d.get_path() for d in self.descs], signature="o")}
+        if "notify" in self.flags:        # offers AcquireNotify (see notify())
+            props["NotifyAcquired"] = dbus.Boolean(self.notify_fd is not None)
+        return {CHR_IFACE: props}
 
     @dbus.service.method(CHR_IFACE, in_signature="a{sv}", out_signature="ay")
     def ReadValue(self, options):
@@ -199,15 +204,47 @@ class Characteristic(dbus.service.Object):
         self.notifying = False
         log(f"notify off: {self.uuid}")
 
+    @dbus.service.method(CHR_IFACE, in_signature="ha{sv}")
+    def AcquireNotify(self, fd, options):
+        """BlueZ hands over a socket for notifications when a client subscribes: writing to it
+        skips D-Bus for every report (D-Bus signal + dbus-daemon + bluetoothd's D-Bus side cost
+        ~16 % of a core in BT Controller mode, measured 2026-10-28)."""
+        self._release_notify_fd()
+        self.notify_fd = fd.take()
+        os.set_blocking(self.notify_fd, False)
+        self.notify_watch = GLib.io_add_watch(self.notify_fd, GLib.IO_HUP | GLib.IO_ERR,
+                                              lambda *a: (self._release_notify_fd(), False)[1])
+        log(f"notify acquired (socket): {self.uuid}, mtu {int(options.get('mtu', 0))}")
+
+    def _release_notify_fd(self):
+        if self.notify_watch:
+            GLib.source_remove(self.notify_watch)
+            self.notify_watch = None
+        if self.notify_fd is not None:
+            try:
+                os.close(self.notify_fd)
+            except OSError:
+                pass
+            self.notify_fd = None
+            log(f"notify socket released: {self.uuid}")
+
     @dbus.service.signal(PROP_IFACE, signature="sa{sv}as")
     def PropertiesChanged(self, interface, changed, invalidated):
         pass
 
     def notify(self, value):
-        # Always emit: BlueZ delivers it to every client that enabled notifications, including
-        # bonded clients whose subscription it remembered from an earlier session (Windows does
-        # not subscribe again after reconnecting).
         self.value = bytes(value)
+        if self.notify_fd is not None:
+            try:
+                os.write(self.notify_fd, self.value)
+                return
+            except BlockingIOError:
+                return                    # link busy: the next report carries the newest state
+            except OSError:
+                self._release_notify_fd()
+        # No socket (yet): emit the value. BlueZ delivers it to every client that enabled
+        # notifications, including bonded clients whose subscription it remembered from an
+        # earlier session (Windows does not subscribe again after reconnecting).
         self.PropertiesChanged(CHR_IFACE, {"Value": dbus.Array(self.value, signature="y")}, [])
 
     @dbus.service.method(PROP_IFACE, in_signature="s", out_signature="a{sv}")

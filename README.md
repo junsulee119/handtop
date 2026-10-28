@@ -86,6 +86,8 @@ Use the handheld as a game controller for your PC or phone: **Apps → External 
 
 **Bluetooth: Switch** (experimental): the handheld pairs with a Switch as a Pro Controller (Controllers → Change Grip/Order the first time), with vibration and the same F = Home / F + Select = Capture. Bluetooth devices connected to the handheld disconnect while it is on (the app asks first). Tested with a PC (Ryujinx), not on a real Switch yet.
 
+**Battery saver** (switch in the app, off by default): the handheld's screen turns off 30 s after connecting; Vol+/- or Power shows it for 10 s.
+
 ## Good to know
 
 - The device has 1 GB RAM; for heavy websites and video, Moonlight to a PC works best.

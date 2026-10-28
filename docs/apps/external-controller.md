@@ -1,6 +1,6 @@
 # External Controller
 
-**Apps → External Controller** (`rg35xxh-external-controller`): use the handheld as a game controller for a PC, phone or Nintendo Switch. **Bluetooth: Xbox** (BT Controller mode, `rg35xxh-btpad`; v0.2.0, an Xbox Wireless Controller since v0.3.0), **Bluetooth: Switch** (Switch Controller mode over Bluetooth, `rg35xxh-switchbt`, experimental), **USB cable: Xbox** (Wired Controller mode, `rg35xxh-usbpad`) or **USB cable: Switch** (Switch Controller mode, `rg35xxh-usbpad --switch`), with a status screen (`rg35xxh-controller-screen`) while it runs. The app shows two cards, Bluetooth and USB cable (each with its icon on top), each split into two halves to pick from: Xbox above (a monitor and keyboard) and Switch below (a TV and a gamepad); those two icons are generic on purpose, no brand logos (`tools/icons/gen_usb_target_icons.py`). Icons follow the Handtop theme (`-light` files). Picking Bluetooth: Switch while Bluetooth devices are connected to the handheld first lists them and asks (they disconnect, see below).
+**Apps → External Controller** (`rg35xxh-external-controller`): use the handheld as a game controller for a PC, phone or Nintendo Switch. **Bluetooth: Xbox** (BT Controller mode, `rg35xxh-btpad`; v0.2.0, an Xbox Wireless Controller since v0.3.0), **Bluetooth: Switch** (Switch Controller mode over Bluetooth, `rg35xxh-switchbt`, experimental), **USB cable: Xbox** (Wired Controller mode, `rg35xxh-usbpad`) or **USB cable: Switch** (Switch Controller mode, `rg35xxh-usbpad --switch`), with a status screen (`rg35xxh-controller-screen`) while it runs. The app shows two cards, Bluetooth and USB cable (each with its icon on top), each split into two halves to pick from: Xbox above (a monitor and keyboard) and Switch below (a TV and a gamepad); those two icons are generic on purpose, no brand logos (`tools/icons/gen_usb_target_icons.py`). Icons follow the Handtop theme (`-light` files). Picking Bluetooth: Switch while Bluetooth devices are connected to the handheld first lists them and asks (they disconnect, see below). Above the cards, a **Battery saver** switch (off by default; see "Battery saver" below).
 
 ## Bluetooth: BT Controller mode
 
@@ -48,6 +48,29 @@ Why: with classic Bluetooth on, Windows also derives a classic pairing key from 
 - Logs: `journalctl -u rg35xxh-btpad`.
 
 Tested 2026-10-21 with Windows 11: pairing, all controls in `joy.cpl`, automatic reconnection after leaving and re-entering the mode; with the Xbox identity: Xbox driver, vibration, identity restored when the mode ends.
+
+## Battery saver
+
+A switch above the cards in the app, **off by default** (Standard: the status screen stays on), remembered in `~/.config/rg35xxh/external-controller` (`power = standard | saver`). Switching it on shows a pop-up explaining how to get the screen back. It applies to all four modes.
+
+With Battery saver on:
+- **The handheld's display switches off 30 s after the other device connects** (`wlopm --off DSI-1`; an HDMI monitor stays on). **Vol+ / Vol−** (also F + Vol) and **Power** show it for 10 s: they are the only presses not sent to the other device. Vol still changes the volume; Power on a dark screen only wakes it (tap again for the power menu). It also comes back by itself when the connection drops (state "waiting" / "pairing" / "cable") and whenever the mode ends.
+- **The status screen redraws only when the picture changes**, at most 15 times a second (`visual_key`: stick caps by whole pixels, buttons, triggers, link info).
+
+How: the app starts `rg35xxh-controller-screen --saver`. The input daemon writes `$XDG_RUNTIME_DIR/rg35xxh-extpad-wake` on Vol / F + Vol / Power while an external mode is on; the screen watches that file (GIO file monitor, no polling). `rg35xxh-extpad-dark` exists while the display is off; the screen switches it back on when it ends (also on SIGTERM), and if it died meanwhile, the input daemon does when the mode ends.
+
+Always on, in both settings: Bluetooth: Xbox offers BlueZ a socket for its input notifications (`AcquireNotify`), which skips D-Bus for every report. BlueZ only uses it when the PC subscribes to notifications; Windows remembers its subscription when it reconnects to an existing pairing and then the D-Bus path is used as before (checked 2026-10-28: a reconnect used D-Bus).
+
+Measured 2026-10-28 (DDR4, `tools/measure-cpu.py`, 60 s while playing on a PC; % of 400 % = 4 cores; idle desktop 28 %; the battery's current reading is fixed on this unit, so CPU is what can be measured; the display and backlight being off saves more on top):
+
+| Mode | Standard | Battery saver |
+|---|---|---|
+| Bluetooth: Xbox | 70 % (status screen 19 % of a core, compositor 4 %, btpad + D-Bus + bluetoothd 15 %) | 33 % |
+| Bluetooth: Switch | 57 % (status screen 18 %) | 33 % |
+| USB cable: Switch | 60 % (status screen 21 %) | not measured |
+| USB cable: Xbox | 60 % (status screen 21 %) | not measured |
+
+With the display off, a mode costs about 5 % above the idle desktop. Not done (small gains, kept for later): taking CPU cores offline or limiting the frequency (the CPU already spends ~70 % of the time at its lowest 480 MHz), Wi-Fi power save or off (would drop SSH / Tailscale).
 
 ## Status screen
 
@@ -135,6 +158,10 @@ Tested 2026-10-28 on a DDR4 RG35XX H with Windows 11: enumerates as "Handtop Con
 3. Later: start the mode and wake the Switch; the handheld reconnects to the last Switch (or PC) by itself.
 4. Controls as in Switch Controller mode over USB (by label, F = Home, F + Select = Capture). **Vibration works** (strength only, on the single motor, through the input daemon's gate). No motion controls (no sensor; the motion data reads zero), no NFC.
 5. Select + Start + L1 + R1 ends it; bluetoothd gets its own identity and plugins back.
+
+**Re-pairing:** remove "Pro Controller" on the PC / Switch **and** remove that host on the handheld (Bluetooth tray → Devices), then pair again. If only the host forgets it, the handheld keeps calling the old host ("Host is down" in the log) and the new pairing can be slow to appear or fail (seen 2026-10-28).
+
+**Same host for both Bluetooth modes:** both use the handheld's Bluetooth address, and Windows keeps one device per address, so pairing "Handtop (Xbox)" and "Pro Controller" with the same PC may replace one with the other (suspected, not confirmed). A PC for Xbox mode and a Switch for Switch mode don't meet this. Possible fix (not done): a separate static random address for Bluetooth: Xbox, which runs without classic Bluetooth anyway (existing Xbox pairings would need re-pairing once).
 
 **How it works** (`rg35xxh-switchbt`, root, `rg35xxh-switchbt.service`; written from public protocol notes: dekuNukem's Nintendo_Switch_Reverse_Engineering, and the clean-room notes of cajunpanda/bluetooth-nes-advantage, an ESP32 pad tested on Switch 1 and 2; no code from GPL implementations):
 - **Identity:** bluetoothd is restarted with a runtime copy of `main.conf` (`Class = 0x000508`, `DeviceID = usb:057e:2009:0001`) and without its `input` plugin (it would own the HID channels, PSM 17 / 19) and its `hostname` plugin (it sets the class from the chassis: "handset" = phone, `0x00020c`). Adapter alias "Pro Controller" (the exact name matters). `ExecStopPost=--restore` puts everything back after a crash, as in BT Controller mode.

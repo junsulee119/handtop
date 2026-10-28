@@ -12,6 +12,10 @@ Picking Bluetooth: Switch first lists the Bluetooth devices connected right now,
 disconnects (bluetoothd restarts as a Pro Controller, without classic HID), and asks to go on.
 After the service is up, the input daemon is told (SIGUSR2) to send it the controls, and the
 full-screen status page opens. Select + Start + L1 + R1 ends the mode.
+
+Battery saver: a switch above the cards (off by default), remembered in
+~/.config/rg35xxh/external-controller; switching it on shows a pop-up on how to wake the screen. Battery saver opens the status page with --saver: fewer
+redraws, and the handheld's display off 30 s after connecting (Vol+/- or Power shows it again).
 """
 import os
 import socket
@@ -26,6 +30,30 @@ NAMES = {"bt": "BT Controller", "usb": "Wired Controller", "switch": "Switch Con
 BLUETOOTH = ("bt", "switch-bt")
 STATUS = "/run/rg35xxh-extpad-status.sock"
 ICONS = "/usr/local/share/rg35xxh/icons"
+SETTINGS = os.path.join(os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config"),
+                        "rg35xxh", "external-controller")
+SAVER_HELP = ("The handheld's screen turns off 30 s after the other device connects. "
+              "Press Vol+ or Vol- (changes the volume too) or Power to show it for 10 s. "
+              "It also comes back by itself if the connection drops.")
+
+
+def saver_on():
+    """Battery saver chosen? (remembered between runs; Standard by default)"""
+    try:
+        with open(SETTINGS) as f:
+            return any(line.strip() == "power = saver" for line in f)
+    except OSError:
+        return False
+
+
+def set_saver(on):
+    try:
+        os.makedirs(os.path.dirname(SETTINGS), exist_ok=True)
+        with open(SETTINGS, "w") as f:
+            f.write("# External Controller (rg35xxh-external-controller): standard | saver\n"
+                    f"power = {'saver' if on else 'standard'}\n")
+    except OSError:
+        pass
 
 
 def notify(title, text, ms=5000):
@@ -70,7 +98,8 @@ def start(mode):
         subprocess.run(["systemctl", "stop", unit], stderr=subprocess.DEVNULL)
         notify(NAMES[mode], "The input daemon is not running. Log out and back in, then try again.", 8000)
         return 1
-    subprocess.Popen(["rg35xxh-controller-screen"], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+    subprocess.Popen(["rg35xxh-controller-screen"] + (["--saver"] if saver_on() else []),
+                     stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
                      stderr=subprocess.DEVNULL, start_new_session=True)
     return 0
 
@@ -127,6 +156,35 @@ def choose():
     head.set_markup("<span size='x-large' weight='bold'>External Controller</span>\n"
                     "<small>Use the handheld as a game controller for a PC, phone or Switch.</small>")
     box.pack_start(head, False, False, 0)
+
+    # Battery saver: a switch (off = Standard, the default); switching it on explains in a pop-up
+    # how to get the screen back while it is off.
+    prow = Gtk.Box(spacing=10)
+    sw = Gtk.Switch(valign=Gtk.Align.CENTER)
+    plab = Gtk.Label(xalign=0)
+    prow.pack_start(sw, False, False, 0)
+    prow.pack_start(plab, True, True, 0)
+    box.pack_start(prow, False, False, 0)
+
+    def show_power(saver):
+        plab.set_markup("<b>Battery saver</b>  <small>" + (
+            "Screen off while playing; Vol+/- or Power shows it." if saver
+            else "Off: the status screen stays on.") + "</small>")
+
+    def on_switch(_sw, _pspec):
+        saver = sw.get_active()
+        set_saver(saver)
+        show_power(saver)
+        if saver:
+            d = Gtk.MessageDialog(transient_for=win, modal=True, message_type=Gtk.MessageType.INFO,
+                                  buttons=Gtk.ButtonsType.OK, text="Battery saver")
+            d.format_secondary_text(SAVER_HELP)
+            d.run()
+            d.destroy()
+    sw.set_active(saver_on())
+    show_power(sw.get_active())
+    sw.connect("notify::active", on_switch)
+
     row = Gtk.Box(spacing=12, homogeneous=True)
     box.pack_start(row, True, True, 0)
 

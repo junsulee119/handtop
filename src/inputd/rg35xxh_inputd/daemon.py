@@ -63,6 +63,12 @@ EXT_MODES = {   # transport: (flag file, notification title, notification text, 
 }
 EXT_HELLO = {b"hello usb": "usb", b"hello switch": "switch", b"hello switch-bt": "switch-bt"}   # else "bt"
 SWITCH_EXTS = ("switch", "switch-bt")           # F gives Home / Capture there
+# Battery saver in external controller modes: the status screen (rg35xxh-controller-screen
+# --saver) switches the handheld's display off while connected. Vol / F + Vol / Power are the
+# only presses not sent to the other device, so they wake it: the daemon writes EXT_WAKE, which
+# the screen watches. EXT_DARK exists while the display is off; if the screen died meanwhile,
+# the daemon switches the display back on when the mode ends.
+EXT_WAKE, EXT_DARK, EXT_OUTPUT = "rg35xxh-extpad-wake", "rg35xxh-extpad-dark", "DSI-1"
 BT_EVENT = struct.Struct("<HHi")               # evdev type, code, value
 # Mode-change feedback: the taskbar icon shakes and the motor wobbles with it, both driven from
 # here on one clock and one damped-spring model, x(t) = A e^(-DECAY t) sin(2 pi FREQ t):
@@ -712,6 +718,15 @@ class Daemon:
             return False
 
     def _command(self, name):
+        if self.bt:                       # external controller mode: wake the status screen
+            dark = os.path.exists(runtime_flag(EXT_DARK))
+            try:
+                with open(runtime_flag(EXT_WAKE), "w") as f:
+                    f.write(f"{time.monotonic():.3f} {name}\n")
+            except OSError as e:
+                log.debug("wake: %s", e)
+            if dark and name == "power_menu":
+                return                    # Power on a dark screen only wakes it (tap again for the menu)
         if name == "power_menu":
             spawn("rg35xxh-power-menu")
         elif name in ("volume_up", "volume_down"):
@@ -1119,6 +1134,10 @@ class Daemon:
             log.info("%s: disconnected", EXT_MODES[self.ext][1])
         for flag, *_ in EXT_MODES.values():
             set_flag(flag, False)
+        if os.path.exists(runtime_flag(EXT_DARK)):      # battery saver left the display off
+            log.info("%s: display was still off, switching it on", EXT_MODES[self.ext][1])
+            spawn("wlopm", "--on", EXT_OUTPUT)
+            set_flag(EXT_DARK, False)
 
     def run(self):
         GLib.timeout_add(10, self._tick)
