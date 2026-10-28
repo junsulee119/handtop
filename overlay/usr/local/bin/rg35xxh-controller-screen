@@ -1,11 +1,11 @@
 #!/usr/bin/python3
-"""External-control status screen (BT Controller and Wired Controller modes).
+"""External-control status screen (BT Controller, Wired Controller and Switch Controller modes).
 
 Full-screen layer-shell window over the desktop while the handheld is used as a controller for
 another device. Shows the connection state, the host's name, a live drawing of the handheld's
 controls (pixel art, drawn at half resolution and scaled 2x like the taskbar icons), battery,
 link info and how to stop. Reads JSON lines from the running service's status socket
-(rg35xxh-btpad or rg35xxh-usbpad) and closes itself
+(rg35xxh-btpad or rg35xxh-usbpad, also for Switch mode) and closes itself
 when that socket closes (the mode ended). Takes no input: every button goes to the other device.
 """
 import json
@@ -93,7 +93,7 @@ if LIGHT:                        # light background, dark ink (the drawn handhel
     BG = (0.875, 0.894, 0.925)                                   # #dfe4ec, the light wallpaper
     TEXT, DIM, OK, WARN = (0.17, 0.19, 0.23), (0.40, 0.44, 0.51), (0.15, 0.52, 0.27), (0.72, 0.43, 0.05)
 SUFFIX = "-light" if LIGHT else ""   # light-theme icon files (inputmode-*-light.png, battery-*-light.png)
-ACCENT = {"bt": (0.37, 0.50, 0.74), "usb": (0.75, 0.54, 0.36)}
+ACCENT = {"bt": (0.37, 0.50, 0.74), "usb": (0.75, 0.54, 0.36), "switch": (0.80, 0.33, 0.33)}
 
 # HID report (rg35xxh-btpad): bytes 0-1 buttons, 2 hat (0-7, 8 = centre), 3-6 sticks LX LY RX RY,
 # 7-8 triggers. Button bits follow the Xbox layout; the handheld's face labels are Nintendo-style.
@@ -108,6 +108,8 @@ STATE_TEXT = {
     "cable": ("Connect the USB cable", "Right USB-C port (OTG2/DC) to the PC; the handheld charges meanwhile"),
     None: ("Starting…", None),
 }
+SWITCH_CABLE_HINT = "Right USB-C port to the Switch dock (USB-A), or through a USB-C OTG adapter"
+SWITCH_HINT = "F: Home (hold: quick settings)    F + Select: Capture"
 
 
 def handheld_monitor():
@@ -471,9 +473,12 @@ class Screen(Gtk.Window):
             cr.restore()
         state = self.st.get("state")
         title, hint = STATE_TEXT.get(state, STATE_TEXT[None])
+        if transport == "switch":
+            hint = SWITCH_CABLE_HINT if state == "cable" else hint or SWITCH_HINT
         dev = self.st.get("device") or "your device"
         self.text(cr, title.format(dev=dev), 80, 46, 22, OK if state == "connected" else TEXT, bold=True)
-        sub = {"bt": "BT Controller", "usb": "Wired Controller (USB)"}.get(transport, "")
+        sub = {"bt": "BT Controller", "usb": "Wired Controller (USB)",
+               "switch": "Switch Controller (USB)"}.get(transport, "")
         self.text(cr, sub, 80, 64, 13, DIM)
         # battery (top right): the taskbar's pixel-art battery icon at 2x, then the percentage
         cap, charging = battery()
@@ -543,8 +548,10 @@ if __name__ == "__main__":
     win = Screen()
     if "--demo" in sys.argv:          # fixed sample state, for screenshots / checking the drawing
         win.connect_status = lambda: False
-        usb = "--usb" in sys.argv
-        win.st = {"transport": "usb" if usb else "bt", "state": "connected", "device": "PC (USB)" if usb else "JASONPC",
+        usb = "--usb" in sys.argv or "--switch" in sys.argv
+        transport = "switch" if "--switch" in sys.argv else "usb" if usb else "bt"
+        win.st = {"transport": transport, "state": "connected",
+                  "device": {"switch": "Switch or PC (USB)", "usb": "PC (USB)"}.get(transport, "JASONPC"),
                   "rate": 1000 if usb else 118, "rssi": None if usb else -64,
                   "report": [(1 << 1) | (1 << 4) | (1 << 7), 0, 2, 200, 90, 128, 128, 0, 255]}
     win.show_all()

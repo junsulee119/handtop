@@ -1,5 +1,6 @@
 #!/usr/bin/python3
-"""Handtop wired controller mode: the handheld becomes a wired Xbox 360 controller for a PC.
+"""Handtop wired controller mode: the handheld becomes a wired Xbox 360 controller for a PC
+(or, with --switch, a wired Nintendo Switch controller).
 
 USB device mode exists only on the right USB-C port (OTG2/DC; the H700's single device-capable
 controller, MUSB). The left port (OTG1) is host-only. The handheld charges from the PC meanwhile.
@@ -16,6 +17,14 @@ struct "<HHi"), exactly as for rg35xxh-btpad; vibration requested by the PC (OUT
 Status for the screen: JSON lines on /run/rg35xxh-extpad-status.sock (same format as btpad).
 Started by the External Controller app as rg35xxh-usbpad.service; stops when the input daemon
 disconnects (Select + Start + L1 + R1) or never connects (60 s); removes the gadget on exit.
+
+--switch (rg35xxh-switchpad.service): a wired Nintendo Switch controller instead. The gadget poses
+as HORI's licensed wired pad (Pokken Tournament DX Pro Pad, 0f0d:0092), which the Switch accepts
+without a handshake: one HID interface, an 8-byte input report (14 buttons incl. Home / Capture,
+hat, 4 stick axes), sent at least every 8 ms. No vibration (the pad has none). The HID class
+requests (report descriptor, idle, get/set report) are answered here on ep0. Buttons by label:
+the handheld's A/B/X/Y are printed where the Switch has them. Home / Capture come from the input
+daemon (F tap / hold, F + Select).
 """
 import grp
 import json
@@ -37,7 +46,9 @@ FFS = "/run/rg35xxh-ffs-pad"
 SOCKET = "/run/rg35xxh-extpad.sock"
 STATUS_SOCKET = "/run/rg35xxh-extpad-status.sock"
 EVENT = struct.Struct("<HHi")
-HOST_NAME = "PC (USB)"
+SWITCH = "--switch" in sys.argv[1:]
+HOST_NAME = "Switch or PC (USB)" if SWITCH else "PC (USB)"   # it can't tell which
+TRANSPORT = "switch" if SWITCH else "usb"
 
 # Xbox 360 wButtons bits
 X_BITS = {E.BTN_START: 4, E.BTN_SELECT: 5, E.BTN_THUMBL: 6, E.BTN_THUMBR: 7, E.BTN_TL: 8, E.BTN_TR: 9,
@@ -46,6 +57,26 @@ X_BITS = {E.BTN_START: 4, E.BTN_SELECT: 5, E.BTN_THUMBL: 6, E.BTN_THUMBR: 7, E.B
 S_BITS = {E.BTN_A: 0, E.BTN_B: 1, E.BTN_X: 2, E.BTN_Y: 3, E.BTN_TL: 4, E.BTN_TR: 5,
           E.BTN_SELECT: 6, E.BTN_START: 7, E.BTN_THUMBL: 8, E.BTN_THUMBR: 9, E.BTN_MODE: 10}
 HAT = {(0, -1): 0, (1, -1): 1, (1, 0): 2, (1, 1): 3, (0, 1): 4, (-1, 1): 5, (-1, 0): 6, (-1, -1): 7}
+
+# Switch (HORI pad) button bits. The daemon sends Xbox-position codes (core.PAD_BUTTONS): BTN_A =
+# bottom, BTN_B = right, BTN_X = left, BTN_Y = top. The Switch's B is bottom, A right, Y left, X top.
+SW_BITS = {E.BTN_X: 0, E.BTN_A: 1, E.BTN_B: 2, E.BTN_Y: 3, E.BTN_TL: 4, E.BTN_TR: 5,
+           E.BTN_SELECT: 8, E.BTN_START: 9, E.BTN_THUMBL: 10, E.BTN_THUMBR: 11,
+           E.BTN_MODE: 12, E.KEY_RECORD: 13}               # ZL = bit 6, ZR = bit 7 (from ABS_Z / ABS_RZ)
+SW_KEEPALIVE = 0.008       # resend the current report at least this often (s); a real pad streams
+# HID report descriptor of the HORI Pokken pad (86 bytes): 16 buttons, hat (4 bits + 4 padding),
+# X Y Z Rz (left X/Y, right X/Y; 0-255, centre 128), 1 vendor byte; 8-byte vendor output report.
+SW_REPORT_DESC = bytes.fromhex(
+    "05 01 09 05 a1 01"                                 # Generic Desktop, Game Pad, Collection
+    "15 00 25 01 35 00 45 01 75 01 95 10"               # 16 x 1 bit
+    "05 09 19 01 29 10 81 02"                           # buttons 1-16
+    "05 01 25 07 46 3b 01 75 04 95 01 65 14 09 39 81 42"   # hat 0-7, null = centre
+    "65 00 95 01 81 01"                                 # 4 bits padding
+    "26 ff 00 46 ff 00 09 30 09 31 09 32 09 35 75 08 95 04 81 02"   # X Y Z Rz, 8 bit
+    "06 00 ff 09 20 95 01 81 02"                        # vendor byte
+    "0a 21 26 95 08 91 02"                              # 8-byte output report
+    "c0")
+SW_HID_DESC = bytes([9, 0x21, 0x11, 0x01, 0x00, 1, 0x22]) + struct.pack("<H", len(SW_REPORT_DESC))
 
 
 def log(*a):
@@ -75,6 +106,14 @@ def unix_server(path, kind):
 
 # ------------------------------------------------------------------ USB gadget
 def descriptors():
+    if SWITCH:
+        intf = bytes([9, 4, 0, 0, 2, 0x03, 0x00, 0x00, 0])            # HID, no boot protocol
+        ep_in = bytes([7, 5, 0x81, 3]) + struct.pack("<H", 64) + bytes([5])
+        ep_out = bytes([7, 5, 0x01, 3]) + struct.pack("<H", 64) + bytes([5])
+        fs = intf + SW_HID_DESC + ep_in + ep_out
+        hs = intf + SW_HID_DESC + ep_in[:6] + bytes([4]) + ep_out[:6] + bytes([4])  # 1 ms at high speed
+        body = struct.pack("<II", 4, 4) + fs + hs
+        return struct.pack("<III", 3, 12 + len(body), 1 | 2) + body
     intf = bytes([9, 4, 0, 0, 2, 0xFF, 0x5D, 0x01, 0])
     xdesc = bytes([0x11, 0x21, 0x00, 0x01, 0x01, 0x25, 0x81, 0x14, 0, 0, 0, 0, 0x13, 0x01, 0x08, 0, 0])
     ep_in = bytes([7, 5, 0x81, 3]) + struct.pack("<H", 32) + bytes([4])
@@ -112,10 +151,19 @@ def gadget_up():
     gadget_clean()
     subprocess.run(["modprobe", "usb_f_fs_xinput"], check=True)
     os.makedirs(G, exist_ok=True)
-    for k, v in (("idVendor", "0x045e"), ("idProduct", "0x028e"), ("bcdDevice", "0x0114"), ("bcdUSB", "0x0200"),
-                 ("bDeviceClass", "0xff"), ("bDeviceSubClass", "0xff"), ("bDeviceProtocol", "0xff"),
-                 ("bMaxPacketSize0", "0x40")):
+    if SWITCH:      # HORI Pokken pad; class at interface level, like the real one
+        ids = (("idVendor", "0x0f0d"), ("idProduct", "0x0092"), ("bcdDevice", "0x0100"), ("bcdUSB", "0x0200"),
+               ("bDeviceClass", "0x00"), ("bDeviceSubClass", "0x00"), ("bDeviceProtocol", "0x00"),
+               ("bMaxPacketSize0", "0x40"))
+    else:
+        ids = (("idVendor", "0x045e"), ("idProduct", "0x028e"), ("bcdDevice", "0x0114"), ("bcdUSB", "0x0200"),
+               ("bDeviceClass", "0xff"), ("bDeviceSubClass", "0xff"), ("bDeviceProtocol", "0xff"),
+               ("bMaxPacketSize0", "0x40"))
+    for k, v in ids:
         w(f"{G}/{k}", v)
+    # The real HORI pad is full speed, but no max_speed here: the MUSB controller refuses to start a
+    # gadget limited to full speed (udc_start -EINVAL, tested). It runs at high speed, like the
+    # Raspberry Pi Zero (dwc2) builds of Switch pads.
     os.makedirs(f"{G}/strings/0x409", exist_ok=True)
     w(f"{G}/strings/0x409/manufacturer", "Handtop")
     w(f"{G}/strings/0x409/product", "Handtop Controller")
@@ -150,7 +198,7 @@ def gadget_down(fds):
 class Status:
     def __init__(self):
         self.clients = []
-        self.st = {"transport": "usb", "state": "cable", "device": None, "rssi": None,
+        self.st = {"transport": TRANSPORT, "state": "cable", "device": None, "rssi": None,
                    "rate": 0, "report": [0, 0, 8, 128, 128, 128, 128, 0, 0]}
         self.server = unix_server(STATUS_SOCKET, socket.SOCK_STREAM)
         GLib.io_add_watch(self.server.fileno(), GLib.IO_IN, self.on_accept)
@@ -226,6 +274,25 @@ class Pad:
         return struct.pack("<BBHBBhhhh6x", 0x00, 0x14, b, max(0, min(255, a[E.ABS_Z])), max(0, min(255, a[E.ABS_RZ])),
                            clamp(a[E.ABS_X]), clamp(-a[E.ABS_Y]), clamp(a[E.ABS_RX]), clamp(-a[E.ABS_RY]))
 
+    # Switch input report (8 bytes, HORI pad): buttons, hat (8 = centre), LX LY RX RY, vendor
+    def switch_report(self):
+        b = 0
+        for code in self.buttons:
+            if code in SW_BITS:
+                b |= 1 << SW_BITS[code]
+        a = self.axes
+        b |= (a[E.ABS_Z] > 64) << 6 | (a[E.ABS_RZ] > 64) << 7      # L2 / R2 -> ZL / ZR (digital)
+        to8 = lambda v: (max(-32768, min(32767, v)) + 32768) >> 8   # HID: Y grows downwards, as evdev
+        return struct.pack("<H6B", b, HAT.get(tuple(self.hat), 8), to8(a[E.ABS_X]), to8(a[E.ABS_Y]),
+                           to8(a[E.ABS_RX]), to8(a[E.ABS_RY]), 0)
+
+    def report(self):
+        return self.switch_report() if SWITCH else self.x360_report()
+
+    def current_report(self):
+        with self.cond:
+            return self.report()
+
     def screen_report(self):
         b = 0
         for code in self.buttons:
@@ -237,13 +304,18 @@ class Pad:
                 to8(a[E.ABS_RX]), to8(a[E.ABS_RY]), max(0, min(255, a[E.ABS_Z])), max(0, min(255, a[E.ABS_RZ]))]
 
     def writer(self, ep_in):
-        """Send a report whenever the state changes (the write returns when the PC has read it)."""
+        """Send a report whenever the state changes (the write returns when the PC has read it).
+        Switch: also resend the current one every SW_KEEPALIVE, as a real pad streams its state."""
         while True:
             with self.cond:
-                while not self.dirty:
-                    self.cond.wait()
+                if SWITCH:
+                    if not self.dirty:
+                        self.cond.wait(SW_KEEPALIVE)
+                else:
+                    while not self.dirty:
+                        self.cond.wait()
                 self.dirty = False
-                r = self.x360_report()
+                r = self.report()
             try:
                 os.write(ep_in, r)
                 self.sent += 1
@@ -258,9 +330,9 @@ class Pad:
             conn.close()
             return True
         self.conn = conn
-        conn.send(b"hello usb")
+        conn.send(b"hello switch" if SWITCH else b"hello usb")
         GLib.io_add_watch(conn.fileno(), GLib.IO_IN | GLib.IO_HUP | GLib.IO_ERR, self.on_events)
-        log("input daemon connected (wired controller mode)")
+        log("input daemon connected (%s controller mode)" % ("Switch" if SWITCH else "wired"))
         return True
 
     def on_events(self, fd, cond):
@@ -376,16 +448,41 @@ def main():
                     setup, etype = ev[i:i + 8], ev[i + 8]
                     if etype == 2:                                   # ENABLE: PC configured us
                         GLib.idle_add(lambda: status.update(state="connected", device=HOST_NAME) and False)
-                        log("connected to a PC")
+                        log("connected to", "a Switch or PC" if SWITCH else "a PC")
                     elif etype in (1, 3, 5):                         # UNBIND / DISABLE / SUSPEND
                         GLib.idle_add(lambda: status.update(state="cable", device=None) and False)
                     elif etype == 6:                                 # RESUME
                         GLib.idle_add(lambda: status.update(state="connected", device=HOST_NAME) and False)
-                    elif etype == 4:                                 # vendor requests: not needed, stall
-                        try:
-                            os.read(ep0, 0) if setup[0] & 0x80 else os.write(ep0, b"")
-                        except OSError:
-                            pass
+                    elif etype == 4:                                 # SETUP for our interface
+                        answer_setup(setup)
+
+        def answer_setup(setup):
+            """Switch: the HID class requests. Xbox 360: vendor requests, not needed. The rest is
+            stalled (FunctionFS: reading on an IN request / writing on an OUT one stalls it)."""
+            rtype, req, value, _index, length = struct.unpack("<BBHHH", setup)
+            data, ack = None, False
+            if SWITCH:
+                if rtype == 0x81 and req == 0x06 and value >> 8 == 0x22:     # GET_DESCRIPTOR: report
+                    data = SW_REPORT_DESC
+                elif rtype == 0x81 and req == 0x06 and value >> 8 == 0x21:   # GET_DESCRIPTOR: HID
+                    data = SW_HID_DESC
+                elif rtype == 0xA1 and req == 0x01:                          # GET_REPORT
+                    data = pad.current_report()
+                elif rtype == 0xA1 and req == 0x02:                          # GET_IDLE
+                    data = bytes([0])
+                elif rtype == 0xA1 and req == 0x03:                          # GET_PROTOCOL: report
+                    data = bytes([1])
+                elif rtype == 0x21 and req in (0x09, 0x0A, 0x0B):            # SET_REPORT / IDLE / PROTOCOL
+                    ack = True
+            try:
+                if data is not None:
+                    os.write(ep0, data[:length])
+                elif ack:
+                    os.read(ep0, length)                                     # data stage (if any) + status
+                else:
+                    os.read(ep0, 0) if rtype & 0x80 else os.write(ep0, b"")
+            except OSError:
+                pass
 
         def ep_out_reader():
             while True:
@@ -394,6 +491,8 @@ def main():
                 except OSError:
                     time.sleep(0.5)
                     continue
+                if SWITCH:
+                    continue                                         # HORI's vendor output: unused
                 if len(d) >= 5 and d[0] == 0x00 and d[1] == 0x08:    # rumble: 00 08 00 big small ...
                     pad.rumble_request(d[3], d[4])
 

@@ -15,7 +15,7 @@ How Handtop works on the RG35XX H. One document per app or background service; g
 
 | File | Contents |
 |---|---|
-| [apps/external-controller.md](apps/external-controller.md) | External Controller: the handheld as a Bluetooth (Xbox) or USB game controller, status screen |
+| [apps/external-controller.md](apps/external-controller.md) | External Controller: the handheld as a Bluetooth (Xbox), USB (Xbox 360) or Nintendo Switch game controller, status screen |
 | [apps/display.md](apps/display.md) | External display (mini HDMI) and the Display app: layouts, resolution, refresh rate |
 | [apps/files.md](apps/files.md) | Files: click-to-mount for the TF2 card and USB sticks, drive toasts |
 | [apps/theme.md](apps/theme.md) | Theme app: dark / light |

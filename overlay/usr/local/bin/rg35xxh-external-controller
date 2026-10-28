@@ -1,12 +1,12 @@
 #!/usr/bin/python3
 """External Controller app: use the handheld as a game controller for a PC or phone.
 
-  rg35xxh-external-controller          choose Bluetooth or USB cable
-  rg35xxh-external-controller bt|usb   start that mode directly
+  rg35xxh-external-controller                 choose Bluetooth, USB cable (PC) or Switch
+  rg35xxh-external-controller bt|usb|switch   start that mode directly
 
 Bluetooth: rg35xxh-btpad.service (BLE gamepad). USB cable: rg35xxh-usbpad.service (wired Xbox 360
-controller; right USB-C port only, OTG2/DC). One at a time: starting one stops the other (the
-units also conflict). After the service is up, the input daemon is told (SIGUSR2) to send it the
+controller; right USB-C port only, OTG2/DC). Switch: rg35xxh-switchpad.service (wired Switch
+controller, same port). One at a time: starting one stops the others (the units also conflict). After the service is up, the input daemon is told (SIGUSR2) to send it the
 controls, and the full-screen status page opens. Select + Start + L1 + R1 ends the mode.
 """
 import os
@@ -15,8 +15,9 @@ import subprocess
 import sys
 import time
 
-SERVICES = {"bt": "rg35xxh-btpad.service", "usb": "rg35xxh-usbpad.service"}
-NAMES = {"bt": "BT Controller", "usb": "Wired Controller"}
+SERVICES = {"bt": "rg35xxh-btpad.service", "usb": "rg35xxh-usbpad.service",
+            "switch": "rg35xxh-switchpad.service"}
+NAMES = {"bt": "BT Controller", "usb": "Wired Controller", "switch": "Switch Controller"}
 STATUS = "/run/rg35xxh-extpad-status.sock"
 ICONS = "/usr/local/share/rg35xxh/icons"
 
@@ -75,12 +76,18 @@ def choose():
     gi.require_version("Gtk", "3.0")
     from gi.repository import Gdk, Gtk
 
-    def icon(name):
+    try:            # Handtop theme: light icons on the light theme
+        with open(os.path.join(os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config"),
+                               "rg35xxh", "theme")) as f:
+            suffix = "-light" if f.read().strip() == "light" else ""
+    except OSError:
+        suffix = ""
+
+    def icon(name, z=3):
         try:
-            img = cairo.ImageSurface.create_from_png(f"{ICONS}/{name}.png")
+            img = cairo.ImageSurface.create_from_png(f"{ICONS}/{name}{suffix}.png")
         except (OSError, cairo.Error):
             return Gtk.Label()
-        z = 3
         surf = cairo.ImageSurface(cairo.FORMAT_ARGB32, img.get_width() * z, img.get_height() * z)
         cr = cairo.Context(surf)
         cr.scale(z, z)
@@ -97,22 +104,49 @@ def choose():
     win.add(box)
     head = Gtk.Label(xalign=0)
     head.set_markup("<span size='x-large' weight='bold'>External Controller</span>\n"
-                    "<small>Use the handheld as a game controller for a PC or phone.</small>")
+                    "<small>Use the handheld as a game controller for a PC, phone or Switch.</small>")
     box.pack_start(head, False, False, 0)
     row = Gtk.Box(spacing=12, homogeneous=True)
     box.pack_start(row, True, True, 0)
-    for mode, ic, title, text in (
-            ("bt", "inputmode-bt", "Bluetooth", "PC or phone. Pair \"Handtop Gamepad\" once;\nit reconnects by itself."),
-            ("usb", "inputmode-wired", "USB cable", "PC: shows up as an Xbox 360 controller.\nRight USB-C port (OTG2/DC) only.")):
+
+    def card(mode, child):
         b = Gtk.Button()
-        v = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10, margin=10)
-        v.pack_start(icon(ic), True, True, 0)
-        lab = Gtk.Label(justify=Gtk.Justification.CENTER)
-        lab.set_markup(f"<span size='large' weight='bold'>{title}</span>\n<small>{text}</small>")
-        v.pack_start(lab, False, False, 0)
-        b.add(v)
-        b.connect("clicked", lambda _b, m=mode: (picked.update(mode=m), win.destroy()))
-        row.pack_start(b, True, True, 0)
+        b.add(child)
+        b.connect("clicked", lambda _b: (picked.update(mode=mode), win.destroy()))
+        return b
+
+    # Two cards: Bluetooth, and USB cable split in two (Xbox for a PC / Switch), one above the other.
+    v = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10, margin=10)
+    v.pack_start(icon("inputmode-bt"), True, True, 0)
+    lab = Gtk.Label(justify=Gtk.Justification.CENTER)
+    lab.set_markup("<span size='large' weight='bold'>Bluetooth</span>\n"
+                   "<small>PC or phone.\nPair \"Handtop Gamepad\" once;\nit reconnects by itself.</small>")
+    v.pack_start(lab, False, False, 0)
+    bt = card("bt", v)
+    row.pack_start(bt, True, True, 0)
+
+    # USB cable card: the wired icon and title on top, then two halves to pick from (one above the
+    # other): Xbox for a PC, Switch. A frame instead of a button, so only the halves are clickable.
+    usb = Gtk.Frame()
+    col = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, margin=8)
+    usb.add(col)
+    col.pack_start(icon("inputmode-wired"), False, False, 4)
+    lab = Gtk.Label(justify=Gtk.Justification.CENTER)
+    lab.set_markup("<span size='large' weight='bold'>USB cable</span>\n<small>Right USB-C port (OTG2/DC).</small>")
+    col.pack_start(lab, False, False, 0)
+    halves = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+    halves.get_style_context().add_class("linked")
+    for mode, ic, title, text in (("usb", "usbtarget-pc", "Xbox", "PC: Xbox 360 controller."),
+                                  ("switch", "usbtarget-console", "Switch", "Dock or OTG. F = Home.")):
+        h = Gtk.Box(spacing=10, margin=4)
+        h.pack_start(icon(ic, 2), False, False, 0)
+        lab = Gtk.Label(xalign=0)
+        lab.set_markup(f"<span weight='bold'>{title}</span>\n<small>{text}</small>")
+        h.pack_start(lab, True, True, 0)
+        halves.pack_start(card(mode, h), True, True, 0)
+    col.pack_start(halves, True, True, 0)
+    row.pack_start(usb, True, True, 0)
+    bt.grab_focus()
     foot = Gtk.Label(xalign=0, wrap=True, max_width_chars=60)
     foot.set_markup("<small>Select + Start + L1 + R1 ends the mode. One connection at a time.</small>")
     box.pack_start(foot, False, False, 0)

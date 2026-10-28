@@ -267,6 +267,87 @@ def test_bt_mode_exits_with_combo_not_start_hold():
 
 
 
+
+def ext_core():
+    c = Core()
+    c.tick(0.0)
+    c.request_gamepad(combo_exit=True, f_buttons=True)
+    return c
+
+
+def test_external_f_tap_is_home():
+    c = ext_core()
+    assert c.button("f", True, 1.0) == []
+    assert c.button("f", False, 1.15) == [("pad_key", "BTN_MODE", 1)]
+    out, t = run_ticks(c, 1.15, 0.3)
+    assert out.count(("pad_key", "BTN_MODE", 0)) == 1      # released by itself ~0.1 s later
+    assert ("pad_key", "BTN_MODE", 1) not in out
+
+
+def test_external_f_hold_holds_home():
+    c = ext_core()
+    c.button("f", True, 1.0)
+    out, t = run_ticks(c, 1.0, 1.0)
+    assert out == [("pad_key", "BTN_MODE", 1)]               # after 0.6 s, once
+    assert c.button("f", False, t) == [("pad_key", "BTN_MODE", 0)]
+    out, t = run_ticks(c, t, 0.3)
+    assert out == []
+
+
+def test_external_f_vol_is_brightness_not_home():
+    c = ext_core()
+    c.button("f", True, 1.0)
+    assert c.button("vol_up", True, 1.05) == [("cmd", "brightness_up")]
+    c.button("vol_up", False, 1.1)
+    out, t = run_ticks(c, 1.1, 1.0)
+    assert [a for a in out if a[0] == "pad_key"] == []
+    assert c.button("f", False, t) == []
+
+
+def test_external_f_select_is_capture():
+    c = ext_core()
+    c.button("f", True, 1.0)
+    assert c.button("select", True, 1.05) == [("pad_key", "KEY_RECORD", 1)]
+    c.button("f", False, 1.1)                                # F released first: no Home
+    assert c.button("select", False, 1.2) == [("pad_key", "KEY_RECORD", 0)]
+    out, t = run_ticks(c, 1.2, 1.0)
+    assert out == []
+    assert c.button("select", True, t) == [("pad_key", "BTN_SELECT", 1)]   # plain Select again
+
+
+def test_f_does_nothing_in_local_gamepad_mode():
+    c = Core()
+    c.tick(0.0)
+    c.button("start", True, 0.1); c.button("start", False, 0.15)
+    assert c.mode == "gamepad"
+    c.button("f", True, 1.0)
+    out, t = run_ticks(c, 1.0, 1.0)
+    assert out == [] and c.button("f", False, t) == []
+    c.button("f", True, t)
+    assert c.button("select", True, t + 0.05) == [("pad_key", "BTN_SELECT", 1)]
+
+
+def test_f_does_nothing_in_xbox_external_modes():
+    c = Core()
+    c.tick(0.0)
+    c.request_gamepad(combo_exit=True)                       # BT / wired Xbox: no Guide (Game Bar)
+    c.button("f", True, 1.0)
+    out, t = run_ticks(c, 1.0, 1.0)
+    assert out == [] and c.button("f", False, t) == []
+    c.button("f", True, t)
+    assert c.button("select", True, t + 0.05) == [("pad_key", "BTN_SELECT", 1)]
+
+
+def test_external_home_state_cleared_when_mode_ends():
+    c = ext_core()
+    c.button("f", True, 1.0)
+    run_ticks(c, 1.0, 1.0)                                   # Home held
+    assert c.home_down
+    c.request_desktop()
+    assert not c.home_down and c.mode == "desktop"
+    assert c.button("f", False, 2.5) == []
+
+
 EXTEND = [{"x": 0, "y": 0, "w": 1920, "h": 1080, "scale": 2.754},     # monitor
           {"x": 640, "y": 1080, "w": 640, "h": 480, "scale": 1.0}]     # handheld below, centred
 

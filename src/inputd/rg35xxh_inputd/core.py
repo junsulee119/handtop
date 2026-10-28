@@ -77,6 +77,12 @@ PAD_AXES = {"lx": "ABS_X", "ly": "ABS_Y", "rx": "ABS_RX", "ry": "ABS_RY"}
 # BT Controller mode exits with this combo instead of holding Start (same as Moonlight's quit
 # combo), so a long Start press reaches the other device.
 EXIT_COMBO = ("select", "start", "l1", "r1")
+# Switch Controller mode only (request_gamepad(f_buttons=True)): F gives the buttons the handheld
+# lacks. F tap = Home, F held = Home held (quick settings), F + Select = Capture. F + Vol stays
+# brightness. Not in the Xbox modes: there Home would be Guide, which opens the Game Bar on Windows.
+HOME_KEY, CAPTURE_KEY = "BTN_MODE", "KEY_RECORD"
+HOME_HOLD_SECONDS = 0.6     # F held this long without Vol / Select: Home pressed until F is released
+HOME_TAP_SECONDS = 0.1      # F tap: Home pressed this long (one report would be too short to see)
 
 
 class Core:
@@ -89,6 +95,7 @@ class Core:
         self.bind.update(bindings or {})
         self.mode = "desktop"
         self.combo_exit = False     # gamepad mapping left with EXIT_COMBO (BT Controller mode)
+        self.f_buttons = False      # F gives Home / Capture (Switch Controller mode)
         self.osk_visible = False
         self.screen_off = False
         self.axes = {"lx": 0.0, "ly": 0.0, "rx": 0.0, "ry": 0.0}
@@ -102,6 +109,10 @@ class Core:
         self.osk_key_next = None    # next "repeat" while the OSK key (A) is held
         self.osk_shift_button = None  # L2 pressed as Shift on the keyboard (its binding is skipped)
         self.vol_repeat = {}        # vol_up/vol_down -> [cmd, next repeat time]
+        self.f_used = False         # F was used as a modifier (Vol / Select) since it went down
+        self.home_down = False      # Home held on the other device (F held, external modes)
+        self.home_release_at = None  # F tap: when to release Home
+        self.capture_down = False   # Select is held as Capture (F + Select, external modes)
         self.last_tick = None
         self.acc = [0.0, 0.0, 0.0, 0.0]   # sub-unit accumulators: x, y, wheel v, wheel h
 
@@ -138,14 +149,21 @@ class Core:
             self.power_fired = False
             return out
         if name in ("vol_up", "vol_down"):
+            if "f" in self.held:
+                self.f_used = True
             direction = "up" if name == "vol_up" else "down"
             cmd = ("brightness_" if "f" in self.held else "volume_") + direction
             self.vol_repeat[name] = [cmd, t + self.s["vol_repeat_delay"]]
             return [("cmd", cmd)]
         if name == "f":
-            return out  # modifier only; never forwarded
+            self.f_used = False
+            return out  # modifier, never forwarded; external modes: Home on tap / hold (_release, tick)
 
         if self.mode == "gamepad":
+            if name == "select" and self._external() and "f" in self.held:
+                self.f_used = True
+                self.capture_down = True
+                return [("pad_key", CAPTURE_KEY, 1)]
             if name == "start":
                 self.start_fired = False
             out = self._pad_button(name, True)
@@ -175,6 +193,9 @@ class Core:
 
     def _release(self, name, t):
         pressed_at = self.held.pop(name, None)
+        if name == "select" and self.capture_down:
+            self.capture_down = False
+            return [("pad_key", CAPTURE_KEY, 0)]
         if name in self.swallowed:
             self.swallowed.discard(name)
             return []
@@ -192,6 +213,8 @@ class Core:
             return []  # held 1-3 s: cancelled
         if name in ("vol_up", "vol_down", "f"):
             self.vol_repeat.pop(name, None)
+            if name == "f" and self._external():
+                return self._home_on_f_release(t, dur)
             return []
 
         if self.mode == "gamepad":
@@ -230,6 +253,16 @@ class Core:
                 rep[1] = t + self.s["vol_repeat_interval"]
 
         if self.mode == "gamepad":
+            if self._external():
+                f = self.held.get("f")
+                if (f is not None and not self.f_used and not self.home_down and "f" not in self.swallowed
+                        and t - f >= HOME_HOLD_SECONDS):
+                    self.home_down = True
+                    self.home_release_at = None
+                    out.append(("pad_key", HOME_KEY, 1))
+                if self.home_release_at is not None and t >= self.home_release_at:
+                    self.home_release_at = None
+                    out.append(("pad_key", HOME_KEY, 0))
             st = self.held.get("start")
             if (st is not None and not self.combo_exit and not self.start_fired
                     and t - st >= self.s["start_hold_seconds"]):
@@ -351,10 +384,13 @@ class Core:
             out.append(("pad_abs", PAD_AXES[name], int(round(v * 32767))))
         return out
 
-    def request_gamepad(self, combo_exit=False):
+    def request_gamepad(self, combo_exit=False, f_buttons=False):
         """Switch to gamepad mapping on request (BT Controller app, SIGUSR2 to the daemon).
-        combo_exit: leave with EXIT_COMBO instead of holding Start."""
+        combo_exit: leave with EXIT_COMBO instead of holding Start. f_buttons: F gives Home /
+        Capture (Switch Controller mode)."""
         self.combo_exit = combo_exit
+        self.f_buttons = f_buttons and combo_exit
+        self._reset_external_buttons()
         if self.mode == "gamepad":
             return []
         out = self._enter_gamepad()
@@ -369,9 +405,28 @@ class Core:
         self.swallowed |= set(self.held)  # buttons still down must not act in desktop mode
         return self._enter_desktop()
 
+    def _external(self):
+        """Switch Controller mode: gamepad mapping left with EXIT_COMBO, F gives Home / Capture."""
+        return self.mode == "gamepad" and self.combo_exit and self.f_buttons
+
+    def _home_on_f_release(self, t, dur):
+        if self.home_down:                         # F was held: release Home
+            self.home_down = False
+            return [("pad_key", HOME_KEY, 0)]
+        if self.f_used or dur >= HOME_HOLD_SECONDS:
+            return []
+        self.home_release_at = t + HOME_TAP_SECONDS    # tap: press now, release from tick()
+        return [("pad_key", HOME_KEY, 1)]
+
+    def _reset_external_buttons(self):
+        # The service clears its state when the link ends; only ours is left to forget.
+        self.home_down = self.capture_down = False
+        self.home_release_at = None
+
     def _enter_desktop(self):
         self.mode = "desktop"
-        self.combo_exit = False
+        self.combo_exit = self.f_buttons = False
+        self._reset_external_buttons()
         self.acc = [0.0, 0.0, 0.0, 0.0]
         self.osk_next_repeat.clear()
         self.osk_key_next = None

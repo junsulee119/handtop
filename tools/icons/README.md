@@ -9,6 +9,7 @@ and shown by Waybar's `image#inputmode` module (`rg35xxh-inputmode`).
 - `gen_light.py` — light-taskbar set (`inputmode-<mode>-light.png`): dark drawing, pastel glass, deeper ring; needs the dark PNGs in the same folder for its preview.
 
 - `gen_shake.py` — shake frames (`inputmode-<mode>[-light]-shake<dx>.png`, dx = -2, -1, 1, 2): the drawing shifted sideways inside the glass. the input daemon shows them on the old icon (one damped-spring swing per 60 ms frame, ~0.36 s) before switching to the new one, vibrating in step.
+- `gen_usb_target_icons.py <icon folder>` — the two halves of External Controller's USB cable card (`usbtarget-{pc,console}[-light].png`, 23x23, shown at 2x, drawing only on a transparent background, no glass frame): a monitor and keyboard for Xbox on a PC, a TV and a gamepad with the coloured X/A/B/Y for Switch. Generic pictures on purpose, no brand logos or console likenesses. Run with `overlay/usr/local/share/rg35xxh/icons`.
 - `gen_battery.py` — taskbar battery icons (`battery[-charging][-low]-<bars>[-light].png`, 20x11): shell always white/ink, 5 bars of 20 %, red bars at 0-20 %, a yellow bolt (1 px clear outline) while charging. Run with the icon folder as the argument. `rg35xxh-battery --animate` steps the charging animation (bars from the current level up to full).
 
 Run in a scratch folder (they write preview PNGs next to themselves): `python3 gen_rainbow.py && python3 gen_light.py && python3 gen_shake.py`. Needs Pillow.

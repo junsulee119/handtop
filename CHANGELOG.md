@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Switch Controller mode.** Apps → External Controller → **USB cable: Switch** turns the handheld into a wired Nintendo Switch controller. It poses as HORI's licensed wired pad, so the Switch takes it with no setup: connect the right USB-C port to the dock's USB-A port (A-to-C cable), or without the dock through a USB-C OTG adapter. The printed A/B/X/Y match the Switch's; **F = Home** (hold for quick settings), **F + Select = Capture**. No vibration (that pad type has none). On a PC it is a normal gamepad that Steam and emulators like Ryujinx recognise (in Ryujinx pick Pro Controller and rebind A/B/X/Y once). Tested with Ryujinx, not on a real Switch yet: please report how it goes.
+- External Controller keeps its two cards; the USB cable card is split in two, each with its own icon: **Xbox** (PC, as before) and **Switch**. Its icons now follow the light theme too.
 - **Newer screen panel (rev6) works without copying files.** RG35XX H units come with one of two screens, and the newer one showed garbled lines or stayed black until you copied its device tree over `dtb.img` by hand. The handheld now reads which screen it has from the board at every start (the same pin Anbernic's own firmware checks), uses the matching device tree and restarts once if it had to switch. A card moved to a unit with the other screen fixes itself the same way. If it ever picks wrong, write `rev6` or `regular` in `panel.txt` on the boot partition. What it did is in `logs\panel.txt`.
 - The rev6 device tree now has hardware video decoding too (copying ROCKNIX's file by hand, as the v0.3.0 notes said, left it out).
 
