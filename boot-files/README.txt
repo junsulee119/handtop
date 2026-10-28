@@ -15,3 +15,8 @@ Screen garbled or black?  RG35XX H units have one of two screens. The handheld p
 Login: user "rg", password "rg35xxh". SSH is off: turn it on with Apps > Enable SSH
 (it asks you to choose your own password first).
 Do not edit KERNEL, dtb*.img or extlinux\ unless you know what you are doing.
+
+Disclaimer: Handtop is an unofficial hobby project, not affiliated with or endorsed by
+Anbernic, ROCKNIX, Nintendo, Microsoft or anyone else named; product names are trademarks of
+their owners. It comes "as is", without warranty: use it at your own risk (full text: README
+on https://github.com/junsulee119/handtop).

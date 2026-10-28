@@ -115,6 +115,13 @@ sudo bash build/10-image.sh        # → work/out/handtop-<date>-<version>.img.x
 - `tools/` — test helpers (QEMU boot test, headless desktop screenshots, Wi-Fi import test)
 - `docs/` — how everything works and why
 
+## Disclaimer
+
+- **Unofficial.** Handtop is an independent hobby project. It is not affiliated with, endorsed by or supported by Anbernic, ROCKNIX, Debian, Nintendo, Microsoft, HORI or any other company or project named here.
+- **Trademarks.** Anbernic and RG35XX, Nintendo Switch and Pro Controller, Xbox, Xbox 360 and Windows, HORI and the other product names are trademarks of their owners. They are used only to say what Handtop works with.
+- **Controller modes.** External Controller presents the USB or Bluetooth identity of compatible controllers so that a PC or Switch can use the handheld, for interoperability only. The Switch modes are experimental and not tested on a real Switch; a console, driver or firmware update may stop any of these modes working at any time. Check the terms of any online service or game you use them with.
+- **No warranty, at your own risk.** Handtop is provided "as is", without warranty of any kind (see the [license](LICENSE)). Flashing replaces everything on the microSD card; keep your stock firmware card and back up anything you need. Handtop replaces the system on the card only, never the handheld's own firmware, and nothing here changes charging limits or other power-chip settings. Still, a software fault can lock up the handheld (see [docs/hardware-safety.md](docs/hardware-safety.md)); in rare cases recovery means opening the back to disconnect the battery ([docs/flashing.md](docs/flashing.md#if-something-is-wrong)), which may affect your warranty. The authors are not liable for damage to devices, data loss or any other harm from using it.
+
 ## Credits and license
 
 Built on the work of the ROCKNIX, Debian, labwc, Waybar, nwg-drawer, wlogout, Moonlight and

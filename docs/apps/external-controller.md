@@ -2,6 +2,8 @@
 
 **Apps → External Controller** (`rg35xxh-external-controller`): use the handheld as a game controller for a PC, phone or Nintendo Switch. **Bluetooth: Xbox** (BT Controller mode, `rg35xxh-btpad`; v0.2.0, an Xbox Wireless Controller since v0.3.0), **Bluetooth: Switch** (Switch Controller mode over Bluetooth, `rg35xxh-switchbt`, experimental), **USB cable: Xbox** (Wired Controller mode, `rg35xxh-usbpad`) or **USB cable: Switch** (Switch Controller mode, `rg35xxh-usbpad --switch`), with a status screen (`rg35xxh-controller-screen`) while it runs. The app shows two cards, Bluetooth and USB cable (each with its icon on top), each split into two halves to pick from: Xbox above (a monitor and keyboard) and Switch below (a TV and a gamepad); those two icons are generic on purpose, no brand logos (`tools/icons/gen_usb_target_icons.py`). Icons follow the Handtop theme (`-light` files). Picking Bluetooth: Switch while Bluetooth devices are connected to the handheld first lists them and asks (they disconnect, see below). Above the cards, a **Battery saver** switch (off by default; see "Battery saver" below).
 
+> **Disclaimer.** These modes present the USB or Bluetooth identity of compatible controllers (Microsoft Xbox, HORI, Nintendo Pro Controller) for interoperability only. Handtop is not affiliated with or endorsed by those companies; the names are their trademarks. A console, driver or firmware update may stop a mode working; check the terms of online services you use it with. See the [README](../../README.md#disclaimer).
+
 ## Bluetooth: BT Controller mode
 
 ### Use

@@ -1,5 +1,7 @@
 # Flashing and First Boot
 
+> Handtop is unofficial and comes without warranty: flashing replaces everything on the card, and you use it at your own risk. Keep your stock firmware card. See "Disclaimer" in the [README](../README.md#disclaimer).
+
 ## You need
 - A microSD card, **16 GB or larger** (the image is ~3.3 GB; the system grows to fill the card on first boot). Keep the stock firmware card separately to go back any time.
 - A card reader and **balenaEtcher** (or Rufus) on Windows.
