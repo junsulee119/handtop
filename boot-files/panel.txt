@@ -1,0 +1,10 @@
+# Screen panel: auto, regular or rev6
+#
+# RG35XX H units come with one of two screens. With "auto" the handheld checks
+# its board at every start and picks the matching screen driver by itself
+# (it restarts once if it had to switch, for example after moving this card
+# to another handheld).
+#
+# Garbled or black screen even so? Write regular or rev6 below instead of auto,
+# eject the card and start again. What it did: logs\panel.txt
+auto

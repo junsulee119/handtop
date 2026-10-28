@@ -61,3 +61,4 @@ DISK_ID="0x52473335"               # MBR disk id ("RG35"); root=PARTUUID=5247333
 BOOT_START_MIB=16                  # U-Boot lives in the first 16 MiB (SPL at 8 KiB)
 BOOT_SIZE_MIB=256
 DEFAULT_DTB="sun50i-h700-anbernic-rg35xx-h.dtb"
+REV6_DTB="sun50i-h700-anbernic-rg35xx-h-rev6-panel.dtb"   # newer screen panel; picked at boot (docs/services/panel.md)

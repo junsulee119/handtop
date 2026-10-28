@@ -9,7 +9,7 @@ mkdir -p "$ROOTFS/var/log/journal"            # persistent journal (survives reb
 chmod 0440 "$ROOTFS/etc/sudoers.d/rg35xxh-lowpower"
 chroot_mount
 in_chroot "visudo -cf /etc/sudoers.d/rg35xxh-lowpower"
-in_chroot "systemctl enable rg35xxh-ssh-keygen.service rg35xxh-resize-root.service rg35xxh-swapfile.service rg35xxh-tailscale-operator.service tailscaled.service rg35xxh-wifi-import.service rg35xxh-bootlog.timer rg35xxh-bootlog-update.timer rg35xxh-bootlogo.service rg35xxh-bootlogo-done.service"
+in_chroot "systemctl enable rg35xxh-ssh-keygen.service rg35xxh-resize-root.service rg35xxh-swapfile.service rg35xxh-tailscale-operator.service tailscaled.service rg35xxh-wifi-import.service rg35xxh-bootlog.timer rg35xxh-bootlog-update.timer rg35xxh-bootlogo.service rg35xxh-bootlogo-done.service rg35xxh-panel.service"
 # udisks2 (click-to-mount in Thunar) is D-Bus activated: it starts the first time Thunar or a
 # file dialog asks for drives, instead of at every boot.
 in_chroot "systemctl disable udisks2.service"

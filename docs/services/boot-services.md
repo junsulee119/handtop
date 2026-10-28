@@ -5,6 +5,7 @@ Small services that run at boot or in the background. All are in `overlay/` (scr
 | Service | What it does |
 |---|---|
 | `rg35xxh-hwinit` | Hardware setup at every boot, ported from ROCKNIX's H700 quirks: CPU/GPU governors, audio DAC and Line Out levels, LEDs. See [../rocknix-quirks.md](../rocknix-quirks.md) |
+| `rg35xxh-panel` | Every boot, before the desktop: reads the board's screen-panel pin (PE6) and makes `dtb.img` the matching device tree (regular or rev6), restarting once if it had to switch; `panel.txt` on the boot partition overrides. See [panel.md](panel.md) |
 | `rg35xxh-resize-root` | First boot: grows the root partition and filesystem to fill the SD card (once) |
 | `rg35xxh-swapfile` | 2 GB swap file on the SD card behind zram (priority 10); created on first boot after the resize, enabled on every boot |
 | `rg35xxh-ssh-keygen` | First boot: generates the SSH host keys (the image ships without them) |

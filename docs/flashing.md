@@ -14,6 +14,7 @@
 The card shows a drive named **RG35XXHBOOT**:
 - `wifi.txt` — fill in `SSID=` and `PASSWORD=` now, or later (any time, then reboot).
 - `rg35xxh-input.conf` — controls; defaults match [services/input-daemon.md](services/input-daemon.md).
+- `panel.txt` — screen panel: `auto` (default), `regular` or `rev6` ([services/panel.md](services/panel.md)).
 - `README.txt` — short version of this page.
 Use **Eject** before removing the card.
 
@@ -21,7 +22,7 @@ Use **Eject** before removing the card.
 1. Card into the **TF1** (left) slot, power on.
 2. First boot takes longer: the system partition is expanded and SSH keys are generated.
 3. Expected: labwc desktop with the bottom panel (`☰ Apps`, clock, `⏻`).
-4. **Garbled or black screen** → rev6 panel board: on the PC, copy `device_trees\sun50i-h700-anbernic-rg35xx-h-rev6-panel.dtb` over `dtb.img` on RG35XXHBOOT, eject, boot again.
+4. **Garbled or black screen at first** → the unit has the newer (rev6) screen panel: the handheld notices it on the board, switches the device tree and restarts once by itself (noted in `logs\panel.txt`). If it stays garbled: on the PC, write `rev6` instead of `auto` in `panel.txt` on RG35XXHBOOT (`regular` for the other panel), eject, boot again. Details: [services/panel.md](services/panel.md).
 5. Login (sudo): user `rg`, password `rg35xxh`. **SSH is off** until you turn it on with Apps → **Enable SSH**, which first asks you to choose your own password.
 
 ## If something is wrong

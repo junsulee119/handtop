@@ -1,0 +1,19 @@
+[Unit]
+Description=Use the device tree that matches the screen panel (regular or rev6)
+Documentation=https://github.com/junsulee119/handtop/blob/main/docs/services/panel.md
+RequiresMountsFor=/boot/firmware
+# Before the desktop session (getty autologin starts labwc), so nothing holds hardware yet when
+# it restarts. After the first-boot jobs, so a restart never interrupts them.
+After=boot-firmware.mount rg35xxh-resize-root.service rg35xxh-swapfile.service rg35xxh-ssh-keygen.service
+Before=getty@tty1.service display-manager.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/rg35xxh-panel
+RemainAfterExit=yes
+# After a switch it asks for a restart; the shutdown then stops it with SIGTERM. Not a failure.
+SuccessExitStatus=SIGTERM
+TimeoutStartSec=60
+
+[Install]
+WantedBy=multi-user.target

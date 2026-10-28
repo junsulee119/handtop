@@ -1,5 +1,10 @@
 # Handtop changelog
 
+## Unreleased
+
+- **Newer screen panel (rev6) works without copying files.** RG35XX H units come with one of two screens, and the newer one showed garbled lines or stayed black until you copied its device tree over `dtb.img` by hand. The handheld now reads which screen it has from the board at every start (the same pin Anbernic's own firmware checks), uses the matching device tree and restarts once if it had to switch. A card moved to a unit with the other screen fixes itself the same way. If it ever picks wrong, write `rev6` or `regular` in `panel.txt` on the boot partition. What it did is in `logs\panel.txt`.
+- The rev6 device tree now has hardware video decoding too (copying ROCKNIX's file by hand, as the v0.3.0 notes said, left it out).
+
 ## v0.3.0
 
 - ⚠️ **Known issue:** Bluetooth is sometimes missing on the first boot after flashing (no adapter: the Bluetooth icon shows it off and External Controller → Bluetooth can't start). Restart once (Power → Restart); it works from then on.

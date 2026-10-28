@@ -1,0 +1,293 @@
+#!/usr/bin/python3
+"""Use the device tree that matches the handheld's screen panel (regular or rev6). Every boot.
+
+RG35XX H boards come with one of two screen panels: same connector, different set-up sequence,
+so each needs its own device tree (ROCKNIX: sun50i-h700-anbernic-rg35xx-h.dtb or
+...-rev6-panel.dtb). With the wrong one the screen is garbled or black. The board tells which
+panel it has on pin PE6: Anbernic's stock U-Boot turns on PE6's pull-up and reads it,
+high = regular panel, low = rev6 (docs/services/panel.md).
+
+This script (rg35xxh-panel.service, before the desktop starts) reads PE6 the same way and
+compares the wanted device tree with dtb.img on the boot partition (the one U-Boot loads next
+time). If they differ it copies the right one over dtb.img, logs it to logs/panel.txt and
+reboots once, so a card also fixes itself when it is moved to a handheld with the other panel.
+
+  panel.txt on the boot partition: auto (default) | regular | rev6
+  dtb.img that is neither dtb-regular.img nor dtb-rev6.img (changed by hand, e.g. without the
+  video engine, docs/video-decode.md) is left alone.
+
+Safety: PE6 is not used by anything in ROCKNIX's device tree; it is read as an input and its
+bias is put back to "disabled" afterwards. No program holding hardware runs yet (the session
+starts after this). dtb.img is replaced by an fsync'ed copy plus rename, so a power cut leaves
+the old or the new file. An automatic switch is tried once: if dtb.img still doesn't match on
+the next boot (detection flips), it gives up and logs it until the two match again.
+Test hooks: RG35XXH_PANEL_BOOT, RG35XXH_PANEL_STATE, RG35XXH_PANEL_TEST_PE6 (0/1),
+RG35XXH_PANEL_DRYRUN=1 (no reboot).
+"""
+import fcntl
+import glob
+import os
+import struct
+import subprocess
+import sys
+import time
+
+BOOT = os.environ.get("RG35XXH_PANEL_BOOT", "/boot/firmware")
+STATE = os.environ.get("RG35XXH_PANEL_STATE", "/var/lib/rg35xxh/panel-switched")
+FILES = {"regular": "dtb-regular.img", "rev6": "dtb-rev6.img"}
+GPIO_LABEL = "300b000.pinctrl"
+PE6 = 4 * 32 + 6                  # port E (4), pin 6 -> line 134 of the main pin controller
+LOG_LINES = 40
+
+
+def say(msg):
+    print("rg35xxh-panel: " + msg, flush=True)
+
+
+def boot_log(msg):
+    """Append to logs/panel.txt on the boot partition (readable from Windows), last lines only."""
+    path = os.path.join(BOOT, "logs", "panel.txt")
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        try:
+            with open(path, encoding="utf-8", errors="replace") as f:
+                old = f.read().splitlines()
+        except FileNotFoundError:
+            old = []
+        lines = old[-(LOG_LINES - 1):] + [time.strftime("%Y-%m-%d %H:%M:%S ") + msg]
+        with open(path, "w", encoding="utf-8", newline="\r\n") as f:
+            f.write("\n".join(lines) + "\n")
+            f.flush()
+            os.fsync(f.fileno())
+    except OSError as e:
+        say("could not write %s: %s" % (path, e))
+
+
+# --- GPIO character device, uAPI v2 (linux/gpio.h) ---------------------------------------------
+def _iowr(nr, size):
+    return (3 << 30) | (size << 16) | (0xB4 << 8) | nr
+
+
+GPIO_GET_CHIPINFO = (2 << 30) | (68 << 16) | (0xB4 << 8) | 0x01
+GPIO_V2_GET_LINE = _iowr(0x07, 592)
+GPIO_V2_LINE_GET_VALUES = _iowr(0x0E, 16)
+FLAG_INPUT, FLAG_PULL_UP, FLAG_BIAS_DISABLED = 1 << 2, 1 << 8, 1 << 10
+
+
+def _request(chip_fd, flags):
+    req = bytearray(592)                    # struct gpio_v2_line_request
+    struct.pack_into("<I", req, 0, PE6)     # offsets[0]
+    req[256:256 + 14] = b"rg35xxh-panel\0"  # consumer
+    struct.pack_into("<Q", req, 288, flags)  # config.flags
+    struct.pack_into("<I", req, 560, 1)     # num_lines
+    fcntl.ioctl(chip_fd, GPIO_V2_GET_LINE, req)
+    return struct.unpack_from("<i", req, 588)[0]
+
+
+def read_pe6():
+    """PE6 with pull-up: 1 = high (regular panel), 0 = low (rev6). None if it can't be read."""
+    test = os.environ.get("RG35XXH_PANEL_TEST_PE6")
+    if test is not None:
+        return int(test) if test in ("0", "1") else None
+    chip_fd = None
+    for path in sorted(glob.glob("/dev/gpiochip*")):
+        try:
+            fd = os.open(path, os.O_RDWR | os.O_CLOEXEC)
+        except OSError:
+            continue
+        info = bytearray(68)
+        try:
+            fcntl.ioctl(fd, GPIO_GET_CHIPINFO, info)
+        except OSError:
+            os.close(fd)
+            continue
+        if info[32:64].split(b"\0")[0].decode(errors="replace") == GPIO_LABEL:
+            chip_fd = fd
+            break
+        os.close(fd)
+    if chip_fd is None:
+        say("no GPIO chip %s" % GPIO_LABEL)
+        return None
+    try:
+        line = _request(chip_fd, FLAG_INPUT | FLAG_PULL_UP)
+        try:
+            time.sleep(0.005)               # let the pull-up settle
+            reads = []
+            for _ in range(5):
+                v = bytearray(struct.pack("<QQ", 0, 1))
+                fcntl.ioctl(line, GPIO_V2_LINE_GET_VALUES, v)
+                reads.append(struct.unpack_from("<Q", v)[0] & 1)
+                time.sleep(0.001)
+        finally:
+            os.close(line)
+    except OSError as e:
+        say("could not read PE6: %s" % e)
+        os.close(chip_fd)
+        return None
+    try:                                    # put the pin back as ROCKNIX leaves it: input, no bias
+        os.close(_request(chip_fd, FLAG_INPUT | FLAG_BIAS_DISABLED))
+    except OSError as e:                    # the reading is still good
+        say("could not reset PE6's bias: %s" % e)
+    finally:
+        os.close(chip_fd)
+    if len(set(reads)) != 1:
+        say("PE6 reads were not stable: %s" % reads)
+        return None
+    return reads[0]
+
+
+# --- boot partition -----------------------------------------------------------------------------
+def configured():
+    """First word of panel.txt that isn't a comment: auto / regular / rev6."""
+    try:
+        with open(os.path.join(BOOT, "panel.txt"), encoding="utf-8-sig", errors="replace") as f:
+            for raw in f:
+                word = raw.split("#", 1)[0].strip().lower()
+                if word:
+                    return word
+    except FileNotFoundError:
+        pass
+    return "auto"
+
+
+def read_bytes(name):
+    try:
+        with open(os.path.join(BOOT, name), "rb") as f:
+            return f.read()
+    except FileNotFoundError:
+        return None
+
+
+def current(dtb):
+    for panel, name in FILES.items():
+        if dtb is not None and dtb == read_bytes(name):
+            return panel
+    return None
+
+
+def replace_dtb(panel):
+    """Copy dtb-<panel>.img over dtb.img: temporary file, fsync, check, rename, fsync."""
+    data = read_bytes(FILES[panel])
+    if not data:
+        raise OSError("%s is missing or empty" % FILES[panel])
+    tmp, dst = os.path.join(BOOT, "dtb.img.new"), os.path.join(BOOT, "dtb.img")
+    try:
+        with open(tmp, "wb") as f:
+            f.write(data)
+            f.flush()
+            os.fsync(f.fileno())
+        if read_bytes("dtb.img.new") != data:
+            raise OSError("copy of %s did not read back the same" % FILES[panel])
+    except OSError:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+    # On vfat, rename over an existing name points dtb.img's directory entry at the new data
+    # (fs/fat/namei_vfat.c); the window before the directory sync below is milliseconds, and the
+    # old data is not erased, so a power cut there still leaves a bootable dtb.img in practice.
+    os.replace(tmp, dst)
+    dir_fd = os.open(BOOT, os.O_RDONLY)
+    try:
+        os.fsync(dir_fd)
+    finally:
+        os.close(dir_fd)
+    os.sync()
+
+
+def switched_last_boot():
+    try:
+        with open(STATE) as f:
+            return f.read().strip()
+    except FileNotFoundError:
+        return ""
+
+
+def set_switched(panel):
+    if panel:
+        os.makedirs(os.path.dirname(STATE), exist_ok=True)
+        with open(STATE, "w") as f:
+            f.write(panel + "\n")
+            f.flush()
+            os.fsync(f.fileno())
+    elif os.path.exists(STATE):
+        os.unlink(STATE)
+
+
+def wait_for_boot_partition_writers():
+    """Don't reboot while the Wi-Fi import is rewriting wifi.txt on the same partition."""
+    for _ in range(60):
+        try:
+            state = subprocess.run(["systemctl", "show", "-p", "ActiveState", "--value",
+                                    "rg35xxh-wifi-import.service"],
+                                   capture_output=True, text=True, timeout=5).stdout.strip()
+        except (OSError, subprocess.SubprocessError):
+            return
+        if state != "activating":
+            return
+        time.sleep(0.5)
+
+
+def main():
+    if any(read_bytes(n) is None for n in FILES.values()):
+        say("%s missing on the boot partition, nothing to do" % " / ".join(FILES.values()))
+        return 0
+    mode = configured()
+    if mode in FILES:
+        want, why = mode, "panel.txt says %s" % mode
+    else:
+        if mode != "auto":
+            say("panel.txt: unknown value %r, using auto" % mode)
+        pe6 = read_pe6()
+        if pe6 is None:
+            return 0
+        want = "regular" if pe6 else "rev6"
+        why = "board pin PE6 = %d (%s panel)" % (pe6, want)
+    have = current(read_bytes("dtb.img"))
+    if have is None:
+        say("dtb.img is neither %s; changed by hand, left alone (%s)"
+            % (" nor ".join(FILES.values()), why))
+        return 0
+    if have == want:
+        say("dtb.img matches the screen panel (%s; %s)" % (want, why))
+        if switched_last_boot():
+            set_switched("")
+        return 0
+    if mode == "auto" and switched_last_boot():
+        msg = ("dtb.img is for the %s panel but %s, and it was already switched on the last "
+               "boot: not switching again. Set the panel in panel.txt." % (have, why))
+        say(msg)
+        boot_log(msg)
+        return 0
+    msg = "%s, but dtb.img is for the %s panel: switching to %s and restarting" % (why, have, FILES[want])
+    say(msg)
+    try:
+        replace_dtb(want)
+    except OSError as e:
+        say("switch failed, dtb.img unchanged: %s" % e)
+        boot_log("switch to %s failed, dtb.img unchanged: %s" % (FILES[want], e))
+        return 1
+    boot_log(msg)
+    set_switched(want if mode == "auto" else "")
+    os.sync()
+    if os.environ.get("RG35XXH_PANEL_DRYRUN") == "1":
+        say("dry run: not restarting")
+        return 0
+    wait_for_boot_partition_writers()
+    try:
+        subprocess.run(["systemctl", "reboot", "--no-block"], timeout=10, check=True)
+    except (OSError, subprocess.SubprocessError) as e:
+        # dtb.img is already right; it takes effect at the next restart, whoever starts it.
+        say("could not restart: %s" % e)
+        boot_log("could not restart (%s); the switch applies at the next restart" % e)
+    return 0
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(main())
+    except Exception as e:      # never leave a traceback as the only trace on a boot that matters
+        say("unexpected error, nothing more done: %r" % e)
+        boot_log("unexpected error: %r" % e)
+        sys.exit(1)

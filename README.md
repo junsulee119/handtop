@@ -57,8 +57,9 @@ You need a microSD card (16 GB or larger) and balenaEtcher or Rufus.
 **Login:** user `rg`, password `rg35xxh` (used for sudo). **SSH is off by default**:
 open Apps → **Enable SSH**, which makes you choose your own password first.
 
-Screen garbled or black? Your unit may have the newer panel: copy
-`device_trees\sun50i-h700-anbernic-rg35xx-h-rev6-panel.dtb` over `dtb.img` on the boot partition.
+RG35XX H units come with one of two screen panels. Handtop checks the board at every start and
+uses the matching one, restarting once if it had to switch. If the screen stays garbled or black,
+write `rev6` (or `regular`) in `panel.txt` on the boot partition.
 Details: [docs/flashing.md](docs/flashing.md).
 
 ## External display

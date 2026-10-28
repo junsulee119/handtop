@@ -39,9 +39,13 @@ BOOTDIR="$P/boot"; mkdir -p "$BOOTDIR/extlinux" "$BOOTDIR/device_trees" "$BOOTDI
 cp "$ROCKNIX_EX/boot/KERNEL" "$BOOTDIR/KERNEL"
 cp "$ROCKNIX_EX"/boot/device_trees/sun50i-h700-anbernic-rg35xx-h*.dtb "$BOOTDIR/device_trees/"
 cp "$ROCKNIX_EX/boot/device_trees/$DEFAULT_DTB" "$BOOTDIR/dtb-rocknix.img"   # original, as fallback
-# Add the video engine (hardware video decoding, docs/video-decode.md) to the ROCKNIX DTB.
+# Add the video engine (hardware video decoding, docs/video-decode.md) to the ROCKNIX DTBs for
+# both screen panels. rg35xxh-panel copies the one that matches the board over dtb.img at boot
+# (docs/services/panel.md); the regular one is the default.
 dtc -q -@ -I dts -O dtb -o "$P/video-engine.dtbo" "$TOP/build/dts/rg35xxh-video-engine.dtso"
-fdtoverlay -i "$BOOTDIR/dtb-rocknix.img" -o "$BOOTDIR/dtb.img" "$P/video-engine.dtbo"
+fdtoverlay -i "$BOOTDIR/dtb-rocknix.img" -o "$BOOTDIR/dtb-regular.img" "$P/video-engine.dtbo"
+fdtoverlay -i "$ROCKNIX_EX/boot/device_trees/$REV6_DTB" -o "$BOOTDIR/dtb-rev6.img" "$P/video-engine.dtbo"
+cp "$BOOTDIR/dtb-regular.img" "$BOOTDIR/dtb.img"
 PARTUUID_ROOT="$(printf '%08x' "$DISK_ID")-02"
 # ROCKNIX's built-in initramfs has no /root directory, which the kernel needs to mount root=
 # itself (error -2). rootfix.cpio only adds that directory; see docs/boot-method.md.
@@ -56,6 +60,7 @@ LABEL rg35xxh
 X
 cp "$TOP/boot-files/wifi.txt" "$TOP/boot-files/README.txt" "$BOOTDIR/"
 sed 's/$/\r/' "$TOP/overlay/etc/rg35xxh/input.conf" > "$BOOTDIR/rg35xxh-input.conf"
+sed 's/$/\r/' "$TOP/boot-files/panel.txt" > "$BOOTDIR/panel.txt"
 mkfs.vfat -F 32 -n "$BOOT_LABEL" -C "$P/boot.vfat" $(( BOOT_SIZE_MIB * 1024 )) >/dev/null
 MTOOLS_SKIP_CHECK=1 mcopy -s -i "$P/boot.vfat" "$BOOTDIR"/* ::/
 

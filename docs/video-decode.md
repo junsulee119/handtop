@@ -165,7 +165,7 @@ is settled upstream.
 |---|---|---|
 | Decoder hardware | Allwinner Cedar video engine (same as H6): MPEG-2, H.264, H.265 8/10-bit, VP8. No VP9 yet (separate upstream series), no AV1 (not in hardware). | `video-codec@1c0e000` |
 | Kernel driver | Cedrus, V4L2 **stateless** (request API) → `/dev/video0`, `/dev/media0` | `sunxi-cedrus.ko` in `/usr/lib/modules/7.2.0/extra/`, loaded automatically from the DT node; our patch gives the decoded picture a 64-byte aligned stride, which is what the GPU needs to import it (see "The blue video") |
-| Device tree | ROCKNIX DTB + overlay adding the video-engine node | `/boot/firmware/dtb.img` (original kept as `dtb-rocknix.img`) |
+| Device tree | ROCKNIX DTB + overlay adding the video-engine node, for both screen panels | `/boot/firmware/dtb-regular.img` / `dtb-rev6.img`, the matching one copied to `dtb.img` at boot ([services/panel.md](services/panel.md)); original kept as `dtb-rocknix.img` |
 | Memory | Decoder buffers come from CMA: `cma=256M` on the kernel command line (ROCKNIX default is 32 MB). Unused CMA stays available to normal programs. 1080p streaming uses ~140 MB. | `extlinux/extlinux.conf` |
 | Heap access | dma-buf heaps are `root:root 0600` in the kernel; the overlay's `72-rg35xxh-dma-heap.rules` gives group `video` access, otherwise ffmpeg logs `Unable to open any dma_heap device` and no dmabuf path can allocate. | `overlay/etc/udev/rules.d/` |
 | Userspace | `build/04c-v4l2-ffmpeg.sh` installs Kwiboo's FFmpeg (`v4l2request` hwdevice + per-codec hwaccels) over the Debian libs, with the same external libraries the distro build has (gnutls for https, x264/lame/opus/vorbis/vpx encoders, libass for subtitles, dav1d for AV1); the replaced `libav*` packages are held with `apt-mark` so an upgrade cannot overwrite them. `/etc/mpv/mpv.conf` sets `hwdec=auto-safe`, which lands on zero-copy `drm`, and `hwdec-codecs=h264,hevc,mpeg2video,vp8`. Moonlight uses its own bundled FFmpeg. | `build/`, `overlay/etc/mpv/` |
@@ -215,7 +215,7 @@ Takes ~6 min on a 28-core x86_64 build host. **When `ROCKNIX_VERSION` changes, t
 
 ## Undo / fallback
 
-On the boot partition (from Windows): rename `dtb.img` → `dtb-ve.img` and `dtb-rocknix.img` → `dtb.img`. Without the node the module never loads. Optionally remove ` cma=256M` from `extlinux/extlinux.conf`.
+On the boot partition (from Windows): rename `dtb.img` → `dtb-ve.img` and `dtb-rocknix.img` → `dtb.img`. Without the node the module never loads. The panel check leaves a `dtb.img` it doesn't recognise alone, so this sticks; `dtb-rocknix.img` is the regular-panel DTB (on a rev6 unit, copy `device_trees\sun50i-h700-anbernic-rg35xx-h-rev6-panel.dtb` instead). Optionally remove ` cma=256M` from `extlinux/extlinux.conf`.
 
 Without the VPU, `hwdec=auto-safe` falls back to software automatically
 (`--hwdec-software-fallback` defaults to yes) — but note the pre-existing Mesa

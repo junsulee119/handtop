@@ -35,6 +35,6 @@
 - Kernel: mainline **7.2** (ROCKNIX H700 build).
 - Image layout: partition 1 = FAT32 boot (`KERNEL`, `SYSTEM` squashfs, `device_trees/`, `extlinux/extlinux.conf`); partition 2 = 32 MB Linux (grows into STORAGE).
 - Boot: `extlinux.conf` loads `/KERNEL` with `FDT /dtb.img`.
-- Device tree: `sun50i-h700-anbernic-rg35xx-h.dtb` (or `...-rg35xx-h-rev6-panel.dtb` for rev6 panel boards; garbled screen = wrong one). Input wiring is identical in both.
+- Device tree: `sun50i-h700-anbernic-rg35xx-h.dtb` (or `...-rg35xx-h-rev6-panel.dtb` for rev6 panel boards; garbled screen = wrong one). Input wiring is identical in both. Both are shipped with the video-engine overlay as `dtb-regular.img` / `dtb-rev6.img`; `rg35xxh-panel` copies the one that matches the board (pin PE6) over `dtb.img` at boot ([services/panel.md](services/panel.md)).
 
 Later, our own kernel build is allowed (e.g. to add the H616/H700 video-engine patches for hardware video decode) — kernel only, not the full ROCKNIX build.
