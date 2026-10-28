@@ -43,5 +43,6 @@ How Handtop works on the RG35XX H. One document per app or background service; g
 | [desktop.md](desktop.md) | Desktop environment (labwc, Waybar, drawer), app list, browser choice, memory |
 | [hardware.md](hardware.md) | Device facts verified from the ROCKNIX device tree; Wi-Fi power save |
 | [boot-method.md](boot-method.md) | How the Debian root filesystem is booted with ROCKNIX's kernel; charging while off |
+| [kernel.md](kernel.md) | Everything Handtop changes at kernel level compared with ROCKNIX: boot command line, device tree, added / new / replaced modules (incl. the rumble freeze fix) |
 | [rocknix-quirks.md](rocknix-quirks.md) | ROCKNIX H700 device scripts and what is ported |
 | [video-decode.md](video-decode.md) | Hardware video decoding (Cedrus) for Moonlight |

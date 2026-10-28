@@ -23,6 +23,11 @@ LINUX_URL="https://cdn.kernel.org/pub/linux/kernel/v7.x/linux-${LINUX_VERSION}.t
 LINUX_SHA256="f9fef3d14c0df53819026f4be74459835c2a0b0dcbf5b5bbd9ea19f0829402b3"
 KTOOLCHAIN_URL="https://developer.arm.com/-/media/Files/downloads/gnu/15.2.rel1/binrel/arm-gnu-toolchain-15.2.rel1-x86_64-aarch64-none-linux-gnu.tar.xz"
 KTOOLCHAIN_SHA256="9a685b335bd709d683a8c782253c37e8c36c10e6924e59e39d4769b02132eb43"
+# Gamepad / motor driver rebuilt with our fix (06d-joypad.sh): the rocknix-joypad version ROCKNIX
+# $ROCKNIX_VERSION ships (its package.mk: PKG_VERSION / PKG_SHA256)
+JOYPAD_COMMIT="d02ed13aae08113f6f9e0e9d699cb29bb3450fa2"
+JOYPAD_URL="https://github.com/ROCKNIX/rocknix-joypad/archive/${JOYPAD_COMMIT}.tar.gz"
+JOYPAD_SHA256="89ade1769d6eb7b4f37265f26407a422cdbcf517487f80eb1c29964904ca138e"
 CMA_SIZE="256M"                    # contiguous memory for the decoder (no IOMMU, see docs/video-decode.md)
 
 # FFmpeg with the V4L2 request-API hwaccels (04c-v4l2-ffmpeg.sh): Kwiboo's tree, the same

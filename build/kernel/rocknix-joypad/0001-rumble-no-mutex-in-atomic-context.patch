@@ -1,0 +1,96 @@
+Handtop: rocknix-singleadc-joypad (ROCKNIX/rocknix-joypad d02ed13, the version ROCKNIX 20261001
+ships): don't take a mutex in the force-feedback play callback.
+
+ff-memless calls rumble_play_effect() in atomic context (dev->event_lock held with interrupts
+off, both for EV_FF writes and from its effect timer). The callback took joypad->lock, a mutex
+that pwm_vibrator_play_work() holds while it applies the PWM state (pwm_apply_might_sleep). When
+the two met, typically on a change of strength ("stop" of one effect and "play" of the next back
+to back), the callback slept in atomic context and the whole handheld locked up with the motor
+running (input, Wi-Fi and SSH dead; only a 10 s power cut helped). Reproduced in about 60 s by
+changing the strength twice a second (tools/motor-stress.py randomslow), 2026-10-28.
+
+Fix: the callback only stores the level (WRITE_ONCE) and schedules the work; the work applies it
+under the mutex as before. Also joypad_store_rumble_enable() called cancel_work_sync() while
+holding the mutex the work takes: moved outside the lock.
+
+--- a/rocknix-singleadc-joypad.c
++++ b/rocknix-singleadc-joypad.c
+@@ -263,13 +263,13 @@
+ 	struct joypad *joypad = container_of(work,
+ 					    struct joypad, play_work);
+ 	mutex_lock(&joypad->lock);
+-	if (!joypad->rumble_enabled) {
++	if (!READ_ONCE(joypad->rumble_enabled)) {
+ 		pwm_vibrator_stop(joypad);
+ 		mutex_unlock(&joypad->lock);
+ 		return;
+ 	}
+ 
+-	if (joypad->level)
++	if (READ_ONCE(joypad->level))
+ 		 pwm_vibrator_start(joypad);
+ 	else
+ 		 pwm_vibrator_stop(joypad);
+@@ -345,16 +345,27 @@
+ 	struct joypad *joypad = platform_get_drvdata(pdev);
+ 	bool enable = simple_strtoul(buf, NULL, 10);
+ 
++	bool stop = false;
++
++	/*
++	 * Handtop: cancel_work_sync() outside the lock, play_work takes it too (waiting for the
++	 * work while holding its lock could never finish).
++	 */
+ 	mutex_lock(&joypad->lock);
+ 	if (enable && !joypad->rumble_enabled) {
+-		joypad->rumble_enabled = true;
++		WRITE_ONCE(joypad->rumble_enabled, true);
+ 	} else if (!enable && joypad->rumble_enabled) {
+-		joypad->rumble_enabled = false;
+-		joypad->level = 0;
++		WRITE_ONCE(joypad->rumble_enabled, false);
++		WRITE_ONCE(joypad->level, 0);
++		stop = true;
++	}
++	mutex_unlock(&joypad->lock);
++	if (stop) {
+ 		cancel_work_sync(&joypad->play_work);
++		mutex_lock(&joypad->lock);
+ 		pwm_vibrator_stop(joypad);
++		mutex_unlock(&joypad->lock);
+ 	}
+-	mutex_unlock(&joypad->lock);
+ 	return count;
+ }
+ 
+@@ -777,20 +788,23 @@
+ 	if (effect->type != FF_RUMBLE)
+ 		 return 0;
+ 
+-	mutex_lock(&joypad->lock);
+-	if (!joypad->rumble_enabled) {
+-		mutex_unlock(&joypad->lock);
++	/*
++	 * Handtop: ff-memless calls this in atomic context (dev->event_lock held with interrupts
++	 * off, also from its effect timer), so it must not sleep. It used to take joypad->lock, a
++	 * mutex that play_work holds while it applies the PWM state (pwm_apply_might_sleep): when
++	 * the two met (a "stop" and a "start" back to back, i.e. every change of strength), it
++	 * slept in atomic context and the whole handheld locked up with the motor on. Now it only
++	 * stores the level; play_work applies it under the lock.
++	 */
++	if (!READ_ONCE(joypad->rumble_enabled))
+ 		return 0; // Ignore rumble effects if disabled
+-	}
+ 
+ 	if (effect->u.rumble.strong_magnitude)
+ 		boosted_level = effect->u.rumble.strong_magnitude + joypad->boost_strong;
+ 	else
+ 		boosted_level = effect->u.rumble.weak_magnitude + joypad->boost_weak;
+ 
+-	joypad->level = (u16)CLAMP(boosted_level, 0, 0xffff);
+-
+-	mutex_unlock(&joypad->lock);
++	WRITE_ONCE(joypad->level, (u16)CLAMP(boosted_level, 0, 0xffff));
+ 
+ 	schedule_work(&joypad->play_work);
+ 	return 0;

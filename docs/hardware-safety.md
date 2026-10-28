@@ -6,6 +6,7 @@ Where they come from:
 - **Log-out freeze, 2026-10-26:** a new session killed the old input daemon while the new one was taking over the gamepad and motor. Full write-up: [services/input-daemon.md](services/input-daemon.md#incident-freeze-at-log-out-2026-10-26).
 - **Motor lock-ups, earlier:** re-uploading vibration effects many times a second, and effects with no end, locked the system up three times (`MOTOR_INTERVAL` in `src/inputd/rg35xxh_inputd/daemon.py`).
 - **Review of all hardware-facing code, 2026-10-26:** the findings below marked *(review)*.
+- **Rumble freezes, 2026-10-28:** the cause of the motor lock-ups was finally found in ROCKNIX's gamepad driver (a mutex taken in atomic context in its force-feedback callback); fixed by rebuilding the driver ([kernel.md](kernel.md#rocknix-singleadc-joypadko-replaced-rumble-fix)). Lesson: when user-space limits only make a hardware lock-up rarer, read the driver; a freeze with an idle system right before it is a deadlock, not an overload. Reproduce with a logged stress test (`tools/motor-stress.py`), not with games.
 
 ## 1. One owner, handed over cleanly
 
