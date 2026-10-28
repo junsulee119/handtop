@@ -1,13 +1,17 @@
 #!/usr/bin/python3
-"""External Controller app: use the handheld as a game controller for a PC or phone.
+"""External Controller app: use the handheld as a game controller for a PC, phone or Switch.
 
-  rg35xxh-external-controller                 choose Bluetooth, USB cable (PC) or Switch
-  rg35xxh-external-controller bt|usb|switch   start that mode directly
+  rg35xxh-external-controller                           choose (two cards, each split Xbox / Switch)
+  rg35xxh-external-controller bt|usb|switch|switch-bt   start that mode directly (no questions)
 
-Bluetooth: rg35xxh-btpad.service (BLE gamepad). USB cable: rg35xxh-usbpad.service (wired Xbox 360
-controller; right USB-C port only, OTG2/DC). Switch: rg35xxh-switchpad.service (wired Switch
-controller, same port). One at a time: starting one stops the others (the units also conflict). After the service is up, the input daemon is told (SIGUSR2) to send it the
-controls, and the full-screen status page opens. Select + Start + L1 + R1 ends the mode.
+Bluetooth: rg35xxh-btpad.service (Xbox Wireless Controller, BLE) or rg35xxh-switchbt.service
+(Switch Pro Controller, classic Bluetooth, experimental). USB cable (right USB-C port only,
+OTG2/DC): rg35xxh-usbpad.service (wired Xbox 360 controller) or rg35xxh-switchpad.service (wired
+Switch controller). One at a time: starting one stops the others (the units also conflict).
+Picking Bluetooth: Switch first lists the Bluetooth devices connected right now, which it
+disconnects (bluetoothd restarts as a Pro Controller, without classic HID), and asks to go on.
+After the service is up, the input daemon is told (SIGUSR2) to send it the controls, and the
+full-screen status page opens. Select + Start + L1 + R1 ends the mode.
 """
 import os
 import socket
@@ -16,8 +20,10 @@ import sys
 import time
 
 SERVICES = {"bt": "rg35xxh-btpad.service", "usb": "rg35xxh-usbpad.service",
-            "switch": "rg35xxh-switchpad.service"}
-NAMES = {"bt": "BT Controller", "usb": "Wired Controller", "switch": "Switch Controller"}
+            "switch": "rg35xxh-switchpad.service", "switch-bt": "rg35xxh-switchbt.service"}
+NAMES = {"bt": "BT Controller", "usb": "Wired Controller", "switch": "Switch Controller",
+         "switch-bt": "Switch Controller (Bluetooth)"}
+BLUETOOTH = ("bt", "switch-bt")
 STATUS = "/run/rg35xxh-extpad-status.sock"
 ICONS = "/usr/local/share/rg35xxh/icons"
 
@@ -40,11 +46,11 @@ def start(mode):
             subprocess.run(["systemctl", "stop", u])
             time.sleep(1)
     if subprocess.run(["systemctl", "start", unit]).returncode:
-        notify(NAMES[mode], "Could not start" + (" (is Bluetooth on?)" if mode == "bt" else ""), 6000)
+        notify(NAMES[mode], "Could not start" + (" (is Bluetooth on?)" if mode in BLUETOOTH else ""), 6000)
         return 1
     ready = False
     for _ in range(150):                       # wait until the service accepts connections (BT: up to
-                                               # ~3 s more while bluetoothd restarts with the Xbox identity)
+                                               # ~3 s more while bluetoothd restarts with its identity)
         try:                                   # (probe the status socket: the pad socket takes
             with socket.socket(socket.AF_UNIX) as c:   # a single client, the input daemon)
                 c.connect(STATUS)
@@ -67,6 +73,21 @@ def start(mode):
     subprocess.Popen(["rg35xxh-controller-screen"], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
                      stderr=subprocess.DEVNULL, start_new_session=True)
     return 0
+
+
+def connected_bt_devices():
+    """Names of the Bluetooth devices connected right now (bluetoothctl), [] if none or unknown."""
+    try:
+        out = subprocess.run(["bluetoothctl", "devices", "Connected"], capture_output=True, text=True,
+                             timeout=3).stdout
+    except (OSError, subprocess.SubprocessError):
+        return []
+    names = []
+    for line in out.splitlines():
+        parts = line.split(" ", 2)
+        if len(parts) >= 2 and parts[0] == "Device":
+            names.append(parts[2] if len(parts) == 3 else parts[1])
+    return names
 
 
 def choose():
@@ -109,43 +130,68 @@ def choose():
     row = Gtk.Box(spacing=12, homogeneous=True)
     box.pack_start(row, True, True, 0)
 
-    def card(mode, child):
-        b = Gtk.Button()
-        b.add(child)
-        b.connect("clicked", lambda _b: (picked.update(mode=mode), win.destroy()))
-        return b
+    def go(mode):
+        if mode == "switch-bt" and not confirm_switch_bt():
+            return
+        picked["mode"] = mode
+        win.destroy()
 
-    # Two cards: Bluetooth, and USB cable split in two (Xbox for a PC / Switch), one above the other.
-    v = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10, margin=10)
-    v.pack_start(icon("inputmode-bt"), True, True, 0)
-    lab = Gtk.Label(justify=Gtk.Justification.CENTER)
-    lab.set_markup("<span size='large' weight='bold'>Bluetooth</span>\n"
-                   "<small>PC or phone.\nPair \"Handtop Gamepad\" once;\nit reconnects by itself.</small>")
-    v.pack_start(lab, False, False, 0)
-    bt = card("bt", v)
-    row.pack_start(bt, True, True, 0)
+    def confirm_switch_bt():
+        """Bluetooth: Switch restarts Bluetooth as a Pro Controller: say which connections go away."""
+        names = connected_bt_devices()
+        if not names:
+            return True
+        esc = lambda t: t.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        d = Gtk.MessageDialog(transient_for=win, modal=True, message_type=Gtk.MessageType.WARNING,
+                              buttons=Gtk.ButtonsType.NONE, text="Bluetooth devices will disconnect")
+        d.format_secondary_markup(
+            "Bluetooth restarts as a Switch Pro Controller. These disconnect now:\n"
+            + "".join(f"  • {esc(n)}\n" for n in names)
+            + "\nKeyboards, mice and controllers on classic Bluetooth stay off until you end "
+              "Switch mode. Others (headphones, BLE devices) may need reconnecting afterwards.")
+        d.add_button("Cancel", Gtk.ResponseType.CANCEL)
+        d.add_button("Start Switch mode", Gtk.ResponseType.OK)
+        d.set_default_response(Gtk.ResponseType.OK)
+        ok = d.run() == Gtk.ResponseType.OK
+        d.destroy()
+        return ok
 
-    # USB cable card: the wired icon and title on top, then two halves to pick from (one above the
-    # other): Xbox for a PC, Switch. A frame instead of a button, so only the halves are clickable.
-    usb = Gtk.Frame()
-    col = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, margin=8)
-    usb.add(col)
-    col.pack_start(icon("inputmode-wired"), False, False, 4)
-    lab = Gtk.Label(justify=Gtk.Justification.CENTER)
-    lab.set_markup("<span size='large' weight='bold'>USB cable</span>\n<small>Right USB-C port (OTG2/DC).</small>")
-    col.pack_start(lab, False, False, 0)
-    halves = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-    halves.get_style_context().add_class("linked")
-    for mode, ic, title, text in (("usb", "usbtarget-pc", "Xbox", "PC: Xbox 360 controller."),
-                                  ("switch", "usbtarget-console", "Switch", "Dock or OTG. F = Home.")):
-        h = Gtk.Box(spacing=10, margin=4)
-        h.pack_start(icon(ic, 2), False, False, 0)
-        lab = Gtk.Label(xalign=0)
-        lab.set_markup(f"<span weight='bold'>{title}</span>\n<small>{text}</small>")
-        h.pack_start(lab, True, True, 0)
-        halves.pack_start(card(mode, h), True, True, 0)
-    col.pack_start(halves, True, True, 0)
-    row.pack_start(usb, True, True, 0)
+    def split_card(ic, title, sub, halves):
+        """A card: icon and title on top, then halves to pick from, one above the other. A frame
+        instead of a button, so only the halves are clickable."""
+        frame = Gtk.Frame()
+        col = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, margin=8)
+        frame.add(col)
+        col.pack_start(icon(ic), False, False, 4)
+        lab = Gtk.Label(justify=Gtk.Justification.CENTER)
+        lab.set_markup(f"<span size='large' weight='bold'>{title}</span>\n<small>{sub}</small>")
+        col.pack_start(lab, False, False, 0)
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        box.get_style_context().add_class("linked")
+        first = None
+        for mode, hic, htitle, text in halves:
+            h = Gtk.Box(spacing=10, margin=4)
+            h.pack_start(icon(hic, 2), False, False, 0)
+            lab = Gtk.Label(xalign=0)
+            lab.set_markup(f"<span weight='bold'>{htitle}</span>\n<small>{text}</small>")
+            h.pack_start(lab, True, True, 0)
+            b = Gtk.Button()
+            b.add(h)
+            b.connect("clicked", lambda _b, m=mode: go(m))
+            box.pack_start(b, True, True, 0)
+            first = first or b
+        col.pack_start(box, True, True, 0)
+        row.pack_start(frame, True, True, 0)
+        return first
+
+    # Two cards, Bluetooth and USB cable, each split in two: Xbox (PC / phone) above, Switch below.
+    # (The usbtarget-* icons serve both cards.)
+    bt = split_card("inputmode-bt", "Bluetooth", "Pairs once, then reconnects.",
+                    (("bt", "usbtarget-pc", "Xbox", "PC or phone. Xbox controller."),
+                     ("switch-bt", "usbtarget-console", "Switch", "Experimental. F = Home.")))
+    split_card("inputmode-wired", "USB cable", "Right USB-C port (OTG2/DC).",
+               (("usb", "usbtarget-pc", "Xbox", "PC: Xbox 360 controller."),
+                ("switch", "usbtarget-console", "Switch", "Dock or OTG. F = Home.")))
     bt.grab_focus()
     foot = Gtk.Label(xalign=0, wrap=True, max_width_chars=60)
     foot.set_markup("<small>Select + Start + L1 + R1 ends the mode. One connection at a time.</small>")

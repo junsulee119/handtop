@@ -84,6 +84,8 @@ Use the handheld as a game controller for your PC or phone: **Apps → External 
 
 **USB cable: Switch**: the handheld becomes a wired Nintendo Switch controller (it poses as HORI's licensed wired pad, so no setup on the Switch). Connect the right USB-C port to a USB-A port of the Switch dock with an A-to-C cable, or, without the dock, through a USB-C OTG adapter. The printed A/B/X/Y match the Switch's. **F = Home** (hold for quick settings), **F + Select = Capture**. No vibration (the pad type has none). Tested on a PC with Ryujinx (rebind A/B/X/Y once there), not on a real Switch yet: reports welcome.
 
+**Bluetooth: Switch** (experimental): the handheld pairs with a Switch as a Pro Controller (Controllers → Change Grip/Order the first time), with vibration and the same F = Home / F + Select = Capture. Bluetooth devices connected to the handheld disconnect while it is on (the app asks first). Tested with a PC (Ryujinx), not on a real Switch yet.
+
 ## Good to know
 
 - The device has 1 GB RAM; for heavy websites and video, Moonlight to a PC works best.

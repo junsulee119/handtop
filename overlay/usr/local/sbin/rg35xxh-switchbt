@@ -1,0 +1,999 @@
+#!/usr/bin/python3
+"""Handtop Switch Controller mode over Bluetooth (experimental): the handheld presents itself to a
+Nintendo Switch as a Pro Controller over classic Bluetooth (HID over L2CAP).
+
+The Switch accepts only Nintendo's own controllers over Bluetooth, so this follows the Pro
+Controller's protocol, written from public notes (dekuNukem/Nintendo_Switch_Reverse_Engineering;
+cajunpanda/bluetooth-nes-advantage docs/switch_pro_protocol.md, a clean-room ESP32 version tested
+on Switch 1 and 2). No code from GPL implementations (joycontrol, nxbt) is used.
+
+  identity   bluetoothd is restarted for the time of the mode with a copy of main.conf (Class
+             0x000508 = peripheral / gamepad, DeviceID usb:057e:2009, BR/EDR) and without its
+             "input" plugin, which would otherwise own the HID channels (PSM 17 / 19), and its
+             "hostname" plugin, which sets the class from the machine's chassis ("handset":
+             phone, 0x00020c). Adapter alias "Pro Controller" (exact). While no Switch is
+             connected the adapter is limited discoverable, which adds the 0x2000 bit: class
+             0x002508 exactly (a Switch 2 pages only that). But the Switch (and Windows) search
+             with the general inquiry code, and this chip answers only one code (Read Number Of
+             Supported IAC = 1), so the kernel's limited mode left it answering the limited code
+             only: invisible. The inquiry code is set back to the general one with a raw HCI
+             command (Write Current IAC LAP: GIAC); the class keeps its 0x2000 bit. The original config comes back when the mode ends (ExecStopPost
+             --restore after a crash), as in rg35xxh-btpad.
+  SDP        an HID record (subclass gamepad, our own report descriptor with the report IDs the
+             Switch uses), registered with BlueZ's ProfileManager1.
+  channels   our own L2CAP sockets on PSM 17 (control) and 19 (interrupt): the Switch connects to
+             them when pairing (Controllers > Change Grip/Order); later the handheld reconnects to
+             the remembered Switch by itself (4 tries 5 s apart, then every 30 s for 3 min, then
+             it only listens).
+  protocol   output report 0x01 (rumble + subcommand) / 0x10 (rumble): every subcommand is
+             answered at once with input report 0x21 (device info, SPI flash reads from a fake
+             flash image, input mode, IMU / vibration / lights: acknowledged; unknown: plain ACK,
+             silence stalls the Switch). Before the Switch picks a mode: simple report 0x3F every
+             100 ms; after 0x03 0x30: full report 0x30 every 15 ms (~66/s), timer +1 each.
+  rumble     HD rumble amplitude (strongest band of either side), forwarded to the input daemon as
+             "rumble <big> <small>" (motor gate, <= 20/s), only while the Switch enabled vibration.
+
+Input comes from the input daemon over /run/rg35xxh-extpad.sock (shared with the other external
+controller services, one runs at a time): one evdev event per packet (struct "<HHi"). Status for
+the screen: JSON lines on /run/rg35xxh-extpad-status.sock (transport "switch-bt").
+Started by the External Controller app as rg35xxh-switchbt.service; stops when the input daemon
+disconnects (Select + Start + L1 + R1) or never connects (60 s). Runs as root.
+Never asks for sniff mode itself (the kernel doesn't by default; a real pad only accepts it).
+"""
+import glob
+import grp
+import json
+import os
+import re
+import signal
+import socket
+import struct
+import subprocess
+import sys
+import threading
+import time
+
+import dbus
+import dbus.mainloop.glib
+import dbus.service
+from evdev import ecodes as E
+from gi.repository import GLib
+
+BLUEZ = "org.bluez"
+OM_IFACE = "org.freedesktop.DBus.ObjectManager"
+PROP_IFACE = "org.freedesktop.DBus.Properties"
+ADAPTER_IFACE = "org.bluez.Adapter1"
+DEVICE_IFACE = "org.bluez.Device1"
+AGENT_IFACE = "org.bluez.Agent1"
+PROFILE_IFACE = "org.bluez.Profile1"
+
+NAME = "Pro Controller"                     # exact: the Switch looks for it
+CLASS = "0x000508"                          # peripheral, gamepad (+ 0x2000 while limited discoverable)
+DEVICE_ID = "usb:057e:2009:0001"            # Nintendo, Pro Controller
+HID_UUID = "00001124-0000-1000-8000-00805f9b34fb"
+PSM_CTRL, PSM_ITR = 17, 19
+SOCKET = "/run/rg35xxh-extpad.sock"
+STATUS_SOCKET = "/run/rg35xxh-extpad-status.sock"
+LAST_HOST = "/var/lib/rg35xxh/switchbt-host"       # address of the last connected Switch
+EVENT = struct.Struct("<HHi")
+BT_CONF = "/etc/bluetooth/main.conf"
+RUN_DIR = "/run/rg35xxh-switchbt"
+DROPIN = "/run/systemd/system/bluetooth.service.d/50-rg35xxh-switchbt.conf"
+BLUETOOTHD = "/usr/libexec/bluetooth/bluetoothd"
+REPORT_MS = 15                              # full report 0x30 period (~66/s)
+SIMPLE_MS = 100                             # simple report 0x3F keepalive before a mode is set
+DISCOVERABLE_S = 180                        # limited discoverable needs a timeout: re-armed
+
+# Our own HID report descriptor (vendor-defined reports with the IDs and sizes the protocol uses;
+# the Switch doesn't read it, Windows needs the sizes to pass reports through).
+REPORT_DESC = bytes([
+    0x05, 0x01, 0x09, 0x05, 0xA1, 0x01,             # Generic Desktop, Game Pad, Application
+    0x06, 0x00, 0xFF, 0x15, 0x00, 0x26, 0xFF, 0x00, 0x75, 0x08,   # vendor page, bytes
+    0x85, 0x30, 0x09, 0x01, 0x95, 0x30, 0x81, 0x02,  # input 0x30: full report, 48 bytes
+    0x85, 0x21, 0x09, 0x02, 0x95, 0x30, 0x81, 0x02,  # input 0x21: subcommand reply, 48 bytes
+    0x85, 0x3F, 0x09, 0x03, 0x95, 0x0B, 0x81, 0x02,  # input 0x3F: simple report, 11 bytes
+    0x85, 0x01, 0x09, 0x04, 0x95, 0x30, 0x91, 0x02,  # output 0x01: rumble + subcommand, 48 bytes
+    0x85, 0x10, 0x09, 0x05, 0x95, 0x30, 0x91, 0x02,  # output 0x10: rumble, 48 bytes
+    0xC0,
+])
+
+SDP_RECORD = """<?xml version="1.0" encoding="UTF-8" ?>
+<record>
+  <attribute id="0x0001"><sequence><uuid value="0x1124" /></sequence></attribute>
+  <attribute id="0x0004"><sequence>
+    <sequence><uuid value="0x0100" /><uint16 value="0x0011" /></sequence>
+    <sequence><uuid value="0x0011" /></sequence>
+  </sequence></attribute>
+  <attribute id="0x0005"><sequence><uuid value="0x1002" /></sequence></attribute>
+  <attribute id="0x0006"><sequence>
+    <uint16 value="0x656e" /><uint16 value="0x006a" /><uint16 value="0x0100" />
+  </sequence></attribute>
+  <attribute id="0x0009"><sequence><sequence><uuid value="0x1124" /><uint16 value="0x0101" /></sequence></sequence></attribute>
+  <attribute id="0x000d"><sequence><sequence>
+    <sequence><uuid value="0x0100" /><uint16 value="0x0013" /></sequence>
+    <sequence><uuid value="0x0011" /></sequence>
+  </sequence></sequence></attribute>
+  <attribute id="0x0100"><text value="Wireless Gamepad" /></attribute>
+  <attribute id="0x0101"><text value="Gamepad" /></attribute>
+  <attribute id="0x0102"><text value="Nintendo" /></attribute>
+  <attribute id="0x0201"><uint16 value="0x0111" /></attribute>
+  <attribute id="0x0202"><uint8 value="0x08" /></attribute>
+  <attribute id="0x0203"><uint8 value="0x00" /></attribute>
+  <attribute id="0x0204"><boolean value="true" /></attribute>
+  <attribute id="0x0205"><boolean value="true" /></attribute>
+  <attribute id="0x0206"><sequence><sequence>
+    <uint8 value="0x22" /><text encoding="hex" value="%s" />
+  </sequence></sequence></attribute>
+  <attribute id="0x0207"><sequence><sequence><uint16 value="0x0409" /><uint16 value="0x0100" /></sequence></sequence></attribute>
+  <attribute id="0x020b"><uint16 value="0x0100" /></attribute>
+  <attribute id="0x020c"><uint16 value="0x0c80" /></attribute>
+  <attribute id="0x020d"><boolean value="false" /></attribute>
+  <attribute id="0x020e"><boolean value="false" /></attribute>
+  <attribute id="0x020f"><uint16 value="0xffff" /></attribute>
+  <attribute id="0x0210"><uint16 value="0xffff" /></attribute>
+</record>
+""" % REPORT_DESC.hex()
+
+# Button bits of the 0x30 / 0x21 reports. The daemon sends Xbox-position codes (core.PAD_BUTTONS):
+# BTN_A = bottom (Switch B), BTN_B = right (A), BTN_X = left (Y), BTN_Y = top (X).
+RIGHT = {E.BTN_X: 0x01, E.BTN_Y: 0x02, E.BTN_A: 0x04, E.BTN_B: 0x08, E.BTN_TR: 0x40}   # Y X B A R
+SHARED = {E.BTN_SELECT: 0x01, E.BTN_START: 0x02, E.BTN_THUMBR: 0x04, E.BTN_THUMBL: 0x08,
+          E.BTN_MODE: 0x10, E.KEY_RECORD: 0x20}                                       # - + RS LS Home Capture
+LEFT_L = 0x40
+ZR, ZL = 0x80, 0x80
+# status-screen report (same 9-byte layout as rg35xxh-btpad's generic report)
+S_BITS = {E.BTN_A: 0, E.BTN_B: 1, E.BTN_X: 2, E.BTN_Y: 3, E.BTN_TL: 4, E.BTN_TR: 5,
+          E.BTN_SELECT: 6, E.BTN_START: 7, E.BTN_THUMBL: 8, E.BTN_THUMBR: 9, E.BTN_MODE: 10}
+HAT = {(0, -1): 0, (1, -1): 1, (1, 0): 2, (1, 1): 3, (0, 1): 4, (-1, 1): 5, (-1, 0): 6, (-1, -1): 7}
+STICK_CENTRE, STICK_RANGE = 0x800, 0x600    # 12-bit; the fake calibration says exactly this
+
+
+def log(*a):
+    print("rg35xxh-switchbt:", *a, flush=True)
+
+
+# ------------------------------------------------------------------ fake SPI flash
+def pack12(a, b):
+    return bytes([a & 0xFF, ((a >> 8) & 0x0F) | ((b & 0x0F) << 4), (b >> 4) & 0xFF])
+
+
+def flash_image():
+    """The parts of a Pro Controller's SPI flash the Switch and SDL read (layout: dekuNukem
+    spi_flash_notes.md). Everything else reads 0xFF (erased)."""
+    f = bytearray(b"\xff" * 0x10000)
+
+    def put(addr, data):
+        f[addr:addr + len(data)] = data
+    put(0x6000, b"\xff" * 16)                                  # no serial number
+    put(0x6012, bytes([0x03, 0xA0]))                           # device type: Pro Controller
+    put(0x601B, bytes([0x01]))                                 # colours below are valid
+    imu = struct.pack("<3h3h3h3h", 0, 0, 0, 0x4000, 0x4000, 0x4000, 0, 0, 0, 0x343B, 0x343B, 0x343B)
+    put(0x6020, imu)                                           # IMU origin / sensitivity (defaults)
+    c, r = STICK_CENTRE, STICK_RANGE
+    put(0x603D, pack12(r, r) + pack12(c, c) + pack12(r, r))   # left: max above, centre, min below
+    put(0x6046, pack12(c, c) + pack12(r, r) + pack12(r, r))   # right: centre, min below, max above
+    put(0x604F, bytes([0xFF]))
+    put(0x6050, bytes([0x32, 0x32, 0x32, 0xFF, 0xFF, 0xFF, 0x32, 0x32, 0x32, 0x32, 0x32, 0x32]))  # body, buttons, grips
+    params = (pack12(0x019, 0x4CD) + pack12(0x0AE, 0xE14) + pack12(0x2EE, 0x2EE) + pack12(0x2EE, 0x2EE)
+              + pack12(0xAB4, 0xAB4) + pack12(0x496, 0x496))    # dead zone 0xAE, range ratio 0xE14
+    put(0x6080, struct.pack("<3h", -688, 0, 4038) + params)   # 6-axis horizontal offsets (Pro) + stick 1
+    put(0x6098, params)                                        # stick parameters 2
+    # 0x8010-0x803F user calibration: left erased (0xFF): no magic, factory values are used
+    return bytes(f)
+
+
+FLASH = flash_image()
+
+
+# ------------------------------------------------------------------ BlueZ objects
+class Agent(dbus.service.Object):
+    """Just-works pairing: accept everything (the Switch starts pairing). BlueZ's default agent
+    would reject the confirmation (Authentication Failure)."""
+    path = "/org/handtop/switchbt/agent"
+
+    @dbus.service.method(AGENT_IFACE)
+    def Release(self):
+        pass
+
+    @dbus.service.method(AGENT_IFACE, in_signature="os")
+    def AuthorizeService(self, device, uuid):
+        log("authorize service", device, uuid)
+
+    @dbus.service.method(AGENT_IFACE, in_signature="o")
+    def RequestAuthorization(self, device):
+        log("pairing accepted:", device)
+
+    @dbus.service.method(AGENT_IFACE, in_signature="ou")
+    def RequestConfirmation(self, device, passkey):
+        log("pairing confirmed:", device, passkey)
+
+    @dbus.service.method(AGENT_IFACE)
+    def Cancel(self):
+        log("pairing cancelled")
+
+
+class Profile(dbus.service.Object):
+    """Only publishes the SDP record; the channels are our own sockets."""
+    path = "/org/handtop/switchbt/profile"
+
+    @dbus.service.method(PROFILE_IFACE)
+    def Release(self):
+        pass
+
+    @dbus.service.method(PROFILE_IFACE, in_signature="oha{sv}")
+    def NewConnection(self, device, fd, props):
+        os.close(fd.take())
+
+    @dbus.service.method(PROFILE_IFACE, in_signature="o")
+    def RequestDisconnection(self, device):
+        pass
+
+
+def unix_server(path, kind):
+    try:
+        os.unlink(path)
+    except FileNotFoundError:
+        pass
+    srv = socket.socket(socket.AF_UNIX, kind)
+    srv.bind(path)
+    try:
+        os.chown(path, 0, grp.getgrnam("input").gr_gid)       # the desktop user is in "input"
+    except KeyError:
+        pass
+    os.chmod(path, 0o660)
+    srv.listen(4)
+    return srv
+
+
+# ------------------------------------------------------------------ status (for the screen)
+class Status:
+    def __init__(self):
+        self.clients = []
+        self.st = {"transport": "switch-bt", "state": "pairing", "device": None, "rssi": None,
+                   "rate": 0, "report": [0, 0, 8, 128, 128, 128, 128, 0, 0]}
+        self.pending = False
+        self.server = unix_server(STATUS_SOCKET, socket.SOCK_STREAM)
+        GLib.io_add_watch(self.server.fileno(), GLib.IO_IN, self.on_accept)
+
+    def on_accept(self, fd, cond):
+        c, _ = self.server.accept()
+        c.setblocking(False)
+        self.clients.append(c)
+        self.send(c)
+        return True
+
+    def send(self, only=None):
+        line = (json.dumps(self.st) + "\n").encode()
+        for c in ([only] if only else list(self.clients)):
+            try:
+                c.send(line)
+            except OSError:
+                c.close()
+                self.clients.remove(c)
+
+    def update(self, **kw):
+        if any(self.st.get(k) != v for k, v in kw.items()):
+            self.st.update(kw)
+            self.send()
+
+    def report(self, r):
+        self.st["report"] = r
+        if not self.pending:
+            self.pending = True
+            GLib.timeout_add(33, self._flush)
+
+    def _flush(self):
+        self.pending = False
+        self.send()
+        return False
+
+    def close(self):
+        for c in self.clients + [self.server]:
+            c.close()
+        try:
+            os.unlink(STATUS_SOCKET)
+        except FileNotFoundError:
+            pass
+
+
+# ------------------------------------------------------------------ the pad state (from the daemon)
+class Pad:
+    RUMBLE_HZ = 20
+
+    def __init__(self, status, on_exit):
+        self.status, self.on_exit = status, on_exit
+        self.buttons = set()
+        self.hat = [0, 0]
+        self.axes = dict.fromkeys((E.ABS_X, E.ABS_Y, E.ABS_RX, E.ABS_RY, E.ABS_Z, E.ABS_RZ), 0)
+        self.conn = None
+        self.rumble_want = self.rumble_sent = (0, 0)
+        self.rumble_scheduled = False
+        self.server = unix_server(SOCKET, socket.SOCK_SEQPACKET)
+        GLib.io_add_watch(self.server.fileno(), GLib.IO_IN, self.on_accept)
+
+    def close(self):
+        for s in (self.conn, self.server):
+            if s:
+                s.close()
+        try:
+            os.unlink(SOCKET)
+        except FileNotFoundError:
+            pass
+
+    def state(self):
+        """Bytes 3-11 of the 0x30 / 0x21 reports: 3 button bytes, left stick, right stick."""
+        r = s = l = 0
+        for code in self.buttons:
+            r |= RIGHT.get(code, 0)
+            s |= SHARED.get(code, 0)
+        if E.BTN_TL in self.buttons:
+            l |= LEFT_L
+        a = self.axes
+        if a[E.ABS_RZ] > 64:
+            r |= ZR
+        if a[E.ABS_Z] > 64:
+            l |= ZL
+        hx, hy = self.hat
+        l |= (hy > 0) * 0x01 | (hy < 0) * 0x02 | (hx > 0) * 0x04 | (hx < 0) * 0x08
+        conv = lambda v, sign: max(0, min(0xFFF, STICK_CENTRE + sign * round(
+            max(-32768, min(32767, v)) * STICK_RANGE / 32767)))
+        left = pack12(conv(a[E.ABS_X], 1), conv(a[E.ABS_Y], -1))      # Nintendo: up = larger
+        right = pack12(conv(a[E.ABS_RX], 1), conv(a[E.ABS_RY], -1))
+        return bytes([r, s, l]) + left + right
+
+    def simple(self):
+        """Simple report 0x3F (11 bytes after the ID), Pro Controller layout: B A Y X L R ZL ZR,
+        then - + LS RS Home Capture, hat, 16-bit sticks. Only sent until the Switch picks a mode."""
+        b1 = b2 = 0
+        for code, bit in ((E.BTN_A, 0x01), (E.BTN_B, 0x02), (E.BTN_X, 0x04), (E.BTN_Y, 0x08),
+                          (E.BTN_TL, 0x10), (E.BTN_TR, 0x20)):          # by position: B A Y X L R
+            if code in self.buttons:
+                b1 |= bit
+        for code, bit in ((E.BTN_SELECT, 0x01), (E.BTN_START, 0x02), (E.BTN_THUMBL, 0x04),
+                          (E.BTN_THUMBR, 0x08), (E.BTN_MODE, 0x10), (E.KEY_RECORD, 0x20)):
+            if code in self.buttons:
+                b2 |= bit
+        a = self.axes
+        b1 |= (a[E.ABS_Z] > 64) * 0x40 | (a[E.ABS_RZ] > 64) * 0x80
+        u16 = lambda v: max(-32768, min(32767, v)) + 32768
+        return struct.pack("<BBB4H", b1, b2, HAT.get(tuple(self.hat), 8),
+                           u16(a[E.ABS_X]), u16(a[E.ABS_Y]), u16(a[E.ABS_RX]), u16(a[E.ABS_RY]))
+
+    def screen_report(self):
+        b = 0
+        for code in self.buttons:
+            if code in S_BITS:
+                b |= 1 << S_BITS[code]
+        a = self.axes
+        to8 = lambda v: (max(-32768, min(32767, v)) + 32768) >> 8
+        return [b & 0xFF, b >> 8, HAT.get(tuple(self.hat), 8), to8(a[E.ABS_X]), to8(a[E.ABS_Y]),
+                to8(a[E.ABS_RX]), to8(a[E.ABS_RY]), max(0, min(255, a[E.ABS_Z])), max(0, min(255, a[E.ABS_RZ]))]
+
+    def on_accept(self, fd, cond):
+        conn, _ = self.server.accept()
+        if self.conn:
+            conn.close()
+            return True
+        self.conn = conn
+        conn.send(b"hello switch-bt")
+        GLib.io_add_watch(conn.fileno(), GLib.IO_IN | GLib.IO_HUP | GLib.IO_ERR, self.on_events)
+        log("input daemon connected (Switch Controller mode, Bluetooth)")
+        return True
+
+    def on_events(self, fd, cond):
+        try:
+            data = self.conn.recv(EVENT.size)
+        except OSError:
+            data = b""
+        if len(data) != EVENT.size:
+            log("input daemon disconnected: stopping")
+            self.conn.close()
+            self.conn = None
+            self.buttons.clear()
+            self.hat = [0, 0]
+            self.axes.update(dict.fromkeys(self.axes, 0))
+            GLib.timeout_add(300, self.on_exit)
+            return False
+        etype, code, value = EVENT.unpack(data)
+        if etype == E.EV_KEY:
+            (self.buttons.add if value else self.buttons.discard)(code)
+        elif etype == E.EV_ABS:
+            if code == E.ABS_HAT0X:
+                self.hat[0] = value
+            elif code == E.ABS_HAT0Y:
+                self.hat[1] = value
+            elif code in self.axes:
+                self.axes[code] = value
+        self.status.report(self.screen_report())
+        return True
+
+    # ---- vibration from the Switch, to the daemon's motor gate (latest value, <= RUMBLE_HZ/s)
+    def rumble(self, big, small):
+        self.rumble_want = (big, small)
+        if not self.rumble_scheduled:
+            self.rumble_scheduled = True
+            GLib.idle_add(self._rumble_forward)
+
+    def _rumble_forward(self):
+        want = self.rumble_want
+        if want != self.rumble_sent and self.conn:
+            try:
+                self.conn.send(f"rumble {want[0]} {want[1]}".encode(), socket.MSG_DONTWAIT)
+                self.rumble_sent = want
+            except OSError:
+                pass
+        if self.rumble_want != self.rumble_sent and self.conn:
+            GLib.timeout_add(1000 // self.RUMBLE_HZ, self._rumble_forward)
+            return False
+        self.rumble_scheduled = False
+        return False
+
+
+def rumble_strength(data):
+    """8 bytes of HD rumble (left 4, right 4: HF freq, HF amp, LF freq, LF amp) -> 0-255, the
+    strongest encoded amplitude of the four bands (codes 0-100; neutral 00 01 40 40 = 0)."""
+    best = 0
+    for side in (data[0:4], data[4:8]):
+        if len(side) < 4:
+            continue
+        hf = side[1] >> 1
+        lf = ((side[3] - 0x40) << 1 | side[2] >> 7) if side[3] >= 0x40 else 0
+        best = max(best, hf, lf)
+    return min(100, best) * 255 // 100
+
+
+# ------------------------------------------------------------------ the Bluetooth link
+class Link:
+    """The two L2CAP channels to the Switch and the Pro Controller protocol on them."""
+
+    def __init__(self, pad, status, local_addr, on_connected, on_lost):
+        self.pad, self.status = pad, status
+        self.mac = bytes(int(x, 16) for x in local_addr.split(":"))    # big-endian, as 0x02 wants
+        self.on_connected, self.on_lost = on_connected, on_lost
+        self.ctrl = self.itr = None
+        self.peer = None
+        self.timer = 0
+        self.mode = None                  # input report mode set by the Switch (0x30, 0x3F, ...)
+        self.vibration = False
+        self.lights = None
+        self.seen = set()                 # subcommands logged once per connection
+        self.sent = 0
+        self.watches = []
+        self.stream = None
+        self.servers = []
+        for psm in (PSM_CTRL, PSM_ITR):
+            s = socket.socket(socket.AF_BLUETOOTH, socket.SOCK_SEQPACKET, socket.BTPROTO_L2CAP)
+            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            s.bind((socket.BDADDR_ANY, psm))
+            s.listen(1)
+            s.setblocking(False)
+            GLib.io_add_watch(s.fileno(), GLib.IO_IN, self.on_accept, s, psm)
+            self.servers.append(s)
+
+    # ---- connecting
+    def on_accept(self, fd, cond, server, psm):
+        try:
+            conn, (addr, _psm) = server.accept()
+        except OSError:
+            return True
+        if self.ctrl and self.itr:                      # already connected: refuse a second host
+            conn.close()
+            return True
+        if self.peer and addr != self.peer:             # half-open from another host: start over
+            self.drop("a different host connected")
+        log(f"incoming channel {psm} from {addr}")
+        self.attach(conn, psm, addr)
+        return True
+
+    def attach(self, conn, psm, addr):
+        conn.setblocking(False)
+        self.peer = addr
+        if psm == PSM_CTRL:
+            self.ctrl = conn
+        else:
+            self.itr = conn
+        self.watches.append(GLib.io_add_watch(conn.fileno(), GLib.IO_IN | GLib.IO_HUP | GLib.IO_ERR,
+                                              self.on_data, psm))
+        if self.ctrl and self.itr:
+            self.connected()
+
+    def connect_to(self, addr):
+        """Reconnect to a known Switch (blocking connects, in a thread)."""
+        def run():
+            socks = []
+            try:
+                for psm in (PSM_CTRL, PSM_ITR):
+                    s = socket.socket(socket.AF_BLUETOOTH, socket.SOCK_SEQPACKET, socket.BTPROTO_L2CAP)
+                    s.settimeout(15)
+                    s.connect((addr, psm))
+                    socks.append((s, psm))
+            except OSError as e:
+                for s, _ in socks:
+                    s.close()
+                GLib.idle_add(self._connect_failed, addr, e)
+                return
+            GLib.idle_add(self._connect_done, addr, socks)
+        threading.Thread(target=run, daemon=True).start()
+
+    def _connect_done(self, addr, socks):
+        if self.ctrl or self.itr:                      # the Switch connected to us meanwhile
+            for s, _ in socks:
+                s.close()
+            return False
+        log("reconnected to", addr)
+        for s, psm in socks:
+            self.attach(s, psm, addr)
+        return False
+
+    def _connect_failed(self, addr, e):
+        log(f"reconnect to {addr} failed: {e}")
+        return False
+
+    def connected(self):
+        log("connected to", self.peer)
+        self.timer = 0
+        self.mode = None
+        self.vibration = False
+        self.lights = None
+        self.seen = set()
+        self.stream = GLib.timeout_add(SIMPLE_MS, self.tick)
+        self.on_connected(self.peer)
+
+    def drop(self, why):
+        if not (self.ctrl or self.itr):
+            return
+        log("disconnected:", why)
+        for w in self.watches:
+            GLib.source_remove(w)
+        self.watches = []
+        if self.stream:
+            GLib.source_remove(self.stream)
+            self.stream = None
+        for s in (self.ctrl, self.itr):
+            if s:
+                try:
+                    s.close()
+                except OSError:
+                    pass
+        peer = self.peer
+        self.ctrl = self.itr = self.peer = None
+        self.mode = None
+        self.pad.rumble(0, 0)
+        self.on_lost(peer)
+
+    def close(self):
+        self.drop("mode ended")
+        for s in self.servers:
+            s.close()
+
+    # ---- incoming
+    def on_data(self, fd, cond, psm):
+        sock = self.ctrl if psm == PSM_CTRL else self.itr
+        if sock is None:
+            return False
+        try:
+            data = sock.recv(700)
+        except BlockingIOError:
+            return True
+        except OSError:
+            data = b""
+        if not data:
+            self.drop(f"channel {psm} closed")
+            return False
+        if psm == PSM_CTRL:
+            self.on_control(data)
+        elif data[0] == 0xA2 and len(data) > 1:        # DATA | OUTPUT
+            self.on_output(data[1:])
+        return True
+
+    def on_control(self, data):
+        kind = data[0] >> 4
+        if kind == 0x1 and data[0] & 0x0F == 0x5:      # HID_CONTROL: virtual cable unplug
+            self.drop("virtual cable unplug")
+            return
+        if kind == 0x5 and len(data) > 1:               # SET_REPORT: output report on the control channel
+            self.on_output(data[1:])
+        if kind in (0x5, 0x7, 0x9):                     # SET_REPORT / SET_PROTOCOL / SET_IDLE: success
+            self.send_ctrl(b"\x00")
+        elif kind in (0x4, 0x6, 0x8):                   # GET_*: unsupported
+            self.send_ctrl(b"\x03")
+
+    def on_output(self, r):
+        if r[0] in (0x01, 0x10) and len(r) >= 10 and self.vibration:
+            v = rumble_strength(r[2:10])
+            self.pad.rumble(v, v)
+        if r[0] == 0x01 and len(r) >= 11:
+            self.subcommand(r[10], r[11:])
+
+    # ---- subcommands (answered at once with 0x21; unknown ones get a plain ACK)
+    def subcommand(self, sub, args):
+        if sub not in self.seen:
+            self.seen.add(sub)
+            log(f"subcommand 0x{sub:02x} {bytes(args[:8]).hex(' ')}")
+        ack, data = 0x80, b""
+        if sub == 0x02:                                  # device info
+            ack, data = 0x82, bytes([0x03, 0x48, 0x03, 0x02]) + self.mac + bytes([0x01, 0x01])
+        elif sub == 0x03:                                # input report mode
+            if args:
+                self.set_mode(args[0])
+        elif sub == 0x04:                                # trigger buttons elapsed time
+            ack, data = 0x83, bytes(14)
+        elif sub == 0x10 and len(args) >= 5:             # SPI flash read
+            addr, size = struct.unpack_from("<IB", args)
+            size = min(size, 0x1D)
+            chunk = FLASH[addr:addr + size] if addr + size <= len(FLASH) else b"\xff" * size
+            ack, data = 0x90, args[:5] + chunk
+        elif sub == 0x21:                                # NFC/IR MCU config
+            data = bytes(34)
+        elif sub == 0x48:                                # vibration on / off
+            vib = bool(args and args[0])
+            if vib != self.vibration:
+                log("vibration", "on" if vib else "off")
+            self.vibration = vib
+            if not vib:
+                self.pad.rumble(0, 0)
+        elif sub == 0x30 and args and args[0] != self.lights:
+            self.lights = args[0]
+            log(f"player lights {args[0]:04b}")
+        self.send_reply(ack, sub, data)
+
+    def set_mode(self, mode):
+        if mode != self.mode:
+            log(f"input report mode 0x{mode:02x}")
+        self.mode = mode
+        if self.stream:
+            GLib.source_remove(self.stream)
+        self.stream = GLib.timeout_add(REPORT_MS if mode == 0x30 else SIMPLE_MS, self.tick)
+
+    # ---- outgoing
+    def header(self, rid):
+        self.timer = (self.timer + 1) & 0xFF
+        return bytes([0xA1, rid, self.timer, battery_byte()]) + self.pad.state()
+
+    def send_reply(self, ack, sub, data):
+        body = self.header(0x21) + bytes([0x80, ack, sub]) + data
+        self.send_itr(body.ljust(50, b"\x00"))
+
+    def tick(self):
+        if self.mode == 0x30:
+            self.send_itr((self.header(0x30) + b"\x00").ljust(50, b"\x00"))   # vibrator byte, IMU zeros
+        else:
+            self.send_itr(bytes([0xA1, 0x3F]) + self.pad.simple())
+        return True
+
+    def send_itr(self, data):
+        if not self.itr:
+            return
+        try:
+            self.itr.send(data, socket.MSG_DONTWAIT)
+            self.sent += 1
+        except BlockingIOError:
+            pass                                         # link busy: the next report carries the state
+        except OSError as e:
+            self.drop(f"send failed: {e}")
+
+    def send_ctrl(self, data):
+        if self.ctrl:
+            try:
+                self.ctrl.send(data, socket.MSG_DONTWAIT)
+            except OSError:
+                pass
+
+
+_battery = [0, 0.0]
+
+
+def battery_byte():
+    """High nibble: 8 full, 6 medium, 4 low, 2 critical, 0 empty; +1 while charging. Low
+    nibble 0: Pro Controller, battery powered. Read every 10 s, not for each of the ~66 reports/s."""
+    now = time.monotonic()
+    if _battery[1] and now - _battery[1] < 10:
+        return _battery[0]
+    _battery[1] = now
+    try:
+        with open("/sys/class/power_supply/battery/capacity") as f:
+            cap = int(f.read().strip())
+    except (OSError, ValueError):
+        cap = 100
+    level = 8 if cap > 60 else 6 if cap > 35 else 4 if cap > 15 else 2 if cap > 5 else 0
+    try:
+        with open("/sys/class/power_supply/axp20x-usb/online") as f:
+            level |= f.read().strip() == "1"
+    except OSError:
+        pass
+    _battery[0] = level << 4
+    return _battery[0]
+
+
+def general_inquiry_code():
+    """Answer the general inquiry code (GIAC 0x9E8B33), which the Switch and PCs search with,
+    while the kernel's limited discoverable mode keeps the class's 0x2000 bit (see the top)."""
+    try:
+        subprocess.run(["hcitool", "-i", "hci0", "cmd", "0x03", "0x003A", "01", "33", "8B", "9E"],
+                       capture_output=True, timeout=5, check=True)
+    except (OSError, subprocess.SubprocessError) as e:
+        log("could not set the general inquiry code:", e)
+
+
+# ------------------------------------------------------------------ bluetoothd identity
+def btmgmt(*args):
+    return subprocess.run(["btmgmt", *args], input="quit\n", capture_output=True, text=True, timeout=10).stdout
+
+
+def unblock_bt():
+    for d in glob.glob("/sys/class/rfkill/rfkill*"):
+        try:
+            with open(f"{d}/type") as f:
+                if f.read().strip() != "bluetooth":
+                    continue
+            with open(f"{d}/soft") as f:
+                if f.read().strip() == "0":
+                    continue
+            with open(f"{d}/soft", "w") as f:
+                f.write("0")
+            log("Bluetooth was blocked (rfkill): unblocked")
+        except OSError:
+            pass
+
+
+def identity(on):
+    """Restart bluetoothd as a Pro Controller (on) or with its own config again (off). Returns
+    False if there was nothing to undo."""
+    if on:
+        try:
+            with open(BT_CONF) as f:
+                lines = f.read().splitlines()
+        except OSError:
+            lines = []
+        lines = [ln for ln in lines if not re.match(r"\s*(DeviceID|Class|ControllerMode)\s*=", ln)]
+        out, done = [], False
+        ours = [f"Class = {CLASS}", f"DeviceID = {DEVICE_ID}", "ControllerMode = dual"]
+        for ln in lines:
+            out.append(ln)
+            if not done and ln.strip() == "[General]":
+                out += ours
+                done = True
+        if not done:
+            out = ["[General]"] + ours + [""] + out
+        os.makedirs(RUN_DIR, exist_ok=True)
+        with open(f"{RUN_DIR}/main.conf", "w") as f:
+            f.write("# Written by rg35xxh-switchbt for Switch Controller mode (Bluetooth); removed afterwards.\n"
+                    + "\n".join(out) + "\n")
+        os.makedirs(os.path.dirname(DROPIN), exist_ok=True)
+        with open(DROPIN, "w") as f:
+            f.write("# Switch Controller mode over Bluetooth (rg35xxh-switchbt): Pro Controller identity,\n"
+                    "# no input plugin (our sockets own the HID channels), no hostname plugin (it would\n"
+                    "# set the class from the chassis). Removed when it ends.\n"
+                    f"[Service]\nExecStart=\nExecStart={BLUETOOTHD} -f {RUN_DIR}/main.conf "
+                    "--noplugin=input,hostname\n")
+        log("bluetoothd: Pro Controller identity", DEVICE_ID, CLASS)
+    else:
+        if not os.path.exists(DROPIN):
+            return False
+        for p in (DROPIN, f"{RUN_DIR}/main.conf"):
+            try:
+                os.remove(p)
+            except FileNotFoundError:
+                pass
+        log("bluetoothd: original identity")
+    subprocess.run(["systemctl", "daemon-reload"])
+    if on:
+        subprocess.run(["systemctl", "restart", "bluetooth.service"])
+    else:
+        # Queued, not waited for (see rg35xxh-btpad: waiting during our own stop deadlocks).
+        subprocess.run(["systemctl", "--no-block", "restart", "bluetooth.service"])
+    unblock_bt()
+    if on:
+        for _ in range(50):
+            out = subprocess.run(["bluetoothctl", "show"], capture_output=True, text=True, timeout=5).stdout
+            if "Powered: yes" in out:
+                break
+            time.sleep(0.2)
+        time.sleep(1)
+    return True
+
+
+# ------------------------------------------------------------------ main
+def run():
+    dbus.mainloop.glib.DBusGMainLoop(set_as_default=True)
+    bus = dbus.SystemBus()
+    adapter_path = None
+    for _ in range(100):                 # bluetoothd has just been restarted
+        try:
+            om = dbus.Interface(bus.get_object(BLUEZ, "/"), OM_IFACE)
+            adapter_path = next((p for p, ifs in om.GetManagedObjects().items() if ADAPTER_IFACE in ifs), None)
+        except dbus.exceptions.DBusException:
+            adapter_path = None
+        if adapter_path:
+            break
+        time.sleep(0.1)
+    if not adapter_path:
+        log("no Bluetooth adapter: stopping")
+        return
+    adapter = bus.get_object(BLUEZ, adapter_path)
+    props = dbus.Interface(adapter, PROP_IFACE)
+    for attempt in range(3):
+        unblock_bt()
+        try:
+            props.Set(ADAPTER_IFACE, "Powered", True)
+            break
+        except dbus.exceptions.DBusException as e:
+            if attempt == 2:
+                raise
+            log(f"power on failed ({e.get_dbus_message()}), retrying")
+            time.sleep(1)
+    btmgmt("class", "5", "8")             # peripheral / gamepad (in case anything changed it)
+    old_alias = props.Get(ADAPTER_IFACE, "Alias")
+    props.Set(ADAPTER_IFACE, "Alias", NAME)
+    props.Set(ADAPTER_IFACE, "Pairable", True)
+    local_addr = str(props.Get(ADAPTER_IFACE, "Address"))
+
+    agent = Agent(bus, Agent.path)
+    agents = dbus.Interface(bus.get_object(BLUEZ, "/org/bluez"), "org.bluez.AgentManager1")
+    agents.RegisterAgent(Agent.path, "NoInputNoOutput")
+    agents.RequestDefaultAgent(Agent.path)
+    profile = Profile(bus, Profile.path)
+    profiles = dbus.Interface(bus.get_object(BLUEZ, "/org/bluez"), "org.bluez.ProfileManager1")
+    profiles.RegisterProfile(Profile.path, HID_UUID, {
+        "ServiceRecord": SDP_RECORD, "Role": "server",
+        "RequireAuthentication": False, "RequireAuthorization": False})
+    log(f"HID record registered; '{NAME}', {local_addr}")
+
+    loop = GLib.MainLoop()
+    status = Status()
+    pad = Pad(status, lambda: (loop.quit(), False)[1])
+
+    def device_name(addr):
+        try:
+            p = dbus.Interface(bus.get_object(BLUEZ, f"{adapter_path}/dev_{addr.replace(':', '_')}"), PROP_IFACE)
+            return str(p.Get(DEVICE_IFACE, "Alias"))
+        except dbus.exceptions.DBusException:
+            return addr
+
+    def trust(addr):
+        try:
+            p = dbus.Interface(bus.get_object(BLUEZ, f"{adapter_path}/dev_{addr.replace(':', '_')}"), PROP_IFACE)
+            if not p.Get(DEVICE_IFACE, "Trusted"):
+                p.Set(DEVICE_IFACE, "Trusted", True)
+                log("trusted", addr)
+        except dbus.exceptions.DBusException as e:
+            log("could not trust", addr, e)
+
+    def paired(addr):
+        try:
+            p = dbus.Interface(bus.get_object(BLUEZ, f"{adapter_path}/dev_{addr.replace(':', '_')}"), PROP_IFACE)
+            return bool(p.Get(DEVICE_IFACE, "Paired"))
+        except dbus.exceptions.DBusException:
+            return False
+
+    def last_host():
+        try:
+            with open(LAST_HOST) as f:
+                addr = f.read().strip()
+            return addr if re.fullmatch(r"([0-9A-F]{2}:){5}[0-9A-F]{2}", addr) and paired(addr) else None
+        except OSError:
+            return None
+
+    # Discoverable (limited: class 0x002508) while no Switch is connected; re-armed before it
+    # times out. Connectable stays on, so a paired Switch can always connect to us.
+    discov = {"on": False, "timer": None}
+
+    def discoverable(on):
+        discov["on"] = on
+        if discov["timer"]:
+            GLib.source_remove(discov["timer"])
+            discov["timer"] = None
+        def run():
+            if on:          # discoverable needs connectable; limited adds 0x2000 to the class
+                btmgmt("connectable", "on")
+                out = btmgmt("discov", "limited", str(DISCOVERABLE_S))
+                if "failed" in out.lower():
+                    log("could not make the adapter discoverable:", out.strip().splitlines()[-1:])
+                general_inquiry_code()
+            else:
+                btmgmt("discov", "no")
+        threading.Thread(target=run, daemon=True).start()
+        if on:
+            discov["timer"] = GLib.timeout_add_seconds(DISCOVERABLE_S - 10, lambda: (discoverable(True), False)[1])
+
+    # Reconnect to the last Switch: 4 tries 5 s apart, then every 30 s for 3 minutes, then listen only.
+    rc = {"timer": None, "tries": 0}
+
+    def reconnect_start():
+        reconnect_stop()
+        rc["tries"] = 0
+        rc["timer"] = GLib.timeout_add(1500, reconnect_try)    # give the Switch a moment first
+
+    def reconnect_stop():
+        if rc["timer"]:
+            GLib.source_remove(rc["timer"])
+            rc["timer"] = None
+
+    def reconnect_try():
+        rc["timer"] = None
+        addr = last_host()
+        if not addr or link.ctrl or link.itr or rc["tries"] >= 10:
+            return False
+        rc["tries"] += 1
+        link.connect_to(addr)
+        rc["timer"] = GLib.timeout_add_seconds(5 if rc["tries"] < 4 else 30, reconnect_try)
+        return False
+
+    def on_connected(addr):
+        reconnect_stop()
+        discoverable(False)
+        trust(addr)
+        try:
+            os.makedirs(os.path.dirname(LAST_HOST), exist_ok=True)
+            with open(LAST_HOST, "w") as f:
+                f.write(addr + "\n")
+        except OSError:
+            pass
+        status.update(state="connected", device=device_name(addr))
+
+    def on_lost(addr):
+        if not running["on"]:
+            return
+        discoverable(True)
+        host = last_host()
+        status.update(state="waiting" if host else "pairing", device=device_name(host) if host else None, rssi=None)
+        if host:
+            reconnect_start()
+
+    running = {"on": True}
+    link = Link(pad, status, local_addr, on_connected, on_lost)
+    discoverable(True)
+    host = last_host()
+    if host:
+        status.update(state="waiting", device=device_name(host))
+        reconnect_start()
+
+    def rate():
+        status.update(rate=link.sent)
+        link.sent = 0
+        return True
+    GLib.timeout_add_seconds(1, rate)
+
+    def no_pad():
+        if pad.conn is None:
+            log("input daemon did not connect within 60 s: stopping")
+            loop.quit()
+        return False
+    GLib.timeout_add_seconds(60, no_pad)
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        GLib.unix_signal_add(GLib.PRIORITY_DEFAULT, sig, lambda *a: (loop.quit(), False)[1])
+    loop.run()
+
+    running["on"] = False
+    reconnect_stop()
+    for step in (link.close, pad.close, status.close):
+        try:
+            step()
+        except Exception as e:
+            log("close:", e)
+    btmgmt("discov", "no")
+    for call in (lambda: profiles.UnregisterProfile(Profile.path), lambda: agents.UnregisterAgent(Agent.path),
+                 lambda: props.Set(ADAPTER_IFACE, "Alias", old_alias)):
+        try:
+            call()
+        except dbus.exceptions.DBusException:
+            pass
+    log("stopped")
+
+
+def main():
+    unblock_bt()
+    identity(True)
+    try:
+        run()
+    finally:
+        identity(False)
+
+
+if __name__ == "__main__":
+    if os.geteuid() != 0:
+        sys.exit("rg35xxh-switchbt: must run as root")
+    if sys.argv[1:] == ["--restore"]:       # ExecStopPost: undo the identity after a crash
+        identity(False)
+        sys.exit(0)
+    main()

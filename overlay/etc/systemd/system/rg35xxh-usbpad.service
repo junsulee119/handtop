@@ -1,7 +1,7 @@
 [Unit]
 Description=Handtop wired controller mode (handheld as a wired Xbox 360 controller over USB)
 # One external controller connection at a time.
-Conflicts=rg35xxh-btpad.service rg35xxh-switchpad.service
+Conflicts=rg35xxh-btpad.service rg35xxh-switchpad.service rg35xxh-switchbt.service
 
 [Service]
 Type=simple

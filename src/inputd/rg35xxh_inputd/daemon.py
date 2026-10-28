@@ -7,7 +7,7 @@ Devices (grabbed exclusively while running):
   device with KEY_POWER       power button (AXP717)
 Virtual devices (uinput): mouse, keyboard, and in gamepad mode an Xbox 360 pad.
 External controller modes (BT Controller: rg35xxh-btpad, wired: rg35xxh-usbpad, Switch:
-rg35xxh-usbpad --switch) use the gamepad mapping too, but send the pad events over a Unix socket to
+rg35xxh-usbpad --switch over USB, rg35xxh-switchbt over Bluetooth) use the gamepad mapping too, but send the pad events over a Unix socket to
 that service instead of creating the local pad, so apps on the handheld see nothing. Only one of
 the services runs at a time.
 """
@@ -47,8 +47,8 @@ HW_AXES = {E.ABS_X: "lx", E.ABS_Y: "ly", E.ABS_RX: "rx", E.ABS_RY: "ry"}
 TERMINALS = ("foot", "footclient", "org.codeberg.dnkl.foot", "xterm", "uxterm", "kitty", "alacritty")
 STATUS_LED = "/sys/class/leds/red:status"
 EXT_SOCKET = "/run/rg35xxh-extpad.sock"        # created by rg35xxh-btpad / -usbpad (root, group input)
-# Messages from the service: b"hello bt" | b"hello usb" | b"hello switch" first, later
-# b"rumble <big> <small>" (0-255).
+# Messages from the service: b"hello bt" | b"hello usb" | b"hello switch" | b"hello switch-bt"
+# first, later b"rumble <big> <small>" (0-255).
 EXT_MODES = {   # transport: (flag file, notification title, notification text, taskbar icon)
     "bt": ("rg35xxh-bt-mode", "BT Controller mode",
            "Controls go to the paired PC/phone. Select + Start + L1 + R1 to stop.", "bt"),
@@ -57,8 +57,12 @@ EXT_MODES = {   # transport: (flag file, notification title, notification text, 
     "switch": ("rg35xxh-wired-mode", "Switch Controller mode",
                "Controls go to the Switch over the USB cable. F: Home, F + Select: Capture. "
                "Select + Start + L1 + R1 to stop.", "wired"),
+    "switch-bt": ("rg35xxh-bt-mode", "Switch Controller mode (Bluetooth)",
+                  "Controls go to the Switch over Bluetooth. F: Home, F + Select: Capture. "
+                  "Select + Start + L1 + R1 to stop.", "bt"),
 }
-EXT_HELLO = {b"hello usb": "usb", b"hello switch": "switch"}    # anything else: "bt"
+EXT_HELLO = {b"hello usb": "usb", b"hello switch": "switch", b"hello switch-bt": "switch-bt"}   # else "bt"
+SWITCH_EXTS = ("switch", "switch-bt")           # F gives Home / Capture there
 BT_EVENT = struct.Struct("<HHi")               # evdev type, code, value
 # Mode-change feedback: the taskbar icon shakes and the motor wobbles with it, both driven from
 # here on one clock and one damped-spring model, x(t) = A e^(-DECAY t) sin(2 pi FREQ t):
@@ -164,7 +168,7 @@ class Daemon:
         self.pad = None            # virtual Xbox pad (gamepad mode only)
         self.pad_ff = {}           # virtual effect id -> physical effect id
         self.bt = None             # socket to rg35xxh-btpad / -usbpad (external controller modes)
-        self.ext = "bt"             # its transport, from the service's hello: "bt" | "usb" | "switch"
+        self.ext = "bt"             # its transport, from the service's hello: "bt" | "usb" | "switch" | "switch-bt"
         self.ext_rumble_id = None   # effect id for vibration requested by the PC
         self.motor_timer = None     # motor gate (MOTOR_INTERVAL): pending updates, last update time
         self.motor_last = 0.0
@@ -959,11 +963,11 @@ class Daemon:
         if self.core.mode == "gamepad":           # local gamepad mode -> BT Controller mode
             self._destroy_pad()
             set_flag("rg35xxh-gamepad-mode", False)
-            self.core.request_gamepad(combo_exit=True, f_buttons=self.ext == "switch")
+            self.core.request_gamepad(combo_exit=True, f_buttons=self.ext in SWITCH_EXTS)
             self._run([("mode", "gamepad")] + [("pad_abs", PAD_AXES[n], int(round(v * 32767)))
                                                for n, v in self.core.axes.items()])
         else:
-            self._run(self.core.request_gamepad(combo_exit=True, f_buttons=self.ext == "switch"))
+            self._run(self.core.request_gamepad(combo_exit=True, f_buttons=self.ext in SWITCH_EXTS))
         return True
 
     def _bt_send(self, etype, code, value):
