@@ -14,6 +14,7 @@ bash ./06-hardware.sh
 bash ./06b-cedrus.sh
 bash ./06c-ffs-xinput.sh
 bash ./06d-joypad.sh
+bash ./06e-uhid.sh
 bash ./07-desktop.sh
 bash ./07b-osd.sh
 bash ./07c-bootsplash.sh

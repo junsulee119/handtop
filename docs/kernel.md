@@ -2,7 +2,7 @@
 
 Handtop takes its whole hardware layer from ROCKNIX (release `ROCKNIX_VERSION` in `build/config.sh`, currently **20261001**, H700, DDR4 or DDR3): U-Boot, the kernel image (`KERNEL`, Linux 7.2.0 with its built-in initramfs), the device trees, every kernel module and the firmware files. `build/02-extract-rocknix.sh` extracts them from ROCKNIX's release image (SHA-256 pinned) and `build/06-hardware.sh` copies the modules and firmware unchanged.
 
-This page lists **every** place where Handtop differs at kernel level: the boot command line, the device tree, and three kernel modules (one added, one new, one replaced). Anything not listed here is ROCKNIX's file, byte for byte. Keep this list complete: a change to the kernel, a module, the device tree or the boot command line goes here in the same PR.
+This page lists **every** place where Handtop differs at kernel level: the boot command line, the device tree, and four kernel modules (two added, one new, one replaced). Anything not listed here is ROCKNIX's file, byte for byte. Keep this list complete: a change to the kernel, a module, the device tree or the boot command line goes here in the same PR.
 
 All modules are built against an exact rebuild of ROCKNIX's kernel tree (`build/06b-cedrus.sh`: linux 7.2 + ROCKNIX's patches at the release tag + ROCKNIX's own `.config` read out of `KERNEL`, built with GCC 15 like ROCKNIX), and each build step checks that every symbol version a module imports matches ROCKNIX's modules, and that `vermagic` matches. The kernel image itself is never rebuilt.
 
@@ -15,6 +15,7 @@ All modules are built against an exact rebuild of ROCKNIX's kernel tree (`build/
 | Device tree | `sun50i-h700-anbernic-rg35xx-h.dtb` / `…-rev6-panel.dtb` | Same + a **video engine node** (overlay, no `iommus`); the matching panel's file is picked at every boot | Hardware video decoding; rev6 screens | `build/dts/rg35xxh-video-engine.dtso`, [video-decode.md](video-decode.md), [services/panel.md](services/panel.md) |
 | `sunxi-cedrus.ko` | Not built | **Added**: upstream Cedrus driver + 2 patches | Hardware video decoding (Moonlight) | `build/06b-cedrus.sh`, `build/kernel/000*.patch` |
 | `usb_f_fs_xinput.ko` | Doesn't exist | **New**: generated copy of FunctionFS that accepts vendor class descriptors | Wired Xbox 360 controller mode | `build/06c-ffs-xinput.sh` |
+| `uhid.ko` | Not built (`# CONFIG_UHID is not set`) | **Added**: the kernel's own uhid driver, unchanged | Bluetooth LE keyboards, mice and gamepads (HID over GATT) | `build/06e-uhid.sh` |
 | `rocknix-singleadc-joypad.ko` | ROCKNIX's build of rocknix-joypad `d02ed13` | **Replaced**: same source + a locking fix in the rumble path | A change of vibration strength could freeze the whole handheld | `build/06d-joypad.sh`, `build/kernel/rocknix-joypad/` |
 | U-Boot, `KERNEL`, all other modules, firmware | ROCKNIX's | Unchanged | | `build/02-extract-rocknix.sh`, `build/06-hardware.sh` |
 
@@ -42,6 +43,14 @@ Installed as `/usr/lib/modules/7.2.0/extra/sunxi-cedrus.ko`.
 
 The wired Xbox 360 controller interface needs a 17-byte class descriptor (type 0x21) that the kernel's FunctionFS rejects (it only knows 0x21 as the 9-byte HID descriptor). `06c-ffs-xinput.sh` generates a renamed copy of the kernel's own `f_fs.c` (filesystem `functionfs_xinput`, USB function `ffsxi`, exports dropped so it sits next to the built-in FunctionFS) that also accepts class descriptors on vendor-specific interfaces. The generator stops if `f_fs.c` changes upstream. Installed as `extra/usb_f_fs_xinput.ko`; used only by Wired Controller mode and Switch Controller mode over USB. [apps/external-controller.md](apps/external-controller.md).
 
+### `uhid.ko` (added)
+
+BlueZ hands Bluetooth LE input devices (HID over GATT, "HoG": most current Bluetooth mice and keyboards, many gamepads) to the kernel through `/dev/uhid`. ROCKNIX's kernel is built without it (`# CONFIG_UHID is not set`), so such a device paired and connected but no input device ever appeared; bluetoothd logged `input-hog profile accept failed` on every connection. Classic Bluetooth HID goes through `hidp` (a module ROCKNIX does build), which is why classic mice, keyboards and the Xbox controller worked.
+
+`06e-uhid.sh` builds the kernel's own `drivers/hid/uhid.c`, unchanged, out of tree against the ROCKNIX tree (ROCKNIX's `.config` stays untouched; the HID core it needs is built into ROCKNIX's kernel). It stops if ROCKNIX's config changes for UHID. Installed as `extra/uhid.ko`; loaded on demand: depmod lists its `devname:uhid` alias, systemd creates `/dev/uhid` at boot and bluetoothd's first open loads it. Three of the symbols it imports (`stream_open`, `hid_safe_input_report`, `__task_pid_nr_ns`) are used by no ROCKNIX module, so the build can't compare their versions; the kernel checks them when loading (it accepted the module on the device).
+
+Tested 2026-10-28 (DDR4): a Bluetooth LE mouse works, as a mouse and its keyboard part; before, it connected but did nothing. After a restart, `/dev/uhid` existed, the module was loaded on demand and the paired mouse reconnected by itself.
+
 ### `rocknix-singleadc-joypad.ko` (replaced, rumble fix)
 
 The gamepad and vibration motor driver comes from ROCKNIX's separate [rocknix-joypad](https://github.com/ROCKNIX/rocknix-joypad) package; `06d-joypad.sh` downloads the exact commit ROCKNIX 20261001 builds (`JOYPAD_COMMIT`, checksum from ROCKNIX's `package.mk`), applies `build/kernel/rocknix-joypad/0001-rumble-no-mutex-in-atomic-context.patch`, builds it for H700 and installs it **over ROCKNIX's file** (same path, `rocknix-joypad/rocknix-singleadc-joypad.ko`). Its imports are identical to ROCKNIX's build of the same source.
@@ -60,5 +69,5 @@ Worth reporting upstream to ROCKNIX (the same driver is used on their other devi
 
 1. Set `ROCKNIX_VERSION` (and the image checksums) in `build/config.sh`, and `JOYPAD_COMMIT` / `JOYPAD_SHA256` from that release's `projects/ROCKNIX/packages/linux-drivers/rocknix-joypad/package.mk`.
 2. Check whether ROCKNIX fixed the rumble locking upstream; if so, drop `06d-joypad.sh` and its patch.
-3. `06b`, `06c` and `06d` stop if a patch no longer applies, `f_fs.c` changed, or a symbol version differs; fix those before building an image.
-4. Re-test on a device: video decoding, Wired Controller mode, and vibration (`tools/motor-stress.py random 300`).
+3. `06b`–`06e` stop if a patch no longer applies, `f_fs.c` changed, ROCKNIX's UHID setting changed, or a symbol version differs; fix those before building an image.
+4. Re-test on a device: video decoding, Wired Controller mode, vibration (`tools/motor-stress.py random 300`) and a Bluetooth LE mouse or keyboard.
