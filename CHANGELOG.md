@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Chromium and VLC decode on the VPU.** Both speak VA-API, which Debian does not connect to the stateless V4L2 decoder, so they were software-only. The image now ships `libva-v4l2_request` (a VA-API driver over the request API) and the session exports `LIBVA_DRIVER_NAME=v4l2_request`, which makes it the session's VA-API driver: **Chromium then decodes on the VPU with no flags**, and VLC too when it is installed (`apt install vlc`, XWayland). mpv is unaffected (it goes through FFmpeg), and any client that wants another VA driver can still override the variable. The driver carries three fixes: single-planar support (cedrus is not multiplanar, so upstream master refuses it), `vaAcquireBufferHandle()` (VLC's dmabuf probe), and one plane per layer on export (VLC rejects a composite layer and shows a green window). Measured on the device, 1080p24: Chromium 154–174 % of one core against 251–260 % in software, VLC H.264 11 % against 227 %. VP9/AV1 stay software (no Cedrus decoder). Details and verification in `docs/video-decode.md`.
+
 ## v0.3.5
 
 - ⚠️ **Known issue (still open):** Bluetooth is sometimes missing on the first boot after flashing. Restart once (Power → Restart); it works from then on.

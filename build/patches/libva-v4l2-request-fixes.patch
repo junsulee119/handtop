@@ -1,0 +1,528 @@
+diff --git a/src/buffer.c b/src/buffer.c
+index a8c6f25..06f1c5c 100644
+--- a/src/buffer.c
++++ b/src/buffer.c
+@@ -12,6 +12,9 @@
+ 
+ #include <stdlib.h>
+ #include <string.h>
++#include <unistd.h>
++
++#include <va/va_drmcommon.h>
+ 
+ #include "v4l2_request.h"
+ 
+@@ -49,6 +52,7 @@ VAStatus v4l2r_CreateBuffer(VADriverContextP va_ctx, VAContextID context_id,
+ 	buffer->type = type;
+ 	buffer->element_size = size;
+ 	buffer->nb_elements = num_elements;
++	buffer->dmabuf_fd = -1;
+ 
+ 	buffer->data = malloc((size_t)size * num_elements);
+ 	if (!buffer->data) {
+@@ -130,6 +134,8 @@ VAStatus v4l2r_DestroyBuffer(VADriverContextP va_ctx, VABufferID buf_id)
+ 	/* Derived image buffers point into the CAPTURE buffer mapping. */
+ 	if (!buffer->derived)
+ 		free(buffer->data);
++	if (buffer->dmabuf_fd >= 0)
++		close(buffer->dmabuf_fd);
+ 
+ 	v4l2r_handles_free(&drv->buffers, buf_id);
+ 	pthread_mutex_unlock(&drv->mutex);
+@@ -158,15 +164,47 @@ VAStatus v4l2r_BufferInfo(VADriverContextP va_ctx, VABufferID buf_id,
+ 	return VA_STATUS_SUCCESS;
+ }
+ 
++/* Legacy buffer-handle export for clients that predate
++ * vaExportSurfaceHandle() (VLC 3 probes the dmabuf path this way). */
+ VAStatus v4l2r_AcquireBufferHandle(VADriverContextP va_ctx, VABufferID buf_id,
+ 				   VABufferInfo *buf_info)
+ {
+-	(void)va_ctx; (void)buf_id; (void)buf_info;
+-	return VA_STATUS_ERROR_UNIMPLEMENTED;
++	struct v4l2r_driver *drv = v4l2r_driver(va_ctx);
++	struct v4l2r_buffer *buffer;
++
++	if (!buf_info)
++		return VA_STATUS_ERROR_INVALID_PARAMETER;
++
++	buffer = V4L2R_BUFFER_GET(drv, buf_id);
++	if (!buffer || !buffer->derived)
++		return VA_STATUS_ERROR_INVALID_BUFFER;
++
++	if (buf_info->mem_type != VA_SURFACE_ATTRIB_MEM_TYPE_DRM_PRIME)
++		return VA_STATUS_ERROR_UNSUPPORTED_MEMORY_TYPE;
++
++	if (buffer->dmabuf_fd < 0)
++		return VA_STATUS_ERROR_OPERATION_FAILED;
++
++	buf_info->handle = (uintptr_t)buffer->dmabuf_fd;
++	buf_info->mem_type = VA_SURFACE_ATTRIB_MEM_TYPE_DRM_PRIME;
++	buf_info->mem_size = v4l2r_buffer_bytes(buffer);
++
++	return VA_STATUS_SUCCESS;
+ }
+ 
+ VAStatus v4l2r_ReleaseBufferHandle(VADriverContextP va_ctx, VABufferID buf_id)
+ {
+-	(void)va_ctx; (void)buf_id;
+-	return VA_STATUS_ERROR_UNIMPLEMENTED;
++	struct v4l2r_driver *drv = v4l2r_driver(va_ctx);
++	struct v4l2r_buffer *buffer;
++
++	buffer = V4L2R_BUFFER_GET(drv, buf_id);
++	if (!buffer || !buffer->derived)
++		return VA_STATUS_ERROR_INVALID_BUFFER;
++
++	if (buffer->dmabuf_fd >= 0) {
++		close(buffer->dmabuf_fd);
++		buffer->dmabuf_fd = -1;
++	}
++
++	return VA_STATUS_SUCCESS;
+ }
+diff --git a/src/context.c b/src/context.c
+index e3b78af..82641d0 100644
+--- a/src/context.c
++++ b/src/context.c
+@@ -33,11 +33,8 @@ static int set_format(struct v4l2r_context *ctx, enum v4l2_buf_type type,
+ 		.type = type,
+ 	};
+ 
+-	format.fmt.pix_mp.width = ctx->picture_width;
+-	format.fmt.pix_mp.height = ctx->picture_height;
+-	format.fmt.pix_mp.pixelformat = pixelformat;
+-	format.fmt.pix_mp.plane_fmt[0].sizeimage = buffersize;
+-	format.fmt.pix_mp.num_planes = 1;
++	v4l2r_format_set(&format, pixelformat, ctx->picture_width,
++			 ctx->picture_height, buffersize);
+ 
+ 	if (ioctl(ctx->video_fd, VIDIOC_S_FMT, &format) < 0)
+ 		return -errno;
+@@ -198,7 +195,7 @@ static int output_buffer_setup(struct v4l2r_context *ctx,
+ 	void *addr;
+ 
+ 	if (sizeimage)
+-		buffers.format.fmt.pix_mp.plane_fmt[0].sizeimage = sizeimage;
++		v4l2r_format_set_sizeimage(&buffers.format, sizeimage);
+ 
+ 	if (ioctl(ctx->video_fd, VIDIOC_CREATE_BUFS, &buffers) < 0) {
+ 		v4l2r_log("failed to create OUTPUT buffer: %s\n",
+@@ -212,8 +209,12 @@ static int output_buffer_setup(struct v4l2r_context *ctx,
+ 
+ 	buffer.type = ctx->output_format.type;
+ 	buffer.index = buffers.index;
+-	buffer.length = VIDEO_MAX_PLANES;
+-	buffer.m.planes = planes;
++	if (V4L2_TYPE_IS_MULTIPLANAR(buffer.type)) {
++		buffer.length = VIDEO_MAX_PLANES;
++		buffer.m.planes = planes;
++	} else {
++		buffer.length = 1;
++	}
+ 
+ 	if (ioctl(ctx->video_fd, VIDIOC_QUERYBUF, &buffer) < 0) {
+ 		v4l2r_log("failed to query OUTPUT buffer %u: %s\n",
+@@ -222,8 +223,13 @@ static int output_buffer_setup(struct v4l2r_context *ctx,
+ 	}
+ 
+ 	output->index = buffer.index;
+-	output->size = buffer.m.planes[0].length;
+-	offset = buffer.m.planes[0].m.mem_offset;
++	if (V4L2_TYPE_IS_MULTIPLANAR(buffer.type)) {
++		output->size = buffer.m.planes[0].length;
++		offset = buffer.m.planes[0].m.mem_offset;
++	} else {
++		output->size = buffer.length;
++		offset = buffer.m.offset;
++	}
+ 
+ 	addr = mmap(NULL, output->size, PROT_READ | PROT_WRITE, MAP_SHARED,
+ 		    ctx->video_fd, offset);
+@@ -317,8 +323,12 @@ static size_t capture_format_bytes(const struct v4l2_format *fmt)
+ {
+ 	size_t bytes = 0;
+ 
+-	for (unsigned int i = 0; i < fmt->fmt.pix_mp.num_planes; i++)
+-		bytes += fmt->fmt.pix_mp.plane_fmt[i].sizeimage;
++	if (V4L2_TYPE_IS_MULTIPLANAR(fmt->type)) {
++		for (unsigned int i = 0; i < fmt->fmt.pix_mp.num_planes; i++)
++			bytes += fmt->fmt.pix_mp.plane_fmt[i].sizeimage;
++	} else {
++		bytes = fmt->fmt.pix.sizeimage;
++	}
+ 
+ 	return bytes;
+ }
+@@ -359,8 +369,12 @@ static int capture_buffer_new(struct v4l2r_context *ctx)
+ 
+ 	buffer.type = ctx->capture_format.type;
+ 	buffer.index = buffers.index;
+-	buffer.length = VIDEO_MAX_PLANES;
+-	buffer.m.planes = planes;
++	if (V4L2_TYPE_IS_MULTIPLANAR(buffer.type)) {
++		buffer.length = VIDEO_MAX_PLANES;
++		buffer.m.planes = planes;
++	} else {
++		buffer.length = 1;
++	}
+ 	buffer.memory = V4L2_MEMORY_DMABUF;
+ 
+ 	if (ioctl(ctx->video_fd, VIDIOC_QUERYBUF, &buffer) < 0) {
+@@ -564,9 +578,9 @@ VAStatus v4l2r_context_bind_surface(struct v4l2r_context *ctx,
+ 		ctx->streaming = true;
+ 
+ 		v4l2r_log("using CAPTURE format %.4s (%ux%u)\n",
+-			  (const char *)&(uint32_t){ctx->capture_format.fmt.pix_mp.pixelformat},
+-			  ctx->capture_format.fmt.pix_mp.width,
+-			  ctx->capture_format.fmt.pix_mp.height);
++			  (const char *)&(uint32_t){v4l2r_format_pixelformat(&ctx->capture_format)},
++			  v4l2r_format_width(&ctx->capture_format),
++			  v4l2r_format_height(&ctx->capture_format));
+ 	}
+ 
+ 	return VA_STATUS_SUCCESS;
+@@ -651,11 +665,15 @@ VAStatus v4l2r_CreateContext(VADriverContextP va_ctx, VAConfigID config_id,
+ 		capabilities = (capability.capabilities & V4L2_CAP_DEVICE_CAPS) ?
+ 			       capability.device_caps : capability.capabilities;
+ 
+-		if (!(capabilities & V4L2_CAP_VIDEO_M2M_MPLANE))
++		if (capabilities & V4L2_CAP_VIDEO_M2M_MPLANE) {
++			ctx->output_format.type = V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE;
++			ctx->capture_format.type = V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE;
++		} else if (capabilities & V4L2_CAP_VIDEO_M2M) {
++			ctx->output_format.type = V4L2_BUF_TYPE_VIDEO_OUTPUT;
++			ctx->capture_format.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
++		} else {
+ 			goto next;
+-
+-		ctx->output_format.type = V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE;
+-		ctx->capture_format.type = V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE;
++		}
+ 
+ 		if (!try_output_format(ctx, ctx->codec->pixelformat))
+ 			goto next;
+diff --git a/src/decode.c b/src/decode.c
+index 990d946..b6efa15 100644
+--- a/src/decode.c
++++ b/src/decode.c
+@@ -102,7 +102,8 @@ static int queue_buffer(struct v4l2r_context *ctx, struct v4l2_buffer *buffer)
+ {
+ 	struct v4l2_plane planes[VIDEO_MAX_PLANES] = {0};
+ 
+-	if (V4L2_TYPE_IS_OUTPUT(buffer->type)) {
++	if (V4L2_TYPE_IS_OUTPUT(buffer->type) &&
++	    V4L2_TYPE_IS_MULTIPLANAR(buffer->type)) {
+ 		planes[0].bytesused = buffer->bytesused;
+ 		buffer->bytesused = 0;
+ 		buffer->length = 1;
+@@ -147,11 +148,17 @@ static int queue_capture_buffer(struct v4l2r_context *ctx, uint32_t index)
+ 	if (!surface->nb_planes)
+ 		return -EINVAL;
+ 
+-	buffer.length = surface->nb_planes;
+-	buffer.m.planes = planes;
+-	for (unsigned int i = 0; i < surface->nb_planes; i++) {
+-		planes[i].m.fd = surface->dmabuf_fd[i];
+-		planes[i].length = surface->plane_size[i];
++	if (V4L2_TYPE_IS_MULTIPLANAR(buffer.type)) {
++		buffer.length = surface->nb_planes;
++		buffer.m.planes = planes;
++		for (unsigned int i = 0; i < surface->nb_planes; i++) {
++			planes[i].m.fd = surface->dmabuf_fd[i];
++			planes[i].length = surface->plane_size[i];
++		}
++	} else {
++		/* Single-planar: one fd in m.fd, size in length. */
++		buffer.length = surface->plane_size[0];
++		buffer.m.fd = surface->dmabuf_fd[0];
+ 	}
+ 
+ 	return queue_buffer(ctx, &buffer);
+@@ -180,10 +187,13 @@ static int dequeue_buffer(struct v4l2r_context *ctx, enum v4l2_buf_type type)
+ 	struct v4l2_buffer buffer = {
+ 		.type = type,
+ 		.memory = V4L2_TYPE_IS_OUTPUT(type) ? V4L2_MEMORY_MMAP : V4L2_MEMORY_DMABUF,
+-		.length = 1,
+-		.m.planes = planes
+ 	};
+ 
++	if (V4L2_TYPE_IS_MULTIPLANAR(type)) {
++		buffer.length = 1;
++		buffer.m.planes = planes;
++	}
++
+ 	if (ioctl(ctx->video_fd, VIDIOC_DQBUF, &buffer) < 0)
+ 		return -errno;
+ 
+diff --git a/src/driver.c b/src/driver.c
+index 53fcf0c..c64548d 100644
+--- a/src/driver.c
++++ b/src/driver.c
+@@ -323,6 +323,8 @@ static bool video_device_is_request_decoder(const char *path,
+ 
+ 	if (capabilities & V4L2_CAP_VIDEO_M2M_MPLANE)
+ 		output_type = V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE;
++	else if (capabilities & V4L2_CAP_VIDEO_M2M)
++		output_type = V4L2_BUF_TYPE_VIDEO_OUTPUT;
+ 	else
+ 		goto fail;
+ 
+diff --git a/src/image.c b/src/image.c
+index e5141bb..f949012 100644
+--- a/src/image.c
++++ b/src/image.c
+@@ -203,6 +203,8 @@ VAStatus v4l2r_DeriveImage(VADriverContextP va_ctx, VASurfaceID surface_id,
+ 	buffer->nb_elements = 1;
+ 	buffer->data = surface->map[0];
+ 	buffer->derived = true;
++	buffer->dmabuf_fd = surface->dmabuf_fd[0] >= 0 ?
++		dup(surface->dmabuf_fd[0]) : -1;
+ 
+ 	image->buf = buffer_id;
+ 	image_object->image = *image;
+diff --git a/src/surface.c b/src/surface.c
+index af9a5eb..3e6e68d 100644
+--- a/src/surface.c
++++ b/src/surface.c
+@@ -268,9 +268,9 @@ static int try_format(int fd, struct v4l2_format *out,
+ 		      struct v4l2_format *cap)
+ {
+ 	struct v4l2_format o = *out, c = *cap;
+-	uint32_t width = c.fmt.pix_mp.width;
+-	uint32_t height = c.fmt.pix_mp.height;
+-	uint32_t pixelformat = c.fmt.pix_mp.pixelformat;
++	uint32_t width = v4l2r_format_width(&c);
++	uint32_t height = v4l2r_format_height(&c);
++	uint32_t pixelformat = v4l2r_format_pixelformat(&c);
+ 
+ 	if (ioctl(fd, VIDIOC_S_FMT, &o) < 0)
+ 		return 1;
+@@ -278,9 +278,9 @@ static int try_format(int fd, struct v4l2_format *out,
+ 	if (ioctl(fd, VIDIOC_S_FMT, &c) < 0)
+ 		return 1;
+ 
+-	if (c.fmt.pix_mp.pixelformat != pixelformat ||
+-	    c.fmt.pix_mp.width < width ||
+-	    c.fmt.pix_mp.height < height)
++	if (v4l2r_format_pixelformat(&c) != pixelformat ||
++	    v4l2r_format_width(&c) < width ||
++	    v4l2r_format_height(&c) < height)
+ 		return 1;
+ 
+ 	*out = o;
+@@ -298,24 +298,8 @@ static int surface_alloc(struct v4l2r_decoder *dec,
+ 	struct v4l2_create_buffers buffers;
+ 	struct v4l2_plane planes[VIDEO_MAX_PLANES] = {0};
+ 	struct v4l2_buffer buffer = {0};
+-	struct v4l2_format out = {
+-		.type = V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE,
+-		.fmt.pix_mp = {
+-			.num_planes = 1,
+-			.width = surface->va.width,
+-			.height = surface->va.height,
+-			.pixelformat = dec->pixelformats[0],
+-		}
+-	};
+-	struct v4l2_format cap = {
+-		.type = V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE,
+-		.fmt.pix_mp = {
+-			.num_planes = 1,
+-			.width = surface->va.width,
+-			.height = surface->va.height,
+-			.pixelformat = pixfmt,
+-		}
+-	};
++	struct v4l2_format out = {0};
++	struct v4l2_format cap = {0};
+ 	unsigned int capabilities;
+ 	bool mplane;
+ 	int fd, ret = 1;
+@@ -330,25 +314,33 @@ static int surface_alloc(struct v4l2r_decoder *dec,
+ 	capabilities = (capability.capabilities & V4L2_CAP_DEVICE_CAPS) ?
+ 		       capability.device_caps : capability.capabilities;
+ 	mplane = capabilities & V4L2_CAP_VIDEO_M2M_MPLANE;
+-
+-	if (!mplane)
++	if (!mplane && !(capabilities & V4L2_CAP_VIDEO_M2M))
+ 		goto done;
+ 
++	out.type = mplane ? V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE :
++			    V4L2_BUF_TYPE_VIDEO_OUTPUT;
++	cap.type = mplane ? V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE :
++			    V4L2_BUF_TYPE_VIDEO_CAPTURE;
++	v4l2r_format_set(&out, dec->pixelformats[0], surface->va.width,
++			 surface->va.height, 0);
++	v4l2r_format_set(&cap, pixfmt, surface->va.width, surface->va.height, 0);
++
+ 	if (!ctx_cap) {
+ 		if (try_format(fd, &out, &cap))
+ 			goto done;
+ 
+ 		/* make sure we have enough space */
+-		cap.fmt.pix_mp.plane_fmt[0].sizeimage +=
+-			cap.fmt.pix_mp.plane_fmt[0].sizeimage / 2;
++		v4l2r_format_set_sizeimage(&cap,
++			v4l2r_format_sizeimage(&cap) * 3 / 2);
+ 	} else {
+ 		cap = *ctx_cap;
+ 	}
+ 
+-	surface->width = cap.fmt.pix_mp.width;
+-	surface->height = cap.fmt.pix_mp.height;
+-	surface->pitch = cap.fmt.pix_mp.plane_fmt[0].bytesperline;
+-	surface->nb_planes = cap.fmt.pix_mp.num_planes;
++	surface->width = v4l2r_format_width(&cap);
++	surface->height = v4l2r_format_height(&cap);
++	surface->pitch = v4l2r_format_bytesperline(&cap);
++	surface->nb_planes = V4L2_TYPE_IS_MULTIPLANAR(cap.type) ?
++			     cap.fmt.pix_mp.num_planes : 1;
+ 
+ 	buffers = (struct v4l2_create_buffers) {
+ 		.count = 1,
+@@ -361,15 +353,22 @@ static int surface_alloc(struct v4l2r_decoder *dec,
+ 
+ 	buffer.type = cap.type;
+ 	buffer.index = buffers.index;
+-	buffer.length = VIDEO_MAX_PLANES;
+-	buffer.m.planes = planes;
++	if (V4L2_TYPE_IS_MULTIPLANAR(cap.type)) {
++		buffer.length = VIDEO_MAX_PLANES;
++		buffer.m.planes = planes;
++	}
+ 
+ 	if (ioctl(fd, VIDIOC_QUERYBUF, &buffer) < 0)
+ 		goto done;
+ 
+-	surface->nb_planes = buffer.length;
+-	for (unsigned int i = 0; i < buffer.length; i++)
+-		surface->plane_size[i] = buffer.m.planes[i].length;
++	if (V4L2_TYPE_IS_MULTIPLANAR(cap.type)) {
++		surface->nb_planes = buffer.length;
++		for (unsigned int i = 0; i < buffer.length; i++)
++			surface->plane_size[i] = buffer.m.planes[i].length;
++	} else {
++		surface->nb_planes = 1;
++		surface->plane_size[0] = buffer.length;
++	}
+ 
+ 	for (unsigned int i = 0; i < surface->nb_planes; i++) {
+ 		struct v4l2_exportbuffer exportbuffer = {
+@@ -396,7 +395,7 @@ static int surface_alloc(struct v4l2r_decoder *dec,
+ 		v4l2r_trace("allocated SURFACE 0x%x%s %.4s %.4s (%zu bytes, ~%llu MiB)\n",
+ 			    surface->id, ctx_cap ? "" : " (no ctx)",
+ 			    (const char *)&(uint32_t){pixfmt},
+-			    (const char *)&(uint32_t){out.fmt.pix_mp.pixelformat},
++			    (const char *)&(uint32_t){v4l2r_format_pixelformat(&out)},
+ 			    got, (unsigned long long)((uint64_t)got >> 20));
+ 	}
+ 
+@@ -420,7 +419,7 @@ static int surface_allocate(struct v4l2r_driver *drv,
+ 
+ 		dec = (struct v4l2r_decoder *)surface->ctx->decoder;
+ 		if (surface_alloc(dec, surface, cap,
+-				  cap->fmt.pix_mp.pixelformat))
++				  v4l2r_format_pixelformat(cap)))
+ 			return 1;
+ 	} else {
+ 		if (surface->va.fourcc == VA_FOURCC_P010)
+@@ -540,7 +539,10 @@ static VAStatus fill_prime_descriptor(const struct v4l2r_surface *view,
+ 	}
+ #endif
+ 
+-	if ((flags & VA_EXPORT_SURFACE_SEPARATE_LAYERS) && two_planes &&
++	/* SEPARATE_LAYERS is a hint, not a requirement: VLC 3 passes flags=0 and
++	 * then rejects any layer with more than one plane, so always hand out
++	 * one plane per layer. */
++	if (two_planes &&
+ 	    view->nb_planes == 1 &&
+ 	    (info->drm_format == DRM_FORMAT_NV12 ||
+ 	     info->drm_format == DRM_FORMAT_P010) &&
+diff --git a/src/v4l2_request.h b/src/v4l2_request.h
+index 7e06f24..39bf546 100644
+--- a/src/v4l2_request.h
++++ b/src/v4l2_request.h
+@@ -217,6 +217,9 @@ struct v4l2r_buffer {
+ 	/* Set for images derived from a surface: data points into the
+ 	 * CAPTURE buffer mapping and must not be freed. */
+ 	bool derived;
++	/* dup()ed dma-buf behind a derived image, handed out through
++	 * vaAcquireBufferHandle() (legacy DRM_PRIME interop), -1 if none. */
++	int dmabuf_fd;
+ };
+ 
+ struct v4l2r_image {
+@@ -344,6 +347,73 @@ static inline void *v4l2r_handles_get(struct v4l2r_driver *drv,
+  * DRM description used for dma-buf export. Mirrors the FFmpeg hwcontext
+  * table.
+  */
++
++/* --- single-planar / multiplanar abstraction ------------------------------
++ *
++ * Nothing in the V4L2 stateless API requires multiplanar queues: cedrus (and
++ * other older decoders) expose V4L2_CAP_VIDEO_M2M with the single-planar
++ * buffer types, newer ones V4L2_CAP_VIDEO_M2M_MPLANE. Everything below works
++ * with either; these helpers keep the format plumbing in one place.
++ */
++static inline uint32_t v4l2r_format_pixelformat(const struct v4l2_format *format)
++{
++	return V4L2_TYPE_IS_MULTIPLANAR(format->type) ?
++	       format->fmt.pix_mp.pixelformat : format->fmt.pix.pixelformat;
++}
++
++static inline uint32_t v4l2r_format_width(const struct v4l2_format *format)
++{
++	return V4L2_TYPE_IS_MULTIPLANAR(format->type) ?
++	       format->fmt.pix_mp.width : format->fmt.pix.width;
++}
++
++static inline uint32_t v4l2r_format_height(const struct v4l2_format *format)
++{
++	return V4L2_TYPE_IS_MULTIPLANAR(format->type) ?
++	       format->fmt.pix_mp.height : format->fmt.pix.height;
++}
++
++static inline uint32_t v4l2r_format_bytesperline(const struct v4l2_format *format)
++{
++	return V4L2_TYPE_IS_MULTIPLANAR(format->type) ?
++	       format->fmt.pix_mp.plane_fmt[0].bytesperline :
++	       format->fmt.pix.bytesperline;
++}
++
++static inline uint32_t v4l2r_format_sizeimage(const struct v4l2_format *format)
++{
++	return V4L2_TYPE_IS_MULTIPLANAR(format->type) ?
++	       format->fmt.pix_mp.plane_fmt[0].sizeimage :
++	       format->fmt.pix.sizeimage;
++}
++
++static inline void v4l2r_format_set(struct v4l2_format *format,
++				    uint32_t pixelformat, uint32_t width,
++				    uint32_t height, uint32_t sizeimage)
++{
++	if (V4L2_TYPE_IS_MULTIPLANAR(format->type)) {
++		format->fmt.pix_mp.width = width;
++		format->fmt.pix_mp.height = height;
++		format->fmt.pix_mp.pixelformat = pixelformat;
++		format->fmt.pix_mp.num_planes = 1;
++		format->fmt.pix_mp.plane_fmt[0].sizeimage = sizeimage;
++	} else {
++		format->fmt.pix.width = width;
++		format->fmt.pix.height = height;
++		format->fmt.pix.pixelformat = pixelformat;
++		format->fmt.pix.sizeimage = sizeimage;
++	}
++}
++
++static inline void v4l2r_format_set_sizeimage(struct v4l2_format *format,
++					      uint32_t sizeimage)
++{
++	if (V4L2_TYPE_IS_MULTIPLANAR(format->type))
++		format->fmt.pix_mp.plane_fmt[0].sizeimage = sizeimage;
++	else
++		format->fmt.pix.sizeimage = sizeimage;
++}
++
+ struct v4l2r_format_info {
+ 	uint32_t pixelformat;
+ 	uint32_t drm_format;

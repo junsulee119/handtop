@@ -3,8 +3,8 @@
 ## Status
 
 **Working.** The Cedrus VPU decodes H.264, HEVC, MPEG-2 and VP8 in the system
-FFmpeg and mpv, zero-copy by default. Moonlight already did (it links its own
-patched FFmpeg).
+FFmpeg and mpv, zero-copy by default, and in Chromium and VLC through VA-API.
+Moonlight already did (it links its own patched FFmpeg).
 
 Debian trixie's FFmpeg 7.1 ships only the mainline `drm` hwaccel, which does
 not work against Cedrus here, so `build/04c-v4l2-ffmpeg.sh` cross-builds
@@ -159,6 +159,99 @@ it embeds its own FFmpeg and never goes through mpv. The `ff_get_format` change
 also looks like an upstream FFmpeg fix; it is kept as a local patch until that
 is settled upstream.
 
+## VA-API: Chromium and VLC on the VPU
+
+FFmpeg's `v4l2request` hwaccels serve mpv, ffplay and the `ffmpeg` CLI. Browsers
+and VLC do not use FFmpeg's decoding API at all: they speak **VA-API**. Nothing
+in Debian's VA-API stack reaches the stateless V4L2 request API, so those two
+decode on the CPU until something bridges them.
+
+`libva-v4l2_request` is that bridge — a VA-API *driver* that talks to the
+kernel's V4L2 request API directly (so it is independent of the FFmpeg build
+above; one can be updated without the other).
+
+What ships:
+
+- `build/04e-va-api.sh` → `tools/build-va-v4l2request.sh --ship` builds
+  `sofus13/libva-v4l2_request`, pinned to `f54d8d2` (master, "one CAPTURE buffer
+  per surface, queued with `V4L2_MEMORY_DMABUF`"), and installs
+  `v4l2_request_drv_video.so` into `/usr/lib/aarch64-linux-gnu/dri/`.
+- `build/patches/libva-v4l2-request-fixes.patch`, three fixes:
+  1. **single-planar support** — master dropped it in `4cb4bde` because its
+     author's SoCs are multiplanar; cedrus exposes `V4L2_CAP_VIDEO_M2M` only, so
+     master answers `no V4L2 Request API decoder found`. (The alternative,
+     converting cedrus to multiplanar, is a ~300–400 line change to a shared
+     kernel interface and would have to be re-validated for every consumer.)
+  2. **`vaAcquireBufferHandle()`** was a stub; VLC 3 probes its dmabuf path with
+     it before accepting the GL converter and otherwise falls back to software
+     without an error.
+  3. **NV12/P010 exported as one plane per layer** even when the client passes
+     `flags = 0`: VLC 3 rejects a composite layer, which shows as a flat green
+     window.
+- `LIBVA_DRIVER_NAME=v4l2_request` in `/etc/profile.d/zz-rg35xxh-session.sh`.
+  libva has no usable default driver on arm64, so a client only finds this one
+  when asked by name; exporting it at session start means every app launched
+  from the desktop inherits it. This does change a default: Chromium's VA-API
+  decoder now finds a driver, so it decodes on the VPU with no flags. mpv is
+  unaffected (it uses the FFmpeg path above), and a client that wants a
+  different VA driver can still override the variable for itself.
+
+Enabling it in an app:
+
+- **Chromium** needs nothing beyond the session variable.
+- **VLC** is not installed by the image; `apt install vlc` and run it. It needs
+  XWayland (`DISPLAY=:0`) because VLC 3's Wayland window modules predate stable
+  xdg-shell, which labwc does not offer.
+
+Verifying (device):
+
+- `DEVICE=user@host tools/test-va-v4l2request.sh install|info` pushes a freshly
+  built driver and checks the profiles (or run `vainfo` by hand with
+  `LIBVA_DRIVER_NAME=v4l2_request` and look for the H264/HEVC VLD profiles).
+- VLC logs `Using v4l2-request for hardware decoding` and
+  `libva-v4l2request: decoding h264 via /dev/video0 [cedrus]`.
+
+### Performance: hardware vs software, VLC vs mpv
+
+The same 1080p24 H.264 file, 12 s sampled after the first 7 s, on the panel
+(640×480), so only the decode and its upload differ. CPU is the process tree
+over that window, one core = 100 %; the VPU is a separate block and does not
+appear in it.
+
+| player | decode | display | CPU (one core) | RAM |
+|---|---|---|---|---|
+| VLC `--avcodec-hw=vaapi` | **VPU (VA-API)** | dmabuf → EGL, zero-copy | **11 %** | 142 MB |
+| mpv `--hwdec=drm` (shipped default) | **VPU (FFmpeg)** | dmabuf → GL, zero-copy | **18 %** | 129 MB |
+| Chromium + this driver | **VPU (VA-API)** | dmabuf → GL | 154–174 % | ~1.0 GB |
+| VLC `--vout=xcb_x11` | VPU, copied to RAM | VAOP → I420 | 93 % | 85 MB |
+| mpv `--hwdec=v4l2request-copy` | VPU, copied to RAM | CPU download | 114 % | 144 MB |
+| Chromium, no driver | CPU | — | 251–260 % | 0.9–1.1 GB |
+| mpv `--hwdec=no` | CPU | — | 152 % | 186 MB |
+| VLC `--avcodec-hw=none` | CPU | — | 227 % | 241 MB |
+
+HEVC, same file size: VLC zero-copy 22 % against 207 % software; mpv zero-copy
+about 75 % at 36 fps against ~266 % software.
+
+What the label says:
+
+- **Hardware is 8–20× cheaper in CPU, not faster.** Decode-only `ffmpeg` is
+  slower on the VPU than on the CPU (27 vs 57 fps); the win is the CPU time,
+  which buys real-time playback with subtitles and thermal headroom.
+- **VLC is the lightest of the three** (11 %), because its GL surface does
+  less than mpv's `vo=gpu`; mpv is still the better player (subtitle handling,
+  OSD, no XWayland).
+- **Copy paths sit in between**: 93–114 %, i.e. still half of software, and
+  they need no dmabuf interop — useful to tell "the driver is fine, the import
+  is not" apart from "the decode is not happening".
+- **Chromium is the odd one out**: its own layout/compositing dominates, so
+  the VPU removes the decode but the browser stays heavy.
+- A flat green or blue picture is not a decode failure: see "The blue video"
+  above — the decoder is engaged while it happens, which is why "hwdec is on"
+  is not a test.
+
+Limits: Cedrus has no VP9 or AV1, so sites that serve those (YouTube among
+them) stay software; Firefox does not engage its VA-API decoder on this device.
+
 ## How it works
 
 | Piece | What | Where |
@@ -177,9 +270,10 @@ Players:
   (`hwdec=auto-safe` → `drm` in `/etc/mpv/mpv.conf`), copy paths as fallback
   (`v4l2request-copy`, `drm-copy`), and `ffmpeg -hwaccel v4l2request` on the CLI.
   Throughput caveats above. AV1 is software (dav1d) on purpose: no Cedrus AV1.
-- Not covered: ffplay decodes in software only, VLC has no V4L2 code path at
-  all, and Chromium cannot use the V4L2 stateless decoder (its Linux decoder only
-  offers the GL output path, which does not accept these dmabufs).
+- **Chromium and VLC** — through VA-API, not FFmpeg (see *VA-API* above).
+  Chromium needs no flags; VLC is not installed by the image and needs XWayland.
+- Not covered: ffplay decodes in software only, and Firefox does not engage its
+  VA-API decoder on this device.
 
 ## Source
 
