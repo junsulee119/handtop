@@ -1,7 +1,7 @@
 [Unit]
 Description=Handtop Switch controller mode (handheld as a wired Nintendo Switch controller over USB)
 # One external controller connection at a time.
-Conflicts=rg35xxh-btpad.service rg35xxh-usbpad.service rg35xxh-switchbt.service
+Conflicts=rg35xxh-btpad.service rg35xxh-usbpad.service rg35xxh-switchbt.service rg35xxh-btclassic.service
 
 [Service]
 Type=simple

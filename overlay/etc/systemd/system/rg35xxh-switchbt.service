@@ -5,7 +5,7 @@ Description=Handtop Switch controller mode over Bluetooth (handheld as a Pro Con
 Wants=bluetooth.service
 After=bluetooth.service
 # One external controller connection at a time.
-Conflicts=rg35xxh-btpad.service rg35xxh-usbpad.service rg35xxh-switchpad.service
+Conflicts=rg35xxh-btpad.service rg35xxh-usbpad.service rg35xxh-switchpad.service rg35xxh-btclassic.service
 
 [Service]
 Type=simple

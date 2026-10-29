@@ -31,6 +31,23 @@ Tested on Windows 11 (2026-10-21): driver, all controls, vibration. Android and 
 
 Fallback: `RG35XXH_BTPAD_PROFILE=generic` in the service's environment (`systemctl edit rg35xxh-btpad`) gives the v0.2.0 behaviour, a generic BLE gamepad (buttons 1–10, hat, X/Y, Z/Rz, Rx/Ry for the triggers) with no vibration; re-pair after switching.
 
+### Better compatibility (classic Bluetooth)
+
+A switch in the Bluetooth card, **"Xbox: better compatibility"**, off by default (remembered in `~/.config/rg35xxh/external-controller`, `xbox-bt = le | classic`). With it on, **Bluetooth → Xbox** presents an **Xbox One S controller** (model 1708, `045e:02fd`) over **classic Bluetooth** instead of the Series X|S controller over Bluetooth LE. Switching it on shows a pop-up: it is a separate pairing on the host (remove "Handtop (Xbox)" there and add it again), and Bluetooth devices connected to the handheld disconnect while it runs (the app lists them first, as for Bluetooth: Switch).
+
+Why: some PC Bluetooth adapters pair classic HID gamepads (DualShock 4, 8BitDo, the Xbox One S controller) fine but fail the Bluetooth LE pairing BT Controller mode needs. Found 2026-10-29 with a fake "CSR 5.0" clone dongle (`USB\VID_0A12&PID_0001`, REV 8891, claims LMP 9 / Bluetooth 5.0): Windows found "Handtop Gamepad" but every pairing ended in "try connecting your device again", while the user's own DualShock 4, 8BitDo SF30 and Xbox One S controllers worked with it. All three are classic Bluetooth; the Series X|S controller this mode copies is Bluetooth LE.
+
+How (`rg35xxh-switchbt --xbox`, `rg35xxh-btclassic.service`): the classic-Bluetooth machinery of Switch Controller mode over Bluetooth (bluetoothd restarted with `Class = 0x000508`, `DeviceID = usb:045e:02fd:0408` and without its input / hostname plugins, HID record, our own L2CAP channels, just-works pairing agent, reconnect to the last host in `/var/lib/rg35xxh/btclassic-host`), with:
+- the Xbox One S controller's classic-Bluetooth HID report descriptor, 334 bytes (Mystfit/ESP32-BLE-CompositeHID, MIT, from DJm00n/ControllersInfo's dump; byte-identical to the dump in xpadneo's docs);
+- input report 1 (16 bytes: sticks u16, triggers 10 bit, hat, 15 buttons, View as AC Back) on every change, at most one per 8 ms;
+- vibration from output report 3 (same layout as BT Controller mode's report 3), through the input daemon's motor gate;
+- battery in report 4, the Xbox battery byte (online, charging, rechargeable pack, level 0-3: hosts show only four steps). A first version sent the raw percentage; iOS read 84 % as 70 %.
+- Name "Handtop (Xbox)"; the input daemon sees `hello bt` (BT Controller mode, F not forwarded); status screen as in BT Controller mode.
+
+Both Xbox options use the handheld's one Bluetooth address, so a host keeps only one of them: switching the option means pairing again there.
+
+Tested 2026-10-29 (DDR4): pairs with an iPhone (iOS treats it as an Xbox controller), Minecraft with all buttons working, automatic reconnection after restarting the mode. Not yet tested: a Windows PC (the case it is for), vibration.
+
 ### Trade-off: classic Bluetooth pauses
 
 While BT Controller mode is on, the handheld's Bluetooth is **BLE only**. Accessories connected *to* the handheld over **BLE** keep working; **classic Bluetooth** accessories (many keyboards and mice, older Xbox One controllers) pause and come back when the mode ends.

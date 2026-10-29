@@ -39,6 +39,14 @@ the screen: JSON lines on /run/rg35xxh-extpad-status.sock (transport "switch-bt"
 Started by the External Controller app as rg35xxh-switchbt.service; stops when the input daemon
 disconnects (Select + Start + L1 + R1) or never connects (60 s). Runs as root.
 Never asks for sniff mode itself (the kernel doesn't by default; a real pad only accepts it).
+
+--xbox (rg35xxh-btclassic.service, "Better compatibility" for Bluetooth: Xbox in the app): the same
+classic-Bluetooth machinery (identity restart, SDP, own L2CAP channels, pairing agent, reconnect)
+but presenting an Xbox One S controller (model 1708, 045e:02fd, the classic-Bluetooth one) instead
+of a Pro Controller: its HID report descriptor, input report 1 (16 bytes) on every change, the
+Xbox button in report 2, battery in report 4, vibration from output report 3. For PCs whose
+Bluetooth handles classic HID gamepads (DualShock 4, Xbox One S) but not the Bluetooth LE
+pairing BT Controller mode needs (cheap CSR-clone dongles, 2026-10-29). Name "Handtop (Xbox)".
 """
 import glob
 import grp
@@ -67,14 +75,15 @@ DEVICE_IFACE = "org.bluez.Device1"
 AGENT_IFACE = "org.bluez.Agent1"
 PROFILE_IFACE = "org.bluez.Profile1"
 
-NAME = "Pro Controller"                     # exact: the Switch looks for it
+XBOX = "--xbox" in sys.argv[1:]             # Xbox One S over classic Bluetooth instead (see the top)
+NAME = "Handtop (Xbox)" if XBOX else "Pro Controller"     # Pro Controller: exact, the Switch looks for it
 CLASS = "0x000508"                          # peripheral, gamepad (+ 0x2000 while limited discoverable)
-DEVICE_ID = "usb:057e:2009:0001"            # Nintendo, Pro Controller
+DEVICE_ID = "usb:045e:02fd:0408" if XBOX else "usb:057e:2009:0001"   # Xbox One S (1708) / Pro Controller
 HID_UUID = "00001124-0000-1000-8000-00805f9b34fb"
 PSM_CTRL, PSM_ITR = 17, 19
 SOCKET = "/run/rg35xxh-extpad.sock"
 STATUS_SOCKET = "/run/rg35xxh-extpad-status.sock"
-LAST_HOST = "/var/lib/rg35xxh/switchbt-host"       # address of the last connected Switch
+LAST_HOST = "/var/lib/rg35xxh/" + ("btclassic-host" if XBOX else "switchbt-host")   # last connected host
 EVENT = struct.Struct("<HHi")
 BT_CONF = "/etc/bluetooth/main.conf"
 RUN_DIR = "/run/rg35xxh-switchbt"
@@ -97,6 +106,27 @@ REPORT_DESC = bytes([
     0xC0,
 ])
 
+# --xbox: the Xbox One S controller's (model 1708) classic-Bluetooth report descriptor, 334 bytes.
+# Source: Mystfit/ESP32-BLE-CompositeHID, XboxDescriptors.h, XboxOneS_1708_HIDDescriptor (MIT;
+# from DJm00n/ControllersInfo's dump); identical to the dump in xpadneo's docs. Report 1: input,
+# 16 bytes (X Y Z Rz u16, brake + accelerator 10 bit, hat 1-8 / 0 = centred, 15 buttons, AC Back
+# = View); report 2: input, AC Home (Xbox button); report 3: output, vibration (enable bits, 4
+# magnitudes 0-100, duration, delay, loops; same as BT Controller mode's); report 4: battery.
+XBOX_REPORT_DESC = bytes.fromhex(
+    "05010905a10185010901a10009300931150027ffff0000950275108102c00901a10009320935150027ffff00009502"
+    "75108102c0050209c5150026ff039501750a810215002500750695018103050209c4150026ff039501750a81021500"
+    "25007506950181030501093915012508350046 3b016614007504950181427504950115002500350045006500810305"
+    "091901290f150025017501950f810215002500750195018103050c0a24021500250195017501810215002500750795"
+    "018103050c09018502a101050c0a23021500250195017501810215002500750795018103c0050f09218503a1020997"
+    "15002501750495019102150025007504950191030970150025647508950491020950660110550e150026ff00750895"
+    "01910209a7150026ff0075089501910265005500097c150026ff00750895019102c0050609208504150026ff007508"
+    "95018102c0".replace(" ", ""))
+assert len(XBOX_REPORT_DESC) == 334
+XBOX_BUTTONS = {E.BTN_A: 0x0001, E.BTN_B: 0x0002, E.BTN_X: 0x0008, E.BTN_Y: 0x0010, E.BTN_TL: 0x0040,
+                E.BTN_TR: 0x0080, E.BTN_START: 0x0800, E.BTN_THUMBL: 0x2000, E.BTN_THUMBR: 0x4000}
+XBOX_HAT = {(0, -1): 1, (1, -1): 2, (1, 0): 3, (1, 1): 4, (0, 1): 5, (-1, 1): 6, (-1, 0): 7, (-1, -1): 8}
+XBOX_MIN_MS = 8                             # input reports: on change, at most one per 8 ms
+
 SDP_RECORD = """<?xml version="1.0" encoding="UTF-8" ?>
 <record>
   <attribute id="0x0001"><sequence><uuid value="0x1124" /></sequence></attribute>
@@ -113,9 +143,9 @@ SDP_RECORD = """<?xml version="1.0" encoding="UTF-8" ?>
     <sequence><uuid value="0x0100" /><uint16 value="0x0013" /></sequence>
     <sequence><uuid value="0x0011" /></sequence>
   </sequence></sequence></attribute>
-  <attribute id="0x0100"><text value="Wireless Gamepad" /></attribute>
+  <attribute id="0x0100"><text value="%s" /></attribute>
   <attribute id="0x0101"><text value="Gamepad" /></attribute>
-  <attribute id="0x0102"><text value="Nintendo" /></attribute>
+  <attribute id="0x0102"><text value="%s" /></attribute>
   <attribute id="0x0201"><uint16 value="0x0111" /></attribute>
   <attribute id="0x0202"><uint8 value="0x08" /></attribute>
   <attribute id="0x0203"><uint8 value="0x00" /></attribute>
@@ -132,7 +162,8 @@ SDP_RECORD = """<?xml version="1.0" encoding="UTF-8" ?>
   <attribute id="0x020f"><uint16 value="0xffff" /></attribute>
   <attribute id="0x0210"><uint16 value="0xffff" /></attribute>
 </record>
-""" % REPORT_DESC.hex()
+""" % (("Xbox Wireless Controller", "Microsoft", XBOX_REPORT_DESC.hex()) if XBOX
+       else ("Wireless Gamepad", "Nintendo", REPORT_DESC.hex()))
 
 # Button bits of the 0x30 / 0x21 reports. The daemon sends Xbox-position codes (core.PAD_BUTTONS):
 # BTN_A = bottom (Switch B), BTN_B = right (A), BTN_X = left (Y), BTN_Y = top (X).
@@ -249,7 +280,7 @@ def unix_server(path, kind):
 class Status:
     def __init__(self):
         self.clients = []
-        self.st = {"transport": "switch-bt", "state": "pairing", "device": None, "rssi": None,
+        self.st = {"transport": "bt" if XBOX else "switch-bt", "state": "pairing", "device": None, "rssi": None,
                    "rate": 0, "report": [0, 0, 8, 128, 128, 128, 128, 0, 0]}
         self.pending = False
         self.server = unix_server(STATUS_SOCKET, socket.SOCK_STREAM)
@@ -308,6 +339,7 @@ class Pad:
         self.conn = None
         self.rumble_want = self.rumble_sent = (0, 0)
         self.rumble_scheduled = False
+        self.on_change = None             # --xbox: the link sends a report on every change
         self.server = unix_server(SOCKET, socket.SOCK_SEQPACKET)
         GLib.io_add_watch(self.server.fileno(), GLib.IO_IN, self.on_accept)
 
@@ -375,9 +407,9 @@ class Pad:
             conn.close()
             return True
         self.conn = conn
-        conn.send(b"hello switch-bt")
+        conn.send(b"hello bt" if XBOX else b"hello switch-bt")
         GLib.io_add_watch(conn.fileno(), GLib.IO_IN | GLib.IO_HUP | GLib.IO_ERR, self.on_events)
-        log("input daemon connected (Switch Controller mode, Bluetooth)")
+        log("input daemon connected (%s)" % ("BT Controller mode, better compatibility" if XBOX else "Switch Controller mode, Bluetooth"))
         return True
 
     def on_events(self, fd, cond):
@@ -405,7 +437,22 @@ class Pad:
             elif code in self.axes:
                 self.axes[code] = value
         self.status.report(self.screen_report())
+        if self.on_change:
+            self.on_change()
         return True
+
+    def xbox_report(self):
+        """--xbox: input report 1 of the Xbox One S controller (16 bytes, little-endian)."""
+        b = 0
+        for code in self.buttons:
+            b |= XBOX_BUTTONS.get(code, 0)
+        a = self.axes
+        stick = lambda v: max(-32768, min(32767, v)) + 32768                # 0..65535, centre 32768
+        trig = lambda v: max(0, min(255, v)) * 1023 // 255                  # 10 bit
+        return struct.pack("<HHHHHHBHB", stick(a[E.ABS_X]), stick(a[E.ABS_Y]), stick(a[E.ABS_RX]),
+                           stick(a[E.ABS_RY]), trig(a[E.ABS_Z]), trig(a[E.ABS_RZ]),
+                           XBOX_HAT.get(tuple(self.hat), 0), b & 0x7FFF,
+                           int(E.BTN_SELECT in self.buttons))               # AC Back = View
 
     # ---- vibration from the Switch, to the daemon's motor gate (latest value, <= RUMBLE_HZ/s)
     def rumble(self, big, small):
@@ -536,8 +583,57 @@ class Link:
         self.vibration = False
         self.lights = None
         self.seen = set()
-        self.stream = GLib.timeout_add(SIMPLE_MS, self.tick)
+        if XBOX:
+            self.xbox_last = None
+            self.xbox_sent_at = 0.0
+            self.xbox_pending = False
+            self.pad.on_change = self.xbox_changed
+            self.send_itr(bytes([0xA1, 0x04, battery_level()]))
+            self.xbox_changed()
+            self.stream = GLib.timeout_add_seconds(60, lambda: (self.send_itr(
+                bytes([0xA1, 0x04, battery_level()])), True)[1])
+        else:
+            self.stream = GLib.timeout_add(SIMPLE_MS, self.tick)
         self.on_connected(self.peer)
+
+    # ---- --xbox: report 1 on every change (at most one per XBOX_MIN_MS, the newest state)
+    def xbox_changed(self):
+        if self.xbox_pending or not self.itr:
+            return
+        self.xbox_pending = True
+        wait = max(0.0, self.xbox_sent_at + XBOX_MIN_MS / 1000 - time.monotonic())
+        GLib.timeout_add(int(wait * 1000), self._xbox_send)
+
+    def _xbox_send(self):
+        self.xbox_pending = False
+        r = self.pad.xbox_report()
+        if r != self.xbox_last:
+            self.xbox_last = r
+            self.xbox_sent_at = time.monotonic()
+            self.send_itr(b"\xa1\x01" + r)
+        return False
+
+    def xbox_rumble(self, data):
+        """Output report 3 (as in BT Controller mode): enable bits, magnitudes 0-100 (left
+        trigger, right trigger, strong, weak), duration and delay in 10 ms, loop count."""
+        if len(data) < 8:
+            return
+        enable, lt, rt, strong, weak, duration, _delay, loops = data[:8]
+        if not enable & 0x0F:
+            lt = rt = strong = weak = 0
+        big = min(100, max(lt, rt, strong)) * 255 // 100
+        small = min(100, weak) * 255 // 100
+        if getattr(self, "rumble_stop", None):
+            GLib.source_remove(self.rumble_stop)
+            self.rumble_stop = None
+        if (big or small) and duration:          # the effect ends by itself after duration x loops
+            self.rumble_stop = GLib.timeout_add(duration * 10 * (loops + 1), self._xbox_rumble_end)
+        self.pad.rumble(big, small)
+
+    def _xbox_rumble_end(self):
+        self.rumble_stop = None
+        self.pad.rumble(0, 0)
+        return False
 
     def drop(self, why):
         if not (self.ctrl or self.itr):
@@ -558,6 +654,10 @@ class Link:
         peer = self.peer
         self.ctrl = self.itr = self.peer = None
         self.mode = None
+        self.pad.on_change = None
+        if getattr(self, "rumble_stop", None):
+            GLib.source_remove(self.rumble_stop)
+            self.rumble_stop = None
         self.pad.rumble(0, 0)
         self.on_lost(peer)
 
@@ -599,6 +699,10 @@ class Link:
             self.send_ctrl(b"\x03")
 
     def on_output(self, r):
+        if XBOX:
+            if r[0] == 0x03:
+                self.xbox_rumble(r[1:])
+            return
         if r[0] in (0x01, 0x10) and len(r) >= 10 and self.vibration:
             v = rumble_strength(r[2:10])
             self.pad.rumble(v, v)
@@ -681,6 +785,26 @@ class Link:
 
 
 _battery = [0, 0.0]
+
+
+def battery_level():
+    """--xbox report 4, the Xbox One S battery byte (bit layout from xpadneo's docs): bit 7 online,
+    bit 4 charging, bits 3-2 power source (10 = rechargeable pack), bits 1-0 level (0 critical,
+    1 low, 2 medium, 3 full). Only four levels: a host shows e.g. 70 % for "medium" (seen on iOS
+    when this sent the percentage as a raw 0-255 value)."""
+    try:
+        with open("/sys/class/power_supply/battery/capacity") as f:
+            cap = int(f.read().strip())
+    except (OSError, ValueError):
+        cap = 100
+    level = 3 if cap > 70 else 2 if cap > 40 else 1 if cap > 10 else 0
+    charging = False
+    try:
+        with open("/sys/class/power_supply/axp20x-usb/online") as f:
+            charging = f.read().strip() == "1" and cap < 100
+    except OSError:
+        pass
+    return 0x80 | (0x10 if charging else 0) | (0b10 << 2) | level
 
 
 def battery_byte():
@@ -766,7 +890,7 @@ def identity(on):
                     "# set the class from the chassis). Removed when it ends.\n"
                     f"[Service]\nExecStart=\nExecStart={BLUETOOTHD} -f {RUN_DIR}/main.conf "
                     "--noplugin=input,hostname\n")
-        log("bluetoothd: Pro Controller identity", DEVICE_ID, CLASS)
+        log("bluetoothd:", NAME, "identity", DEVICE_ID, CLASS)
     else:
         if not os.path.exists(DROPIN):
             return False

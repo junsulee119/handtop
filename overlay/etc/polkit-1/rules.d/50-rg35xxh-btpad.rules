@@ -1,12 +1,13 @@
 // RG35XX H: the desktop user (group "sudo") may start/stop External Controller mode
 // (Bluetooth: rg35xxh-btpad, USB cable: rg35xxh-usbpad, Switch: rg35xxh-switchpad over USB,
-// rg35xxh-switchbt over Bluetooth) without a password.
+// rg35xxh-switchbt over Bluetooth; rg35xxh-btclassic: Xbox over classic Bluetooth) without a password.
 polkit.addRule(function(action, subject) {
     if (action.id == "org.freedesktop.systemd1.manage-units" &&
         (action.lookup("unit") == "rg35xxh-btpad.service" ||
          action.lookup("unit") == "rg35xxh-usbpad.service" ||
          action.lookup("unit") == "rg35xxh-switchpad.service" ||
-         action.lookup("unit") == "rg35xxh-switchbt.service") &&
+         action.lookup("unit") == "rg35xxh-switchbt.service" ||
+         action.lookup("unit") == "rg35xxh-btclassic.service") &&
         (action.lookup("verb") == "start" || action.lookup("verb") == "stop") &&
         subject.isInGroup("sudo")) {
         return polkit.Result.YES;

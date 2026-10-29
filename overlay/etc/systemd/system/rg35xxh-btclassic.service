@@ -1,0 +1,16 @@
+[Unit]
+Description=Handtop BT Controller mode, better compatibility (Xbox One S controller over classic Bluetooth)
+# Wants, not Requires: the service restarts bluetoothd itself (controller identity),
+# which must not stop it.
+Wants=bluetooth.service
+After=bluetooth.service
+# One external controller connection at a time.
+Conflicts=rg35xxh-btpad.service rg35xxh-usbpad.service rg35xxh-switchpad.service rg35xxh-switchbt.service
+
+[Service]
+Type=simple
+ExecStart=/usr/local/sbin/rg35xxh-switchbt --xbox
+# Put bluetoothd's own identity (and its plugins) back even if the service crashed.
+ExecStopPost=/usr/local/sbin/rg35xxh-switchbt --restore
+# Stops by itself when the mode is left; not started at boot.
+Restart=no

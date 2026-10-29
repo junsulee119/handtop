@@ -86,6 +86,8 @@ Use the handheld as a game controller for your PC or phone: **Apps → External 
 
 **Bluetooth: Switch** (experimental): the handheld pairs with a Switch as a Pro Controller (Controllers → Change Grip/Order the first time), with vibration and the same F = Home / F + Select = Capture. Bluetooth devices connected to the handheld disconnect while it is on (the app asks first). Tested with a PC (Ryujinx), not on a real Switch yet.
 
+**Xbox: better compatibility** (switch in the Bluetooth card): if your PC's Bluetooth won't pair with the handheld but works with other controllers, this makes it an Xbox One S controller over classic Bluetooth instead (pair it again).
+
 **Battery saver** (switch in the app, off by default): the handheld's screen turns off 30 s after connecting; Vol+/- or Power shows it for 10 s.
 
 ## Good to know
