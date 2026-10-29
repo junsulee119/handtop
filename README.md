@@ -93,7 +93,7 @@ Use the handheld as a game controller for your PC or phone: **Apps → External 
 - The device has 1 GB RAM; for heavy websites and video, Moonlight to a PC works best.
 - Hardware video decoding (H.264/HEVC) is used by Moonlight; other players decode on the CPU.
 - For streaming, 5 GHz Wi-Fi gives the smoothest result.
-- Bluetooth devices pair from the tray (Blueman); USB keyboards and mice work through the host port.
+- Bluetooth devices pair from the tray (Blueman). USB keyboards, mice and hubs go in the **left** USB-C port (the host port); the right one is for charging and the External Controller cable modes. A hub drawing a lot of power, or one waiting for a USB-C power-delivery handshake, may not start.
 - If a stick drifts, Apps → **Re-center sticks** recalibrates it.
 - Sleep uses about 5–6 % battery per hour.
 

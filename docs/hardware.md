@@ -23,7 +23,7 @@ Sources: decompiled `sun50i-h700-anbernic-rg35xx-h.dtb` from ROCKNIX 20260901, l
 
 - **No video-engine node** in the ROCKNIX DTB → we add it with an overlay and build the Cedrus driver ourselves; hardware decoding works (see `video-decode.md`). Upstream DT support lands in 7.4.
 - **HDMI enabled** (`hdmi@6000000` okay); ROCKNIX's HDMI patch is merged upstream in 7.2.
-- **USB:** OTG controller (`dr_mode = "otg"`) plus host controllers enabled. Keyboard/hub goes on the host port, charging on the other.
+- **USB:** OTG controller (`dr_mode = "otg"`) plus host controllers enabled. Keyboard/hub goes on the host port (left, OTG1: EHCI/OHCI, host only), charging on the other. The right port (OTG2/DC, MUSB) stays a device (`mode` = `b_idle`): its role comes from an ID GPIO (`usb0_id_det-gpios`), and a USB-C plug has no ID pin, so a hub there is never seen (checked 2026-10-29: a hub with keyboard and mouse works on the left port only). Forcing it to host would fight with charging on the same port; not done.
 - **Sleep is disabled by ROCKNIX** on H700 ("Sleep is currently broken") — see [apps/power-menu.md](apps/power-menu.md).
 
 ## Input device
