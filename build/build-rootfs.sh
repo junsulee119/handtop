@@ -9,6 +9,7 @@ bash ./03-debootstrap.sh
 bash ./04-install-packages.sh
 bash ./04b-nwg-drawer.sh
 bash ./04c-v4l2-ffmpeg.sh
+bash ./04e-va-api.sh
 bash ./05-configure-base.sh
 bash ./06-hardware.sh
 bash ./06b-cedrus.sh
