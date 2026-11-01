@@ -193,8 +193,10 @@ What ships:
   when asked by name; exporting it at session start means every app launched
   from the desktop inherits it. This does change a default: Chromium's VA-API
   decoder now finds a driver, so it decodes on the VPU with no flags. mpv is
-  unaffected (it uses the FFmpeg path above), and a client that wants a
-  different VA driver can still override the variable for itself.
+  affected too: with this driver present `hwdec=auto-safe` lands on `vaapi`
+  rather than `drm` for H.264 and HEVC (same zero-copy dmabuf path, no
+  dropped frames measured). `--hwdec=drm` still works, and a client that wants
+  a different VA driver can override the variable for itself.
 
 Enabling it in an app:
 
@@ -261,13 +263,13 @@ them) stay software; Firefox does not engage its VA-API decoder on this device.
 | Device tree | ROCKNIX DTB + overlay adding the video-engine node, for both screen panels | `/boot/firmware/dtb-regular.img` / `dtb-rev6.img`, the matching one copied to `dtb.img` at boot ([services/panel.md](services/panel.md)); original kept as `dtb-rocknix.img` |
 | Memory | Decoder buffers come from CMA: `cma=256M` on the kernel command line (ROCKNIX default is 32 MB). Unused CMA stays available to normal programs. 1080p streaming uses ~140 MB. | `extlinux/extlinux.conf` |
 | Heap access | dma-buf heaps are `root:root 0600` in the kernel; the overlay's `72-rg35xxh-dma-heap.rules` gives group `video` access, otherwise ffmpeg logs `Unable to open any dma_heap device` and no dmabuf path can allocate. | `overlay/etc/udev/rules.d/` |
-| Userspace | `build/04c-v4l2-ffmpeg.sh` installs Kwiboo's FFmpeg (`v4l2request` hwdevice + per-codec hwaccels) over the Debian libs, with the same external libraries the distro build has (gnutls for https, x264/lame/opus/vorbis/vpx encoders, libass for subtitles, dav1d for AV1); it also enables the VA-API hwaccels, because VLC decodes through those and not through `v4l2request`. The replaced `libav*` packages are held with `apt-mark` so an upgrade cannot overwrite them. `/etc/mpv/mpv.conf` sets `hwdec=auto-safe`, which lands on zero-copy `drm`, and `hwdec-codecs=h264,hevc,mpeg2video,vp8`. Moonlight uses its own bundled FFmpeg. | `build/`, `overlay/etc/mpv/` |
+| Userspace | `build/04c-v4l2-ffmpeg.sh` installs Kwiboo's FFmpeg (`v4l2request` hwdevice + per-codec hwaccels) over the Debian libs, with the same external libraries the distro build has (gnutls for https, x264/lame/opus/vorbis/vpx encoders, libass for subtitles, dav1d for AV1); it also enables the VA-API hwaccels, because VLC decodes through those and not through `v4l2request`. The replaced `libav*` packages are held with `apt-mark` so an upgrade cannot overwrite them. `/etc/mpv/mpv.conf` sets `hwdec=auto-safe`, which lands on zero-copy `vaapi`, and `hwdec-codecs=h264,hevc,mpeg2video,vp8`. Moonlight uses its own bundled FFmpeg. | `build/`, `overlay/etc/mpv/` |
 
 Players:
 
 - **Moonlight** — zero-copy, 1080p60 HEVC works today; nothing to install.
 - **mpv / ffmpeg (system)** — hardware decode works, zero-copy by default
-  (`hwdec=auto-safe` → `drm` in `/etc/mpv/mpv.conf`), copy paths as fallback
+  (`hwdec=auto-safe` → `vaapi` in `/etc/mpv/mpv.conf`), copy paths as fallback
   (`v4l2request-copy`, `drm-copy`), and `ffmpeg -hwaccel v4l2request` on the CLI.
   Throughput caveats above. AV1 is software (dav1d) on purpose: no Cedrus AV1.
 - **Chromium and VLC** — through VA-API, not FFmpeg (see *VA-API* above).
