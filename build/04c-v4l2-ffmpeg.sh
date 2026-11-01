@@ -56,14 +56,15 @@ SRC="$WORK/src/kwiboo-ffmpeg"
 # Build-time headers.
 DEV_PKGS=(libdrm-dev libudev-dev zlib1g-dev libdav1d-dev
           libgnutls28-dev libx264-dev libmp3lame-dev libopus-dev
-          libvorbis-dev libvpx-dev libass-dev libfreetype6-dev libxml2-dev)
+          libvorbis-dev libvpx-dev libass-dev libfreetype6-dev libxml2-dev
+          libva-dev)
 
 # Runtime side of the same features. The replacement libav* link against these,
 # so they have to be in the image; installing them explicitly also keeps them
 # there (the ones that only Debian's libav* pulled in would otherwise be
 # candidates for autoremove).
 RUNTIME_PKGS=(libgnutls30t64 libx264-164 libmp3lame0 libopus0 libvorbis0a
-               libvpx9 libass9 libfreetype6 libxml2 libunibreak6)
+               libvpx9 libass9 libfreetype6 libxml2 libunibreak6 libva2)
 
 # dpkg-owned libraries we overwrite. Holding them keeps an upgrade from
 # replacing them and silently dropping the VPU path again.
@@ -89,7 +90,7 @@ grep -q "HWACCEL_DRM_V4L2REQUEST" "$SRC/libavcodec/hwconfig.h" || die "DRM-regis
 
 export PKG_CONFIG_SYSROOT_DIR="$ROOTFS"
 export PKG_CONFIG_LIBDIR="$ROOTFS/usr/lib/aarch64-linux-gnu/pkgconfig:$ROOTFS/usr/share/pkgconfig"
-(cd "$SRC" && ./configure --arch=aarch64 --target-os=linux --enable-cross-compile --cross-prefix=aarch64-linux-gnu- --sysroot="$ROOTFS" --pkg-config=pkg-config --prefix=/usr --libdir=/usr/lib/aarch64-linux-gnu --enable-shared --disable-static --disable-doc --disable-debug --enable-gpl --enable-neon --enable-libdrm --enable-libudev --enable-libdav1d --enable-v4l2-request --enable-gnutls --enable-libx264 --enable-libmp3lame --enable-libopus --enable-libvorbis --enable-libvpx --enable-libass --enable-libfreetype --enable-libxml2 > "$WORK/ffmpeg-config.log" 2>&1)
+(cd "$SRC" && ./configure --arch=aarch64 --target-os=linux --enable-cross-compile --cross-prefix=aarch64-linux-gnu- --sysroot="$ROOTFS" --pkg-config=pkg-config --prefix=/usr --libdir=/usr/lib/aarch64-linux-gnu --enable-shared --disable-static --disable-doc --disable-debug --enable-gpl --enable-neon --enable-libdrm --enable-libudev --enable-libdav1d --enable-v4l2-request --enable-vaapi --enable-gnutls --enable-libx264 --enable-libmp3lame --enable-libopus --enable-libvorbis --enable-libvpx --enable-libass --enable-libfreetype --enable-libxml2 > "$WORK/ffmpeg-config.log" 2>&1)
 (cd "$SRC" && make -j"$(nproc)" > "$WORK/ffmpeg-build.log" 2>&1)
 
 (cd "$SRC" && make DESTDIR="$ROOTFS" install >> "$WORK/ffmpeg-build.log" 2>&1)
@@ -99,6 +100,16 @@ grep -q "#define CONFIG_V4L2_REQUEST 1" "$SRC/config.h" || die "v4l2_request not
 for c in H264 HEVC AV1 VP8 VP9 MPEG2; do
   grep -q "#define CONFIG_${c}_V4L2REQUEST_HWACCEL 1" "$SRC/config_components.h" \
     || die "${c}_v4l2request hwaccel not compiled in"
+done
+
+# VA-API is the other half: the driver 04e ships is reached through libva, and
+# VLC 3 decodes with libavcodec's vaapi hwaccels through it (H.264 and HEVC are
+# the ones that matter on this SoC). A build without them leaves VLC and
+# Chromium on the CPU with no error, so gate on both paths.
+grep -q "#define CONFIG_VAAPI 1" "$SRC/config.h" || die "vaapi not compiled in"
+for c in H264 HEVC; do
+  grep -q "#define CONFIG_${c}_VAAPI_HWACCEL 1" "$SRC/config_components.h" \
+    || die "${c}_vaapi hwaccel not compiled in"
 done
 
 # AV1 has no Cedrus VPU decoder, so playback relies on software: this build must
@@ -112,6 +123,7 @@ in_chroot "ldconfig"
 [[ "$(in_chroot "command -v ffmpeg")" == "/usr/bin/ffmpeg" ]] || die "ffmpeg in PATH is not /usr/bin/ffmpeg"
 [[ "$(in_chroot "ffmpeg -version")" == *"${KWIBOO_PIN:0:7}"* ]] || die "patched ffmpeg is not the installed one"
 in_chroot "ffmpeg -hide_banner -hwaccels" | grep -w v4l2request >/dev/null || die "installed ffmpeg has no v4l2request hwaccel"
+in_chroot "ffmpeg -hide_banner -hwaccels" | grep -w vaapi >/dev/null || die "installed ffmpeg has no vaapi hwaccel"
 in_chroot "ffmpeg -hide_banner -decoders" | grep -w libdav1d >/dev/null || die "installed ffmpeg has no dav1d decoder"
 
 # (grep without -q below: -q stops reading at the first match, the long ffmpeg list then dies of
