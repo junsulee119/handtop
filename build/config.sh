@@ -23,8 +23,18 @@ KVER="7.2.0"                       # ROCKNIX kernel version (must match modules/
 LINUX_VERSION="7.2"
 LINUX_URL="https://cdn.kernel.org/pub/linux/kernel/v7.x/linux-${LINUX_VERSION}.tar.xz"
 LINUX_SHA256="f9fef3d14c0df53819026f4be74459835c2a0b0dcbf5b5bbd9ea19f0829402b3"
-KTOOLCHAIN_URL="https://developer.arm.com/-/media/Files/downloads/gnu/15.2.rel1/binrel/arm-gnu-toolchain-15.2.rel1-x86_64-aarch64-none-linux-gnu.tar.xz"
-KTOOLCHAIN_SHA256="9a685b335bd709d683a8c782253c37e8c36c10e6924e59e39d4769b02132eb43"
+# Kernel compiler: Arm's GCC release ROCKNIX uses, in the build for this host (x86_64 or arm64;
+# both checksums from Arm's .sha256asc files). Same compiler version either way.
+KTOOLCHAIN_VERSION="15.2.rel1"
+KTOOLCHAIN_SHA256_X86_64="9a685b335bd709d683a8c782253c37e8c36c10e6924e59e39d4769b02132eb43"
+KTOOLCHAIN_SHA256_AARCH64="97e3f600c00413088bb21109475443f9a1c57b4f75336a6e820acd43b065f875"
+KTOOLCHAIN_HOST="$(uname -m)"
+case "$KTOOLCHAIN_HOST" in
+  x86_64)  KTOOLCHAIN_SHA256="$KTOOLCHAIN_SHA256_X86_64" ;;
+  aarch64) KTOOLCHAIN_SHA256="$KTOOLCHAIN_SHA256_AARCH64" ;;
+  *)       KTOOLCHAIN_SHA256="" ;;   # 06b-cedrus.sh stops with a message
+esac
+KTOOLCHAIN_URL="https://developer.arm.com/-/media/Files/downloads/gnu/${KTOOLCHAIN_VERSION}/binrel/arm-gnu-toolchain-${KTOOLCHAIN_VERSION}-${KTOOLCHAIN_HOST}-aarch64-none-linux-gnu.tar.xz"
 # Gamepad / motor driver rebuilt with our fix (06d-joypad.sh): the rocknix-joypad version ROCKNIX
 # $ROCKNIX_VERSION ships (its package.mk: PKG_VERSION / PKG_SHA256)
 JOYPAD_COMMIT="d02ed13aae08113f6f9e0e9d699cb29bb3450fa2"

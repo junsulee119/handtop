@@ -22,29 +22,53 @@ fetch() {  # url file sha256
   echo "$3  $f" | sha256sum -c --quiet - || die "checksum mismatch: $2"
 }
 
-# 1. Sources and toolchain (pinned checksums in config.sh)
+# 1. Sources and toolchain (pinned checksums in config.sh). The compiler is the build for this
+# host (x86_64 or arm64; codebase audit 2026-10-30, M13), kept per host in case work/ is shared.
+[ -n "$KTOOLCHAIN_SHA256" ] || die "no Arm GCC build for host '$KTOOLCHAIN_HOST' (x86_64 or aarch64 only)"
 fetch "$LINUX_URL" "linux-$LINUX_VERSION.tar.xz" "$LINUX_SHA256"
-fetch "$KTOOLCHAIN_URL" gcc15.tar.xz "$KTOOLCHAIN_SHA256"
-[ -x "${CROSS_COMPILE}gcc" ] || { mkdir -p "$K/gcc15"; tar xf "$K/gcc15.tar.xz" -C "$K/gcc15" --strip-components=1; }
+fetch "$KTOOLCHAIN_URL" "gcc-$KTOOLCHAIN_VERSION-$KTOOLCHAIN_HOST.tar.xz" "$KTOOLCHAIN_SHA256"
+if [ ! -x "${CROSS_COMPILE}gcc" ] || [ "$(cat "$K/gcc15/.host" 2>/dev/null)" != "$KTOOLCHAIN_HOST-$KTOOLCHAIN_SHA256" ]; then
+  [ ! -e "$K/gcc15" ] || safe_rm -r "$K/gcc15"
+  mkdir -p "$K/gcc15"
+  tar xf "$K/gcc-$KTOOLCHAIN_VERSION-$KTOOLCHAIN_HOST.tar.xz" -C "$K/gcc15" --strip-components=1
+  echo "$KTOOLCHAIN_HOST-$KTOOLCHAIN_SHA256" > "$K/gcc15/.host"
+fi
+"${CROSS_COMPILE}gcc" --version | head -n1
 if [ ! -d "$K/rocknix-src/.git" ]; then
   git clone -q --filter=blob:none --no-checkout https://github.com/ROCKNIX/distribution.git "$K/rocknix-src"
 fi
 git -C "$K/rocknix-src" sparse-checkout set --no-cone /projects/ROCKNIX/packages/linux /projects/ROCKNIX/devices/H700/patches
 git -C "$K/rocknix-src" checkout -q "$ROCKNIX_VERSION"
 
-# 2. Kernel tree = linux + ROCKNIX patches (same order as ROCKNIX's package.mk) + Cedrus H616
-if [ ! -f "$T/.rg35xxh-patched" ]; then
-  [ ! -e "$T" ] || die "$T exists but is not fully patched; remove it (safe_rm) and rerun"
+# 2. Kernel tree = linux + ROCKNIX patches (same order as ROCKNIX's package.mk) + our patches
+# (build/kernel/). The marker holds a hash of everything that went into the tree: the Linux
+# tarball, every patch file (names and contents, in order), the compiler and the build host's
+# architecture (the tree's own tools, scripts/*, are host programs). When any of them
+# changes, the tree is built again from scratch; a tree from before the hash (empty marker) too.
+# Before, only the marker's presence was checked, so an edited patch in build/kernel/ was
+# silently left out of the next build (codebase audit 2026-10-30, L02).
+P="$K/rocknix-src/projects/ROCKNIX"
+PATCHES=()
+for d in "$P/packages/linux/patches/$LINUX_VERSION" "$P/packages/linux/patches/mainline" \
+         "$P/devices/H700/patches/linux" "$P/packages/linux/patches/default"; do
+  [ -d "$d" ] || continue
+  while IFS= read -r f; do PATCHES+=("$f"); done < <(find "$d" -maxdepth 1 -name '*.patch' | sort)
+done
+PATCHES+=("$TOP"/build/kernel/*.patch)
+INPUTS="$( { echo "linux $LINUX_SHA256 rocknix $ROCKNIX_VERSION gcc $KTOOLCHAIN_VERSION host $KTOOLCHAIN_HOST"
+             for f in "${PATCHES[@]}"; do
+               n="${f#"$K/"}"; echo "${n#"$TOP/"} $(sha256sum < "$f" | cut -d' ' -f1)"
+             done
+           } | sha256sum | cut -d' ' -f1)"
+if [ "$(cat "$T/.rg35xxh-patched" 2>/dev/null)" != "$INPUTS" ]; then
+  if [ -e "$T" ]; then
+    echo "Kernel tree $T is out of date (or was not fully patched): building it again."
+    safe_rm -r "$T"
+  fi
   [ ! -e "$K/linux-$LINUX_VERSION" ] || die "$K/linux-$LINUX_VERSION is in the way"
   tar xf "$K/linux-$LINUX_VERSION.tar.xz" -C "$K" && mv "$K/linux-$LINUX_VERSION" "$T"
-  P="$K/rocknix-src/projects/ROCKNIX"
-  for d in "$P/packages/linux/patches/$LINUX_VERSION" "$P/packages/linux/patches/mainline" \
-           "$P/devices/H700/patches/linux" "$P/packages/linux/patches/default"; do
-    [ -d "$d" ] || continue
-    for f in $(ls "$d"/*.patch 2>/dev/null | sort); do patch -d "$T" -p1 -s --forward < "$f"; done
-  done
-  for f in "$TOP"/build/kernel/*.patch; do patch -d "$T" -p1 -s --forward < "$f"; done
-  touch "$T/.rg35xxh-patched"
+  for f in "${PATCHES[@]}"; do patch -d "$T" -p1 -s --forward < "$f"; done
+  echo "$INPUTS" > "$T/.rg35xxh-patched"
 fi
 
 # The 64-byte stride is what lets the GPU import the decoded picture

@@ -358,10 +358,10 @@ The ROCKNIX kernel has everything Cedrus needs built in; only the driver is off.
 
 1. linux 7.2 (sha256 pinned) + ROCKNIX patches from the tag in `ROCKNIX_VERSION` (now `20261001`) (`packages/linux/patches/7.2`, `mainline`, `devices/H700/patches/linux`, same order as ROCKNIX's `package.mk`) + our Cedrus patches.
 2. ROCKNIX's own `.config`, extracted from `KERNEL` (`extract-ikconfig`), with `VIDEO_SUNXI_CEDRUS=m`.
-3. **GCC 15** (Arm GNU Toolchain 15.2.Rel1, sha256 pinned): ROCKNIX uses GCC 15; with GCC 13 compiler-feature options (`CC_HAS_COUNTED_BY`, …) changed type definitions and 8–50 symbol versions differed.
+3. **GCC 15** (Arm GNU Toolchain 15.2.Rel1, sha256 pinned): ROCKNIX uses GCC 15; with GCC 13 compiler-feature options (`CC_HAS_COUNTED_BY`, …) changed type definitions and 8–50 symbol versions differed. Arm publishes the same release for x86_64 and arm64 hosts; the step takes the one for the build host (`KTOOLCHAIN_SHA256_X86_64` / `_AARCH64` in `config.sh`). Before, it always took the x86_64 one, which cannot run on an arm64 host (codebase audit 2026-10-30, M13).
 4. Check: every symbol version the module imports must equal the one ROCKNIX's own modules import, and vermagic must match — otherwise the build stops. (Verified: all 1696 symbols imported by ROCKNIX modules match this build.)
 
-Takes ~6 min on a 28-core x86_64 build host. **When `ROCKNIX_VERSION` changes, this step rebuilds against the new tag automatically**; the checks catch mismatches.
+Takes ~6 min on a 28-core x86_64 build host. **The kernel tree is rebuilt from scratch whenever anything that went into it changes**: `work/kernel/…/.rg35xxh-patched` holds a hash of the Linux tarball, the ROCKNIX tag, every patch file (ROCKNIX's and `build/kernel/`, names and contents), the compiler release and the host architecture. A re-run with nothing changed reuses the tree. (Before 2026-11 the marker was an empty file, so an edited patch in `build/kernel/` was silently left out until `work/kernel` was deleted by hand: codebase audit 2026-10-30, L02. A tree with the old empty marker is rebuilt once.) The checks catch mismatches.
 
 ## Undo / fallback
 
