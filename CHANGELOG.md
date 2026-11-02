@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Building: the launcher (nwg-drawer) is now compiled with Go 1.27.3 (was 1.27.1), which carries Go's latest security fixes.
 - **Logging out (or a crash) during Screen off no longer leaves the next session dark and slow.** Screen off's low-power state (backlight off, three CPU cores offline, audio off) outlived the session, so the new desktop could start with the screen dark and one core. Each session now leaves it first.
 - **Buttons no longer get stuck after a busy moment.** If the system was too busy to read the controls for a moment, a button release could get lost and the button stayed held (a mouse button kept dragging, for example). The input daemon now notices the lost input and reads the controls' real state again.
 - **Display:** with an HDMI monitor at a scale other than 1 (or rotated), Extend now puts the handheld's screen right below the monitor instead of leaving a gap the pointer couldn't cross. A resolution Test now switches back after 15 s of real time, even if a display command is slow.

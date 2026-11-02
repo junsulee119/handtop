@@ -7,7 +7,7 @@
   dl.cloudsmith.io, pkgs.tailscale.com, github.com, go.dev, cdn.kernel.org, developer.arm.com).
 - On x86_64 the arm64 root filesystem is built under qemu-user emulation; an arm64 host is faster.
 - The kernel-module steps (`06b`–`06e`) use Arm's GCC 15 release built for the host: x86_64 or arm64 (SHA-256 checked). Only an x86_64 host has run the full build. The arm64 compiler was checked on the x86_64 server under qemu-user (2026-11-02): same version string (`15.2.1 20251203`, Build arm-15.86), byte-identical object code for a test file, and the Cedrus module built with it has the same vermagic and the same 110 symbol versions as the x86_64 build. The symbol-version and vermagic checks in `06b` still stop the build if a module would not match ROCKNIX's kernel.
-- Go for nwg-drawer: `00-host-deps.sh` downloads the Go release pinned in `build/config.sh` (SHA-256 checked) into `work/tools/go`, on x86_64 and arm64 hosts. To use your own Go ≥ 1.25 instead, set `GO_TOOLCHAIN`.
+- Go for nwg-drawer: `00-host-deps.sh` downloads the Go release pinned in `build/config.sh` (SHA-256 checked) into `work/tools/go`, on x86_64 and arm64 hosts, and replaces it there when `GO_VERSION` changes. To use your own Go ≥ 1.25 instead, set `GO_TOOLCHAIN`.
 - Windows cannot build the image (no Linux filesystems or ARM package scripts).
 
 ## Steps

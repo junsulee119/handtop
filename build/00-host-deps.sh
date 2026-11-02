@@ -22,8 +22,11 @@ grep -q enabled /proc/sys/fs/binfmt_misc/qemu-aarch64 && echo "qemu-aarch64 binf
 
 # Go toolchain (>= 1.25) for cross-compiling nwg-drawer; Ubuntu/Debian packaged Go may be too old.
 # Downloads the release pinned in config.sh (SHA-256 checked) unless GO_TOOLCHAIN points to your own Go.
+# The downloaded one is replaced when GO_VERSION changes: before, a work/ that already had Go kept
+# the old release after a bump (found 2026-11-02 going from 1.27.1 to 1.27.3).
 source "$(dirname "$(realpath "$0")")/config.sh"
-if [ ! -x "$GO_TOOLCHAIN" ]; then
+if [ ! -x "$GO_TOOLCHAIN" ] || { [ "$GO_TOOLCHAIN" = "$GO_DEFAULT" ] \
+     && [ "$("$GO_TOOLCHAIN" env GOVERSION 2>/dev/null)" != "go$GO_VERSION" ]; }; then
   [ "$GO_TOOLCHAIN" = "$GO_DEFAULT" ] || die "GO_TOOLCHAIN is set but not executable: $GO_TOOLCHAIN"
   case "$(uname -m)" in
     x86_64)  GO_ARCH=amd64; GO_SHA="$GO_SHA256_AMD64" ;;

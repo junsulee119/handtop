@@ -176,6 +176,15 @@ What ships:
   `sofus13/libva-v4l2_request`, pinned to `f54d8d2` (master, "one CAPTURE buffer
   per surface, queued with `V4L2_MEMORY_DMABUF`"), and installs
   `v4l2_request_drv_video.so` into `/usr/lib/aarch64-linux-gnu/dri/`.
+  Upstream after the pin (reviewed 2026-11-02, up to `0e54d31`, "Bump version
+  to 2.0"): six commits, none touching decoding. The project is renamed
+  `asahi-va-driver` (Apple Silicon focus), the module to `asahi_drv_video.so`
+  and the vendor string follows; the build type moves to `release`. Not taken:
+  it gains nothing here and the rename would break
+  `LIBVA_DRIVER_NAME=v4l2_request`. Waived in `build/upstreams.conf`, so the
+  drift check reports the next upstream commit again. If a later update is
+  taken: install the module under the old name (or change the session's
+  `LIBVA_DRIVER_NAME`), re-check the fixes patch, re-test Chromium and VLC.
 - `build/patches/libva-v4l2-request-fixes.patch`, three fixes:
   1. **single-planar support** — master dropped it in `4cb4bde` because its
      author's SoCs are multiplanar; cedrus exposes `V4L2_CAP_VIDEO_M2M` only, so
