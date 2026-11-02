@@ -16,7 +16,7 @@ It needs bash, dash, shellcheck, Python 3 with pytest and git; no root, no hardw
 | `bash -n` on every bash script and `*.sh` | Syntax errors |
 | `shellcheck -S warning` on all of them | Errors and warnings fail CI. The ones that were in the tree in 2026-11 are silenced line by line with `# shellcheck disable=SCxxxx  # reason` (or fixed when that changed nothing), so a new warning stands out. A disable needs a reason on the same line. Info and style hints (`a && b \|\| c`, unfollowed `source`) are not enforced |
 | `py_compile` on every `*.py` and Python script | Syntax errors in code that only runs on the device |
-| Input daemon tests: `pytest`, and the direct run the image build uses (`build/08-input.sh`), with **the same number of tests** | The build once ran 29 of 31 tests because two were defined after the `if __name__ == "__main__"` block (audit 2026-10-30, L01) |
+| Input daemon tests: `pytest` on all of `src/inputd/tests` (`test_core.py`: the pure logic and the config file; `test_daemon.py`: failure paths in `daemon.py` with evdev and GLib faked), and the direct run of `test_core.py` that the image build uses (`build/08-input.sh`), with **the same number of tests in that file** | The build once ran 29 of 31 tests because two were defined after the `if __name__ == "__main__"` block (audit 2026-10-30, L01) |
 | `tools/test-wifi-import.sh` from a copy of the repo whose path contains a space | The Wi-Fi import ran a command path unquoted (audit 2026-10-30, L03) |
 
 Files sourced by other scripts have no shebang; they carry a `# shellcheck shell=bash` (or `sh`) line near the top so that shellcheck and this script know their shell.

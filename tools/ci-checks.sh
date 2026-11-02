@@ -57,9 +57,9 @@ step "input daemon tests"
 direct="$(PYTHONDONTWRITEBYTECODE=1 python3 src/inputd/tests/test_core.py)" || bad "direct test run"
 echo "$direct" | tail -n1
 n_direct="$(echo "$direct" | tail -n1 | sed -n 's#^[0-9]*/\([0-9]*\) passed$#\1#p')"
-n_pytest="$(cd src/inputd && python3 -m pytest -q --collect-only tests 2>/dev/null | grep -c '::')"
+n_pytest="$(cd src/inputd && python3 -m pytest -q --collect-only tests/test_core.py 2>/dev/null | grep -c '::')"
 [ -n "$n_direct" ] && [ "$n_direct" = "$n_pytest" ] \
-  || bad "the build's direct run has ${n_direct:-?} tests, pytest collects $n_pytest"
+  || bad "the build's direct run of test_core.py has ${n_direct:-?} tests, pytest finds $n_pytest there"
 
 # ---- Wi-Fi import, from a copy whose path has a space (audit 2026-10-30, L03)
 step "Wi-Fi import test (path with a space)"

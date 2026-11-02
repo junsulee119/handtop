@@ -420,6 +420,51 @@ def test_osk_l2_is_shift_only_while_open():
     assert c.button("l2", False, 1.1) == []
 
 
+
+# ---- config file: a bad value keeps the default instead of stopping the daemon
+# (codebase audit 2026-10-30, M04)
+def _load_conf(text):
+    import tempfile
+    from rg35xxh_inputd import config
+    with tempfile.TemporaryDirectory() as tmp:
+        p = os.path.join(tmp, "input.conf")
+        with open(p, "w") as f:
+            f.write(text)
+        return config.load([p])
+
+
+def test_config_bad_boolean_keeps_default():
+    _, _, hw, _ = _load_conf("[hardware]\ninvert_lx = maybe\ninvert_ly = yes\n")
+    assert hw["invert_lx"] is False and hw["invert_ly"] is True
+
+
+def test_config_numbers_outside_range_keep_default():
+    s, _, _, _ = _load_conf("[settings]\npointer_max_speed = inf\ndeadzone = 1\n"
+                            "pointer_curve = nan\nscroll_speed = -3\nhaptic_strength = 0.5\n")
+    assert "pointer_max_speed" not in s and "deadzone" not in s
+    assert "pointer_curve" not in s and "scroll_speed" not in s
+    assert s["haptic_strength"] == 0.5
+
+
+def test_config_kept_defaults_run():
+    s, b, _, _ = _load_conf("[settings]\ndeadzone = 1\npointer_max_speed = inf\n")
+    c = Core(s, b)
+    c.axis("lx", 0.7, 0.0)
+    c.axis("ly", 0.7, 0.0)
+    out, _ = run_ticks(c, 0.0, 0.2)
+    assert any(a[0] == "rel" for a in out)
+
+
+def test_config_unknown_key_keeps_default():
+    from rg35xxh_inputd import config
+    real = config._known_key
+    config._known_key = lambda name: name != "KEY_DOES_NOT_EXIST"
+    try:
+        _, b, _, _ = _load_conf("[desktop]\ny = key:KEY_DOES_NOT_EXIST\nselect = key:KEY_TAB\n")
+    finally:
+        config._known_key = real
+    assert "y" not in b and b["select"] == "key:KEY_TAB"
+
 if __name__ == "__main__":
     failed = 0
     tests = [(n, f) for n, f in sorted(globals().items()) if n.startswith("test_")]

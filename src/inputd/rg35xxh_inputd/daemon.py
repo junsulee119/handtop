@@ -35,6 +35,8 @@ log = logging.getLogger("rg35xxh-inputd")
 
 GAMEPAD_NAME = "H700 Gamepad"
 BUILTIN = {GAMEPAD_NAME: "gamepad", "gpio-keys-volume": "volume", "axp20x-pek": "power"}
+GRAB_TRIES = 5                 # a device busy at start-up (usually the previous daemon still
+GRAB_RETRY_S = 0.5             # letting go) is tried again for ~2 s before giving up
 # Physical codes (rocknix-singleadc-joypad, see docs/hardware.md) -> button names.
 HW_BUTTONS = {
     0x131: "a", 0x130: "b", 0x134: "x", 0x133: "y",   # all four verified on device (debug log)
@@ -227,15 +229,33 @@ class Daemon:
             if len(found) == len(BUILTIN):
                 break
             time.sleep(0.5)
+        # Only a device we hold exclusively is used. One whose grab fails is closed: kept, it
+        # would be set up as the gamepad (motor included) without its input ever being read
+        # (codebase audit 2026-10-30, M07). Without the gamepad the daemon is useless, so that
+        # case ends the start-up and the session's restart loop tries again.
+        owned = {}
         for role, d in found.items():
-            try:
-                d.grab()
-            except OSError as e:
-                log.error("cannot grab %s (%s): %s", role, d.path, e)
+            for attempt in range(1, GRAB_TRIES + 1):
+                try:
+                    d.grab()
+                    break
+                except OSError as e:
+                    log.warning("cannot grab %s (%s), try %d/%d: %s", role, d.path, attempt, GRAB_TRIES, e)
+                    if attempt < GRAB_TRIES:
+                        time.sleep(GRAB_RETRY_S)
+            else:
+                d.close()
+                if role == "gamepad":
+                    for other in found.values():
+                        if other is not d and other not in owned.values():
+                            other.close()
+                    raise RuntimeError(f"cannot grab the gamepad ({d.path}); restarting")
+                log.error("%s (%s) not used: cannot grab it", role, d.path)
                 continue
             log.info("%s: %s (%s)", role, d.name, d.path)
+            owned[role] = d
             self.devices.append(d)
-        self.gamepad = found.get("gamepad")
+        self.gamepad = owned.get("gamepad")
         if not self.gamepad:
             log.error("gamepad '%s' not found", GAMEPAD_NAME)
         else:
@@ -422,6 +442,11 @@ class Daemon:
             self.pad_ff = {}
             self.motor_game_active.clear()
             self.motor_game_endless.clear()
+            # A game's upload or play still waiting for the motor gate must not reach the motor
+            # after the mode ended: it would upload a new effect, play it, and stay on the
+            # gamepad with nothing left to erase it (codebase audit 2026-10-30, M02).
+            self.motor_pending_upload.clear()
+            self.motor_pending_play.clear()
             self.pad.close()
             self.pad = None
             log.info("desktop mode: virtual pad removed")
@@ -531,7 +556,23 @@ class Daemon:
         self.keyboard.syn()
 
     # ------------------------------------------------------------- events
+    # GLib drops a callback that raises: its timer or watch is gone for good while the rest of
+    # the main loop, the heartbeat included, keeps running, so the watchdog never restarts the
+    # daemon and buttons or the pointer stay dead. The two input callbacks therefore log the
+    # error and end the daemon; the session's restart loop starts a fresh one 2 s later
+    # (codebase audit 2026-10-30, M05).
+    def _input_failed(self, where):
+        log.exception("%s failed; exiting so that a fresh daemon starts", where)
+        GLib.idle_add(self._quit)
+        return False
+
     def _on_device(self, fd, cond, dev):
+        try:
+            return self._on_device_events(cond, dev)
+        except Exception:
+            return self._input_failed(f"input from {dev.path}")
+
+    def _on_device_events(self, cond, dev):
         if cond & (GLib.IO_HUP | GLib.IO_ERR):
             # Built-in devices can be re-created (e.g. after resume): exit and let the
             # session's restart loop start a fresh daemon that opens them again.
@@ -566,6 +607,12 @@ class Daemon:
         return v
 
     def _tick(self):
+        try:
+            return self._tick_body()
+        except Exception:
+            return self._input_failed("input loop")
+
+    def _tick_body(self):
         self.ticks += 1
         now = time.monotonic()
         if self.ticks % 10 == 0:
@@ -1060,6 +1107,9 @@ class Daemon:
             self.motor_pending_play.clear()
             return False
         self.motor_last = time.monotonic()
+        if self.pad is None:          # no game pad (any more): nothing of a game's may play
+            self.motor_pending_upload.clear()
+            self.motor_pending_play.clear()
         try:
             # games (virtual pad): latest upload per effect, then play/stop changes
             for vid, eff in list(self.motor_pending_upload.items()):
