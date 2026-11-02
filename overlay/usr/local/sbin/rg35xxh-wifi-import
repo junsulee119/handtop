@@ -15,20 +15,20 @@ get() { printf '%s\n' "$content" | sed -n "s/^[[:space:]]*$1[[:space:]]*=//p" | 
 SSID="$(get SSID)"; PASSWORD="$(get PASSWORD)"; COUNTRY="$(get COUNTRY)"
 
 if [ -n "$COUNTRY" ] && command -v "$IW" >/dev/null; then
-  $IW reg set "$COUNTRY" 2>/dev/null && log "regulatory domain: $COUNTRY"
+  "$IW" reg set "$COUNTRY" 2>/dev/null && log "regulatory domain: $COUNTRY"
 fi
 [ -n "$SSID" ] || { log "SSID empty, nothing to import"; exit 0; }
 [ -z "$PASSWORD" ] && printf '%s\n' "$content" | grep -q '^# imported' && { log "'$SSID' already imported"; exit 0; }
 
 con="wifi-$SSID"
-if $NMCLI -t -f NAME connection show | grep -Fxq "$con"; then
-  $NMCLI connection delete "$con" >/dev/null
+if "$NMCLI" -t -f NAME connection show | grep -Fxq "$con"; then
+  "$NMCLI" connection delete "$con" >/dev/null
 fi
 if [ -n "$PASSWORD" ]; then
-  $NMCLI connection add type wifi con-name "$con" ssid "$SSID" \
+  "$NMCLI" connection add type wifi con-name "$con" ssid "$SSID" \
     wifi-sec.key-mgmt wpa-psk wifi-sec.psk "$PASSWORD" connection.autoconnect yes >/dev/null
 else
-  $NMCLI connection add type wifi con-name "$con" ssid "$SSID" connection.autoconnect yes >/dev/null
+  "$NMCLI" connection add type wifi con-name "$con" ssid "$SSID" connection.autoconnect yes >/dev/null
 fi || { log "nmcli failed for '$SSID'"; exit 1; }
 log "added connection '$con'"
 
@@ -38,5 +38,5 @@ printf '%s\n' "$content" | sed -e "s/^[[:space:]]*PASSWORD[[:space:]]*=.*/PASSWO
   -e '/^# imported /d' > "$tmp"
 printf '# imported %s - password removed from this file; it is stored on the device\n' "$(date '+%Y-%m-%d %H:%M')" >> "$tmp"
 mv -f "$tmp" "$WIFI_FILE" && sync
-$NMCLI connection up "$con" >/dev/null 2>&1 && log "connected to '$SSID'" || log "'$SSID' not reachable now; will autoconnect"
+"$NMCLI" connection up "$con" >/dev/null 2>&1 && log "connected to '$SSID'" || log "'$SSID' not reachable now; will autoconnect"
 exit 0

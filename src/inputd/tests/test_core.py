@@ -395,19 +395,6 @@ def test_layout_change_keeps_or_clamps_position():
     assert lay.scale() == 1.0
 
 
-if __name__ == "__main__":
-    failed = 0
-    tests = [(n, f) for n, f in sorted(globals().items()) if n.startswith("test_")]
-    for name, fn in tests:
-        try:
-            fn()
-            print("ok   ", name)
-        except AssertionError as e:
-            failed += 1
-            print("FAIL ", name, e)
-    print(f"{len(tests) - failed}/{len(tests)} passed")
-    sys.exit(1 if failed else 0)
-
 
 def test_osk_hold_a_repeats():
     c = Core()
@@ -431,3 +418,17 @@ def test_osk_l2_is_shift_only_while_open():
     c.set_osk_visible(False)
     assert c.button("l2", True, 1) == []                     # default binding: none
     assert c.button("l2", False, 1.1) == []
+
+
+if __name__ == "__main__":
+    failed = 0
+    tests = [(n, f) for n, f in sorted(globals().items()) if n.startswith("test_")]
+    for name, fn in tests:
+        try:
+            fn()
+            print("ok   ", name)
+        except AssertionError as e:
+            failed += 1
+            print("FAIL ", name, e)
+    print(f"{len(tests) - failed}/{len(tests)} passed")
+    sys.exit(1 if failed else 0)

@@ -9,6 +9,10 @@ How Handtop works on the RG35XX H. One document per app or background service; g
 | [flashing.md](flashing.md) | Flashing the SD card and first boot |
 | [building.md](building.md) | Building the image, testing and debugging |
 | [hardware-safety.md](hardware-safety.md) | **Rules for changes** to code that holds hardware, changes power states or starts / stops those processes; checklist |
+| [ci.md](ci.md) | CI: the checks every push and pull request runs (`tools/ci-checks.sh`), and how to run them locally |
+| [upstreams.md](upstreams.md) | Pinned pieces outside apt (`build/upstreams.conf`), the weekly drift check and its issue, how to update or waive |
+| [release-checklist.md](release-checklist.md) | Before tagging a release: CI, upstream drift, images, device tests |
+| [audits/](audits/README.md) | Codebase audits and how their findings are tracked |
 | [reliability-checklist.md](reliability-checklist.md) | **Scenarios to think through before every PR**: power cuts, interruptions, restart loops, first boot, Windows-edited files, other units, recovery |
 
 ## Apps (Apps menu / power button)

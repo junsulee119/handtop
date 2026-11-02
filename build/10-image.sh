@@ -49,7 +49,9 @@ cp "$BOOTDIR/dtb-regular.img" "$BOOTDIR/dtb.img"
 PARTUUID_ROOT="$(printf '%08x' "$DISK_ID")-02"
 # ROCKNIX's built-in initramfs has no /root directory, which the kernel needs to mount root=
 # itself (error -2). rootfix.cpio only adds that directory; see docs/boot-method.md.
-RF="$P/rootfix"; mkdir -m 0700 -p "$RF/root"
+RF="$P/rootfix"
+# shellcheck disable=SC2174  # only root/ goes into the cpio, so only it needs 0700
+mkdir -m 0700 -p "$RF/root"
 (cd "$RF" && echo root | cpio -o -H newc -R 0:0 --quiet) > "$BOOTDIR/rootfix.cpio"
 cat > "$BOOTDIR/extlinux/extlinux.conf" <<X
 LABEL rg35xxh

@@ -1,4 +1,5 @@
 # Helpers to run commands inside the arm64 rootfs. Source after config.sh.
+# shellcheck shell=bash
 
 chroot_mount() {
   assert_rootfs

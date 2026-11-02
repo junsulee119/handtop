@@ -1,4 +1,5 @@
 # Start the labwc desktop on tty1 after auto-login.
+# shellcheck shell=sh
 # Logging out of labwc returns to getty, which logs in again = session restart.
 # Gives up after 3 quick failures per boot and leaves a shell on tty1.
 # Let VA-API clients (Chromium, VLC) reach the VPU: the libva driver over the

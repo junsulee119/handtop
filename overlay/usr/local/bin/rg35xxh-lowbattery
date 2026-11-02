@@ -23,6 +23,7 @@ WARN_PCT=20
 OFF_PCT=5
 INTERVAL=30
 CONF="${RG35XXH_POWER_CONF:-/etc/rg35xxh/power.conf}"
+# shellcheck source=/dev/null  # site config, path set at run time
 [ -r "$CONF" ] && . "$CONF"
 WARN_PCT=${SCREEN_OFF_WARN_PCT:-$WARN_PCT}
 OFF_PCT=${SCREEN_OFF_SHUTDOWN_PCT:-$OFF_PCT}

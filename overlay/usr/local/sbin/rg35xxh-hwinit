@@ -18,6 +18,7 @@ rfkill unblock wifi 2>/dev/null
 rfkill unblock bluetooth 2>/dev/null
 
 # Vibration motor on (used for the shutdown haptic).
+# shellcheck disable=SC2044  # sysfs paths never contain spaces
 for f in $(find /sys/devices/platform -name rumble_enable 2>/dev/null); do
   echo 1 > "$f"
 done

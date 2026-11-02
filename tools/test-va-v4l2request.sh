@@ -15,7 +15,6 @@ SO="$TOP/work/va-driver/v4l2_request_drv_video.so"
 DEST=/usr/lib/aarch64-linux-gnu/dri/v4l2_request_drv_video.so
 DEVICE="${DEVICE:-}"
 need_device() { [ -n "$DEVICE" ] || { echo "set DEVICE=user@host"; exit 1; }; }
-WENV='export XDG_RUNTIME_DIR=/run/user/$(id -u) WAYLAND_DISPLAY=wayland-0'
 
 run() { ssh "$DEVICE" "$@"; }
 

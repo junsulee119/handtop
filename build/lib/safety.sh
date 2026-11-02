@@ -1,4 +1,5 @@
 # Safety rules for every build/test script (sourced by config.sh).
+# shellcheck shell=bash
 # 1. All paths must resolve inside this project; an empty or wrong ROOTFS aborts.
 # 2. Deleting files: only through safe_rm, and only inside $WORK (build outputs:
 #    rootfs, downloads, temp). Anything outside $WORK is refused.

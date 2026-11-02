@@ -75,7 +75,7 @@ P
 sleep "$WAIT"
 mon "screendump $T/screen.ppm" || true
 mon "quit" || true   # (Power key is ignored by logind by design, so no ACPI shutdown)
-for i in $(seq 1 30); do kill -0 $QPID 2>/dev/null || break; sleep 1; done
+for _ in $(seq 1 30); do kill -0 $QPID 2>/dev/null || break; sleep 1; done
 kill $QPID 2>/dev/null || true
 python3 - "$T/screen.ppm" "$WORK/screens/7-qemu-desktop.png" <<'P' || true
 import sys, zlib, struct

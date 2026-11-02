@@ -1,4 +1,6 @@
 # Shared build configuration. Sourced by build scripts.
+# shellcheck shell=bash
+# shellcheck disable=SC2034  # every variable here is read by the scripts that source this file
 TOP="$(cd "$(dirname "$(realpath "${BASH_SOURCE[0]}")")/.." && pwd)"   # absolute, independent of $HOME/sudo
 WORK="${WORK:-$TOP/work}"
 

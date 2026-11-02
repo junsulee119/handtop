@@ -1,0 +1,47 @@
+# Weekly: is anything we pin (build/upstreams.conf) behind its upstream?
+# Keeps one open issue, "Upstream drift", up to date, and closes it when everything
+# is current or waived. Details: docs/upstreams.md.
+name: Upstream drift
+on:
+  schedule:
+    - cron: "17 1 * * 1"      # Mondays 01:17 UTC
+  workflow_dispatch:
+permissions:
+  contents: read
+  issues: write
+jobs:
+  drift:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check pins against upstream
+        id: check
+        run: |
+          if python3 tools/check-upstreams.py --report report.md; then
+            echo "drift=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "drift=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Open, update or close the issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DRIFT: ${{ steps.check.outputs.drift }}
+        run: |
+          title="Upstream drift"
+          num="$(gh issue list --state open --search "\"$title\" in:title" --json number,title \
+                 --jq ".[] | select(.title == \"$title\") | .number" | head -n1)"
+          run_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          printf '\n_Updated by the [weekly check](%s)._\n' "$run_url" >> report.md
+          if [ "$DRIFT" = true ]; then
+            if [ -z "$num" ]; then
+              gh issue create --title "$title" --body-file report.md
+            else
+              old="$(gh issue view "$num" --json body --jq .body | grep -v '^_Updated by' | sed '1d')"
+              new="$(grep -v '^_Updated by' report.md | sed '1d')"
+              gh issue edit "$num" --body-file report.md
+              [ "$old" = "$new" ] || gh issue comment "$num" --body "The report changed: see the description."
+            fi
+          elif [ -n "$num" ]; then
+            gh issue comment "$num" --body-file report.md
+            gh issue close "$num"
+          fi

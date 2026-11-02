@@ -64,6 +64,7 @@ make -C "$T" -s -j"$(nproc)" vmlinux modules
 
 # 4. Every symbol version the module imports must match ROCKNIX's own modules
 KO="$T/drivers/staging/media/sunxi/cedrus/sunxi-cedrus.ko"
+# shellcheck disable=SC2044  # module paths never contain spaces
 for m in $(find "$ROCKNIX_EX/modules/$KVER" -name '*.ko*'); do /sbin/modprobe --dump-modversions "$m" 2>/dev/null; done \
   | sort -u -k2 > "$K/rocknix.versions"
 bad=$(/sbin/modprobe --dump-modversions "$KO" | awk 'NR==FNR{r[$2]=$1; next} ($2 in r) && r[$2]!=$1' "$K/rocknix.versions" -)

@@ -1,0 +1,23 @@
+# Checks on every push and pull request: no hardware, no root, no image build.
+# The same script runs locally: tools/ci-checks.sh (docs/ci.md).
+name: CI
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  checks:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"     # Debian trixie's Python
+      - name: Install tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq dash shellcheck
+          python3 -m pip install -q pytest
+      - name: Run checks
+        run: bash tools/ci-checks.sh
