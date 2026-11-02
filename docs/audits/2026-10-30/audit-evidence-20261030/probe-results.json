@@ -1,0 +1,91 @@
+[
+  {
+    "name": "configuration_input_validation",
+    "result": {
+      "bad_bool": "ValueError: Not a boolean: maybe",
+      "infinity": "ValueError: cannot convert float NaN to integer",
+      "deadzone_one": "ZeroDivisionError: division by zero",
+      "bad_key": [
+        [
+          "key",
+          "KEY_DOES_NOT_EXIST",
+          true
+        ]
+      ],
+      "legacy": 225.0
+    }
+  },
+  {
+    "name": "mouse_release_on_osk_change",
+    "result": {
+      "press": [
+        [
+          "mouse",
+          "left",
+          true
+        ]
+      ],
+      "toggle": [
+        [
+          "osk",
+          "toggle"
+        ]
+      ],
+      "release": [
+        [
+          "mouse",
+          "left",
+          false
+        ]
+      ]
+    }
+  },
+  {
+    "name": "classic_bluetooth_final_state_dropped",
+    "result": {
+      "send_attempts": 1,
+      "last_cached": "released",
+      "successful_reports": 0
+    }
+  },
+  {
+    "name": "ble_final_state_dropped",
+    "result": {
+      "write_attempts": 1,
+      "cached_state": "released"
+    }
+  },
+  {
+    "name": "pending_rumble_survives_gamepad_exit",
+    "result": {
+      "pad_closed": true,
+      "uploads_after_close": 1,
+      "motor_writes": [
+        [
+          21,
+          42,
+          1
+        ]
+      ],
+      "remaining_effects": {
+        "0": 42
+      }
+    }
+  },
+  {
+    "name": "duplicate_l2cap_channel_leaks",
+    "result": {
+      "old_channel_closed": 0,
+      "watches_for_same_psm": 2,
+      "old_channel_still_open": true
+    }
+  },
+  {
+    "name": "usb_signal_handler_installation_order",
+    "result": {
+      "first_hardware_setup_line": 423,
+      "first_signal_registration_line": 515,
+      "stop_post_in_service": false
+    }
+  }
+]

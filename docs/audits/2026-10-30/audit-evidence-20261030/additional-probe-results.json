@@ -1,0 +1,40 @@
+{
+  "scaled_hdmi_extend": {
+    "actual_commands": [
+      [
+        "--output",
+        "HDMI-A-1",
+        "--on",
+        "--preferred",
+        "--pos",
+        "0,0"
+      ],
+      [
+        "--output",
+        "DSI-1",
+        "--on",
+        "--mode",
+        "640x480",
+        "--pos",
+        "1600,2160"
+      ]
+    ],
+    "expected_internal_position": "640,1080"
+  },
+  "failed_grab": {
+    "gamepad_retained": true,
+    "gamepad_in_watched_devices": false,
+    "motor_setup_calls": 1,
+    "ungrabbed_fd_closed": false
+  },
+  "syn_dropped": {
+    "held_after": [
+      "a"
+    ],
+    "release_actions": 0
+  },
+  "tick_heartbeat": {
+    "tick_exception": "ValueError",
+    "heartbeat_after_failed_tick": 2
+  }
+}

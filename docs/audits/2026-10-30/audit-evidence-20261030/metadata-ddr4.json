@@ -1,0 +1,201 @@
+{
+  "partitions": [
+    {
+      "type": 12,
+      "offset": 16777216,
+      "size": 268435456
+    },
+    {
+      "type": 131,
+      "offset": 285212672,
+      "size": 3288334336
+    }
+  ],
+  "files": {
+    "/var/lib/dpkg/status": {
+      "size": 739804,
+      "mode": "0o100644",
+      "uid": 0,
+      "gid": 0
+    },
+    "/var/lib/apt/extended_states": {
+      "size": 37073,
+      "mode": "0o100644",
+      "uid": 0,
+      "gid": 0
+    },
+    "/etc/os-release": {
+      "size": 21,
+      "mode": "0o120777",
+      "uid": 0,
+      "gid": 0
+    },
+    "/etc/apt/sources.list": {
+      "size": 365,
+      "mode": "0o100644",
+      "uid": 0,
+      "gid": 0
+    },
+    "/etc/machine-id": {
+      "size": 0,
+      "mode": "0o100444",
+      "uid": 0,
+      "gid": 0
+    },
+    "/etc/ssh/sshd_config": {
+      "size": 3424,
+      "mode": "0o100644",
+      "uid": 0,
+      "gid": 0
+    },
+    "/etc/fstab": {
+      "size": 236,
+      "mode": "0o100644",
+      "uid": 0,
+      "gid": 0
+    },
+    "/usr/bin/ffmpeg": {
+      "size": 395480,
+      "mode": "0o100755",
+      "uid": 0,
+      "gid": 0
+    },
+    "/usr/local/bin/nwg-drawer": {
+      "size": 45438280,
+      "mode": "0o100755",
+      "uid": 0,
+      "gid": 0
+    },
+    "/etc/passwd": {
+      "size": 1204,
+      "mode": "0o100644",
+      "uid": 0,
+      "gid": 0
+    },
+    "/etc/group": {
+      "size": 685,
+      "mode": "0o100644",
+      "uid": 0,
+      "gid": 0
+    }
+  },
+  "/etc/ssh": [
+    {
+      "name": ".",
+      "size": 4096
+    },
+    {
+      "name": "..",
+      "size": 4096
+    },
+    {
+      "name": "moduli",
+      "size": 592383
+    },
+    {
+      "name": "ssh_config",
+      "size": 1668
+    },
+    {
+      "name": "ssh_config.d",
+      "size": 4096
+    },
+    {
+      "name": "sshd_config",
+      "size": 3424
+    },
+    {
+      "name": "sshd_config.d",
+      "size": 4096
+    }
+  ],
+  "/var/lib/bluetooth": [
+    {
+      "name": ".",
+      "size": 4096
+    },
+    {
+      "name": "..",
+      "size": 4096
+    }
+  ],
+  "/var/lib/tailscale": {
+    "error": "File not found: /var/lib/tailscale"
+  },
+  "/etc/NetworkManager/system-connections": [
+    {
+      "name": ".",
+      "size": 4096
+    },
+    {
+      "name": "..",
+      "size": 4096
+    }
+  ],
+  "/usr/lib/aarch64-linux-gnu": [
+    {
+      "name": "libavcodec.so.61.19.101",
+      "size": 12921072
+    },
+    {
+      "name": "libavformat.so.61.7.100",
+      "size": 2759280
+    },
+    {
+      "name": "libavformat.so.61.7.103",
+      "size": 3082704
+    },
+    {
+      "name": "libavutil.so.59.39.100",
+      "size": 854880
+    }
+  ],
+  "/usr/lib/modules": [
+    {
+      "name": ".",
+      "size": 4096
+    },
+    {
+      "name": "..",
+      "size": 4096
+    },
+    {
+      "name": "7.2.0",
+      "size": 4096
+    }
+  ],
+  "/home/rg": [
+    {
+      "name": ".",
+      "size": 4096
+    },
+    {
+      "name": "..",
+      "size": 4096
+    },
+    {
+      "name": ".bash_logout",
+      "size": 220
+    },
+    {
+      "name": ".bashrc",
+      "size": 3526
+    },
+    {
+      "name": ".cache",
+      "size": 4096
+    },
+    {
+      "name": ".config",
+      "size": 4096
+    },
+    {
+      "name": ".local",
+      "size": 4096
+    },
+    {
+      "name": ".profile",
+      "size": 807
+    }
+  ]
+}

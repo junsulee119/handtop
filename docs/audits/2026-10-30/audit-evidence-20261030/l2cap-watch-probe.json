@@ -1,0 +1,9 @@
+{
+  "registered_watches": 2,
+  "registered_fds": [
+    424,
+    440
+  ],
+  "old_socket_garbage_collected": true,
+  "conclusion": "watch cleanup omission; not a proven socket-FD leak"
+}

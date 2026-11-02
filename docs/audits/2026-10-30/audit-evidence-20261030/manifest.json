@@ -1,0 +1,52 @@
+[
+  {
+    "file": "packages-ddr4.json",
+    "bytes": 253121,
+    "sha256": "9b9de008de36f4b47ab741649ecc0b1ce0f103287b1aeff129dc54249377ddb8"
+  },
+  {
+    "file": "metadata-ddr3.json",
+    "bytes": 3419,
+    "sha256": "f40e79151ec3fcbc6908909dc533dedb2e24b8514cdad7343cb0d68205fb36e8"
+  },
+  {
+    "file": "metadata-ddr4.json",
+    "bytes": 3419,
+    "sha256": "f40e79151ec3fcbc6908909dc533dedb2e24b8514cdad7343cb0d68205fb36e8"
+  },
+  {
+    "file": "probe-results.json",
+    "bytes": 1814,
+    "sha256": "e13aa1a2f1811f4f173673d63e8534796ea753a94aa4379188c28151616c85d3"
+  },
+  {
+    "file": "additional-probe-results.json",
+    "bytes": 761,
+    "sha256": "67fd4db44f95554af2297b814c4fa6b323a1adf8124b340f66158e0413e0e05b"
+  },
+  {
+    "file": "l2cap-watch-probe.json",
+    "bytes": 192,
+    "sha256": "1c301f3f9472255d7015ea2fc2a0c578ed403cad882e43e46e93c21924e59c3d"
+  },
+  {
+    "file": "debian-security-matches.json",
+    "bytes": 632439,
+    "sha256": "ea9981a5eb76e3d1c04bf47b7d5c2d09ad62ffb6ff7e4f4f8cab14eb16e96971"
+  },
+  {
+    "file": "go-module-inventory.json",
+    "bytes": 11454,
+    "sha256": "a96071a451036ef752705ae463fd9d8727746dbe02200f575876c5908b635617"
+  },
+  {
+    "file": "go-advisory-matches.json",
+    "bytes": 716,
+    "sha256": "ffaa9f87f7d2bce8aa5dd09985bc5479add67766ccbab7a3e5f1cc6e9018e290"
+  },
+  {
+    "file": "static-inventory.json",
+    "bytes": 7101,
+    "sha256": "a8f900f6e450e80fb6dcae05294d2238cbbf737435aa1345980d63837fd45569"
+  }
+]
