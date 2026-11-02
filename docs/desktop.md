@@ -73,7 +73,7 @@ Chosen over LXQt-on-labwc (heavier) and sfwbar (smaller community) for low RAM a
 - Physical keyboard: Super+D apps, Super+Enter terminal, Super+E files, Super+X power menu, Alt+F4 close, Print screenshot.
 - **No xdg-desktop-portal**: it delayed Waybar startup (portal activation timeouts) and is only needed for screen sharing/Flatpak; GTK apps use their own file dialogs.
 - Audio: speaker starts at 100 % on a fresh system (`/etc/wireplumber/wireplumber.conf.d/50-rg35xxh.conf`; WirePlumber default is 40 %); the codec DAC and Line Out are set to 100 % by `rg35xxh-hwinit`.
-- Memory: zram swap (50 % of RAM, zstd, priority 100) plus a 2 GB swap file `/swapfile` on the SD card (priority 10, created on first boot by `rg35xxh-swapfile`). Chromium flags in `/etc/chromium.d/50-rg35xxh`; uBlock Origin Lite force-installed by policy (`/etc/chromium/policies/managed/ublock-origin-lite.json`, downloaded on first launch).
+- Memory: zram swap (50 % of RAM, zstd, priority 100) plus a 2 GB swap file `/swapfile` on the SD card (priority 10, created on first boot by `rg35xxh-swapfile`). Chromium flags in `/etc/chromium.d/50-rg35xxh`; uBlock Origin Lite and enhanced-h264ify (YouTube in H.264, so the VPU decodes it: [video-decode.md](video-decode.md)) force-installed by policy (`/etc/chromium/policies/managed/extensions.json`, downloaded on first launch). Both go in one file: Chromium does not merge a list policy that is set in two files of the same directory, so a second file would drop one of the two.
 - Component logs: `~/.local/state/session/*.log`, labwc: `~/.local/state/labwc.log`.
 
 ## Core use
@@ -94,7 +94,7 @@ Selection rule: light apps for 1 GB RAM; Qt apps preferred where equal, since mo
 | Purpose | Package(s) | Why |
 |---|---|---|
 | Remote desktop | `moonlight-qt` (official Moonlight Cloudsmith repo, debian/trixie arm64) | Core use case |
-| Browser | `chromium` + uBlock Origin Lite | Smoothest browser tested on this device (see below). Heavy browsing → use the PC via Moonlight |
+| Browser | `chromium` + uBlock Origin Lite + enhanced-h264ify | Smoothest browser tested on this device (see below). Heavy browsing → use the PC via Moonlight |
 | File manager | `thunar`, `udisks2`, `gvfs`, `exfatprogs`, `dosfstools`, `eject` | Light, Wayland-capable, familiar. Other drives (TF2 card, USB sticks) mount with a tap — see [apps/files.md](apps/files.md) |
 | Terminal | `foot` | Lightest Wayland terminal; stable app_id `foot` for copy/paste detection |
 | Text editor | `mousepad` (GUI), `micro` + `nano` (terminal) | Simple; micro supports mouse and Ctrl+C/V |

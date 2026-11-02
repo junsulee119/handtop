@@ -38,7 +38,7 @@ Status: **v0.3.5**, developed and tested on the RG35XX H.
 - Sleep (s2idle) from the power menu or after 10 min idle; Power tap wakes
 - Charges while switched off (power button boots)
 - Wi-Fi set up from Windows/macOS by editing `wifi.txt` on the boot partition
-- Chromium with uBlock Origin Lite (installed automatically on first launch when online); zram + 2 GB swap file
+- Chromium with uBlock Origin Lite and enhanced-h264ify (installed automatically on first launch when online; the second makes YouTube play on the hardware decoder); zram + 2 GB swap file
 - Boot logs written to the FAT partition, readable from any PC
 
 Full control map: [docs/services/input-daemon.md](docs/services/input-daemon.md).

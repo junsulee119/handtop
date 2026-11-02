@@ -201,6 +201,40 @@ What ships:
 Enabling it in an app:
 
 - **Chromium** needs nothing beyond the session variable.
+- **YouTube in Chromium**: YouTube sends VP9 or AV1 to any browser that says it
+  can play them, and this VPU has neither (see *Decoder hardware*), so YouTube
+  would decode on the CPU. The image force-installs
+  [enhanced-h264ify](https://github.com/alextrv/enhanced-h264ify)
+  (`omkfmpieigblcllmkgbflkikinpkodlk`, in
+  `/etc/chromium/policies/managed/extensions.json`). On YouTube pages it makes
+  `MediaSource.isTypeSupported()` / `canPlayType()` answer "no" for VP8, VP9
+  and AV1, so YouTube falls back to H.264 (avc1, up to 1080p) and Chromium
+  decodes it on the VPU. Its defaults are what we want (VP8/VP9/AV1 blocked,
+  H.264 and 60 fps allowed), so no settings are shipped; users can change them
+  from the extension's toolbar button. Downloaded from the Chrome Web Store on
+  first launch, like uBlock Origin Lite.
+  - **Recommended quality: 480p.** The screen is 640×480, so higher shows
+    nothing more, and the cost grows with resolution even though the VPU does
+    all the decoding (Chromium scales and copies the bigger frames). Measured
+    on the device (DDR4, 2026-11-02; YouTube, H.264 via VaapiVideoDecoder; VPU
+    about 30 frames/s in all three, from the video engine's interrupt count):
+
+    | YouTube quality | Chromium CPU (all processes, % of one core) | CPU idle | Dropped frames |
+    |---|---|---|---|
+    | 480p | ~140–210 % (the high end while the page loads) | 35 % | none seen |
+    | 720p | ~140 % | 57 % | none seen |
+    | 1080p | ~200–240 % | 24–34 % | a few, slowly adding up |
+
+    At 1080p the video engine's memory (CMA, 256 MB) is down to about 30 MB
+    free, so two 1080p streams, or 1080p next to Moonlight, may not fit.
+  - Why not AV1 or VP9 on the GPU or CPU: the Mali-G31 has no video decoder and
+    AV1 does not split well over shader cores; dav1d on the four A53s manages
+    480p at best, with most of the CPU.
+  - Rejected for now: our own ~10-line extension (no third-party code, works
+    offline, but we would have to follow YouTube's changes ourselves), and
+    mpv + yt-dlp (lightest on the CPU, but no YouTube page, and yt-dlp needs
+    frequent updates). enhanced-h264ify's last release is 2.2.1 (May 2024); if
+    YouTube breaks it, the own-extension route is the fallback.
 - **VLC** is not installed by the image; `apt install vlc` and run it. It needs
   XWayland (`DISPLAY=:0`) because VLC 3's Wayland window modules predate stable
   xdg-shell, which labwc does not offer.
@@ -273,7 +307,8 @@ Players:
   (`v4l2request-copy`, `drm-copy`), and `ffmpeg -hwaccel v4l2request` on the CLI.
   Throughput caveats above. AV1 is software (dav1d) on purpose: no Cedrus AV1.
 - **Chromium and VLC** — through VA-API, not FFmpeg (see *VA-API* above).
-  Chromium needs no flags; VLC is not installed by the image and needs XWayland.
+  Chromium needs no flags (YouTube through enhanced-h264ify, see above); VLC is
+  not installed by the image and needs XWayland.
 - Not covered: ffplay decodes in software only, and Firefox does not engage its
   VA-API decoder on this device.
 
