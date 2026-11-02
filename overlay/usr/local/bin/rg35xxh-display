@@ -23,7 +23,8 @@ chosen or saved mode's layout follows when it closes.
 Resolution & refresh rate: per monitor (make + model + serial) in ~/.config/rg35xxh/display-modes.json,
 otherwise the monitor's preferred mode. The picker's Resolution / Refresh steppers and Test try a mode
 on the monitor (placed apart from the handheld, so the pointer stays on it) and switch back after
-15 s unless kept. Refresh rates are passed exactly as the monitor lists them (e.g. 239.998 Hz): a
+15 s unless kept (a real-time deadline; every wlr-randr and notify-send call has a time limit, so a
+slow or stuck one cannot hold the switch-back up for good). Refresh rates are passed exactly as the monitor lists them (e.g. 239.998 Hz): a
 rounded value is an "unknown mode" to wlr-randr.
 """
 import json
@@ -31,6 +32,7 @@ import os
 import signal
 import subprocess
 import sys
+import time
 
 INTERNAL = "DSI-1"
 MODES = ("monitor", "extend", "mirror")
@@ -67,9 +69,10 @@ def save_mode(m):
         f.write(m + "\n")
 
 
-def outputs():
+def outputs(timeout=5):
     try:
-        out = subprocess.run(["wlr-randr", "--json"], capture_output=True, text=True, check=True, timeout=5).stdout
+        out = subprocess.run(["wlr-randr", "--json"], capture_output=True, text=True, check=True,
+                             timeout=timeout).stdout
         return {o["name"]: o for o in json.loads(out)}
     except (OSError, subprocess.SubprocessError, ValueError):
         return {}
@@ -162,12 +165,31 @@ def resolutions(ext):
     return out
 
 
+def logical_size(o, md):
+    """Size of output o in mode md in layout coordinates, the ones --pos uses: the mode divided
+    by the output's scale, width and height swapped when it is turned by 90 or 270 degrees."""
+    sc = float(o.get("scale") or 1.0)
+    w, h = round(md["width"] / sc), round(md["height"] / sc)
+    if str(o.get("transform") or "normal").endswith(("90", "270")):
+        w, h = h, w
+    return w, h
+
+
+# Both run in the picker's UI loop, which also counts down a mode test: each has a time limit,
+# so a stuck compositor request or notification daemon cannot hold the switch-back up for good
+# (codebase audit 2026-10-30, M10).
 def randr(*args):
-    subprocess.run(["wlr-randr", *args], check=False)
+    try:
+        subprocess.run(["wlr-randr", *args], check=False, timeout=5)
+    except (OSError, subprocess.SubprocessError) as e:
+        print(f"rg35xxh-display: wlr-randr {' '.join(args)}: {e}", file=sys.stderr)
 
 
 def notify(text):
-    subprocess.run(["notify-send", "-t", "2500", "Display", text], check=False)
+    try:
+        subprocess.run(["notify-send", "-t", "2500", "Display", text], check=False, timeout=3)
+    except (OSError, subprocess.SubprocessError):
+        pass
 
 
 def apply(osk=None):
@@ -185,8 +207,7 @@ def write_pointer_layout():
         cur = next((md for md in o.get("modes", []) if md.get("current")), None)
         if not cur:
             continue
-        sc = float(o.get("scale") or 1.0)
-        w, h = round(cur["width"] / sc), round(cur["height"] / sc)
+        w, h = logical_size(o, cur)
         factor = 1.0 if name == INTERNAL else max(1.0, (w * w + h * h) ** 0.5 / 800.0)
         pos = o.get("position") or {}
         rects.append({"name": name, "x": pos.get("x", 0), "y": pos.get("y", 0), "w": w, "h": h,
@@ -222,8 +243,10 @@ def _apply(osk=None):
             randr("--output", INTERNAL, "--off")
     elif m == "extend":            # handheld below the monitor, centred (how the two usually sit)
         randr("--output", name, "--on", *mode_args(ext), "--pos", "0,0")
-        cur = next((md for md in outputs().get(name, {}).get("modes", []) if md.get("current")), None)
-        width, height = (cur["width"], cur["height"]) if cur else (1920, 1080)
+        # In layout coordinates: a 3840x2160 monitor at scale 2 is 1920x1080 there (audit M09)
+        o = outputs().get(name, {})
+        cur = next((md for md in o.get("modes", []) if md.get("current")), None)
+        width, height = logical_size(o, cur) if cur else (1920, 1080)
         randr("--output", INTERNAL, "--on", "--mode", "640x480", "--pos", f"{max(0, (width - 640) // 2)},{height}")
     else:  # mirror: same 640x480 area on both
         randr("--output", name, "--on", "--mode", "640x480", "--pos", "0,0")
@@ -578,7 +601,7 @@ def picker(auto):
     P = palette(light_theme())
     st = {"current": mode(), "selected": None, "hover": None, "ext": external(outputs()),
           "info": describe(external(outputs())), "remaining": COUNTDOWN if (auto and docked) else None,
-          "res_sel": None, "rate_sel": None, "confirm": None, "_t": []}
+          "deadline": time.monotonic() + COUNTDOWN, "res_sel": None, "rate_sel": None, "confirm": None, "_t": []}
     moved = {"origin": None}
     done = {"v": False}
 
@@ -634,6 +657,7 @@ def picker(auto):
     def restart_countdown():
         if st["remaining"] is not None:
             st["remaining"] = COUNTDOWN
+            st["deadline"] = time.monotonic() + COUNTDOWN
             area.queue_draw()
 
     def on_motion(_w, ev):
@@ -686,7 +710,7 @@ def picker(auto):
         # The monitor comes on with that mode, apart from the handheld (no shared edge), so the
         # pointer stays on the handheld where the confirmation is.
         randr("--output", st["ext"]["name"], "--on", "--mode", spec + "Hz", "--pos", FAR)
-        st["confirm"] = {"spec": spec, "remaining": CONFIRM}
+        st["confirm"] = {"spec": spec, "remaining": CONFIRM, "deadline": time.monotonic() + CONFIRM}
 
     def end_test(keep):
         c = st["confirm"]
@@ -785,22 +809,25 @@ def picker(auto):
 
     ticks = {"n": 0}
 
+    # Countdowns run on real time (time.monotonic()), not on the number of ticks: a tick that
+    # comes late (a slow wlr-randr call) no longer stretches the 15 s of a mode test (audit M10).
     def tick():
         if done["v"]:
             return False
+        now = time.monotonic()
         if st["confirm"]:
-            st["confirm"]["remaining"] -= 0.1
+            st["confirm"]["remaining"] = max(0.0, st["confirm"]["deadline"] - now)
             if st["confirm"]["remaining"] <= 0:
                 end_test(False)                   # not confirmed: switch back
             area.queue_draw()
         elif st["remaining"] is not None:
-            st["remaining"] -= 0.1
+            st["remaining"] = max(0.0, st["deadline"] - now)
             area.queue_draw()
             if st["remaining"] <= 0:
                 finish()
                 return False
         ticks["n"] += 1
-        if docked and ticks["n"] % 10 == 0 and external(outputs()) is None:
+        if docked and ticks["n"] % 10 == 0 and external(outputs(timeout=2)) is None:
             finish(reapply=False)                 # display unplugged meanwhile
             return False
         return True
