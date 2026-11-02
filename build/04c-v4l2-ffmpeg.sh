@@ -23,10 +23,18 @@
 # has no interop for the v4l2request hwdevice and only the copy path works, which
 # caps 1080p below real time. See docs/video-decode.md ("Zero-copy").
 #
-# Branch v4l2-request-n7.1.3 is rebased on FFmpeg n7.1.3 and reports
-# libavutil 59.39.100 / libavcodec 61.19.101: the same soname ABI as Debian's
-# ffmpeg 7.1.5 that this rootfs' mpv 0.40 was built against, so nothing else is
-# rebuilt (libplacebo and friends stay as built).
+# Source = the FFmpeg release Debian ships (FFMPEG_VERSION, now 7.1.5) + Kwiboo's
+# patchset, applied as one diff (KWIBOO_BASE..KWIBOO_PIN: his branch
+# v4l2-request-n7.1.3 minus n7.1.3 itself). Up to v0.3.5 the build used Kwiboo's
+# branch as is, i.e. FFmpeg n7.1.3: about 388 upstream commits behind Debian's
+# 7.1.5, two CVE fixes among them, while dpkg still showed Debian's version (codebase
+# audit 2026-10-30, H01). The same release as Debian keeps its security fixes and
+# its soname ABI (libavutil 59.39.100 / libavcodec 61.19.101), which this rootfs'
+# mpv 0.40, Chromium and VLC were built against, so nothing else is rebuilt.
+# How to bump it: docs/video-decode.md, "Updating FFmpeg".
+#
+# The build installs into a staging folder first and copies that into the rootfs,
+# so the same build can later produce packages (planned updates without reflashing).
 #
 # Debian's ffmpeg is built against ~60 external libraries; a build with only
 # drm/udev/dav1d would drop most of them -- no gnutls, so libavformat has no
@@ -49,9 +57,17 @@ source "$(dirname "$0")/config.sh"
 source "$(dirname "$0")/lib/chroot.sh"
 trap chroot_umount EXIT
 
-KWIBOO_PIN="$FFMPEG_V4L2REQ_PIN"      # pinned in config.sh
-KWIBOO_URL="$FFMPEG_V4L2REQ_URL"
-SRC="$WORK/src/kwiboo-ffmpeg"
+SRC="$WORK/src/ffmpeg"                # FFMPEG_* and KWIBOO_* are pinned in config.sh
+STAGE="$WORK/stage/ffmpeg"            # make install goes here, then into the rootfs
+FF_VERSION="${FFMPEG_VERSION}-handtop-v4l2request-${KWIBOO_PIN:0:7}"   # what ffmpeg -version prints
+
+# Security fixes the base must contain: "CVE|file|a line of the fix". The base
+# version is what really carries them; these guard against going back to an older
+# base by mistake (codebase audit 2026-10-30, H01).
+SECURITY_FIXES=(
+  "CVE-2026-8461|libavcodec/magicyuv.c|if (1 + interlaced < height)"
+  "CVE-2026-38347|libswscale/alphablend.c|int subsample_row = y_subsample &&"
+)
 
 # Build-time headers.
 DEV_PKGS=(libdrm-dev libudev-dev zlib1g-dev libdav1d-dev
@@ -76,10 +92,29 @@ in_chroot "apt-get update -qq && apt-get install -y -qq --no-install-recommends 
 chroot_umount
 
 [ -e "$SRC" ] && safe_rm -r "$SRC"
-mkdir -p "$SRC"
+[ -e "$STAGE" ] && safe_rm -r "$STAGE"
+mkdir -p "$SRC" "$STAGE"
 git init -q "$SRC"
-(cd "$SRC" && git remote add origin "$KWIBOO_URL" && git fetch -q --depth 1 origin "$KWIBOO_PIN" && git checkout -q FETCH_HEAD)
-[ "$(cd "$SRC" && git rev-parse HEAD)" = "$KWIBOO_PIN" ] || die "kwiboo-ffmpeg checkout mismatch"
+# The release, and Kwiboo's branch deep enough to reach its base (KWIBOO_COMMITS + 1).
+(cd "$SRC" && git remote add ffmpeg "$FFMPEG_URL" && git remote add kwiboo "$KWIBOO_URL" \
+  && git fetch -q --depth 1 ffmpeg "$FFMPEG_COMMIT" \
+  && git fetch -q --depth $((KWIBOO_COMMITS + 1)) kwiboo "$KWIBOO_PIN" \
+  && git checkout -q "$FFMPEG_COMMIT")
+[ "$(cd "$SRC" && git rev-parse HEAD)" = "$FFMPEG_COMMIT" ] || die "ffmpeg checkout mismatch"
+[ "$(cat "$SRC/RELEASE")" = "$FFMPEG_VERSION" ] || die "FFMPEG_COMMIT is not release $FFMPEG_VERSION"
+[ "$(cd "$SRC" && git rev-list --count "$KWIBOO_BASE..$KWIBOO_PIN")" = "$KWIBOO_COMMITS" ] \
+  || die "Kwiboo's branch is not $KWIBOO_COMMITS commits on top of $KWIBOO_BASE"
+# git apply is all or nothing: one hunk that doesn't fit and nothing is changed.
+(cd "$SRC" && git diff --binary "$KWIBOO_BASE" "$KWIBOO_PIN" | git apply) \
+  || die "Kwiboo's patchset does not apply onto FFmpeg $FFMPEG_VERSION"
+[ -f "$SRC/libavutil/hwcontext_v4l2request.c" ] || die "Kwiboo's patchset is missing after applying it"
+for fix in "${SECURITY_FIXES[@]}"; do
+  IFS='|' read -r cve file line <<< "$fix"
+  grep -qF "$line" "$SRC/$file" || die "FFmpeg $FFMPEG_VERSION lacks the fix for $cve ($file)"
+done
+# version.sh takes the version from this file; without it ffmpeg -version would show
+# only a commit hash.
+echo "$FF_VERSION" > "$SRC/VERSION"
 
 # Local patch: register the decoders under the DRM device type as well, and
 # accept the DRM device a render API's dmabuf interop hands over.
@@ -93,9 +128,9 @@ export PKG_CONFIG_LIBDIR="$ROOTFS/usr/lib/aarch64-linux-gnu/pkgconfig:$ROOTFS/us
 (cd "$SRC" && ./configure --arch=aarch64 --target-os=linux --enable-cross-compile --cross-prefix=aarch64-linux-gnu- --sysroot="$ROOTFS" --pkg-config=pkg-config --prefix=/usr --libdir=/usr/lib/aarch64-linux-gnu --enable-shared --disable-static --disable-doc --disable-debug --enable-gpl --enable-neon --enable-libdrm --enable-libudev --enable-libdav1d --enable-v4l2-request --enable-vaapi --enable-gnutls --enable-libx264 --enable-libmp3lame --enable-libopus --enable-libvorbis --enable-libvpx --enable-libass --enable-libfreetype --enable-libxml2 > "$WORK/ffmpeg-config.log" 2>&1)
 (cd "$SRC" && make -j"$(nproc)" > "$WORK/ffmpeg-build.log" 2>&1)
 
-(cd "$SRC" && make DESTDIR="$ROOTFS" install >> "$WORK/ffmpeg-build.log" 2>&1)
+(cd "$SRC" && make DESTDIR="$STAGE" install >> "$WORK/ffmpeg-build.log" 2>&1)
 
-file "$ROOTFS/usr/bin/ffmpeg" | grep -q "ARM aarch64" || die "ffmpeg is not arm64"
+file "$STAGE/usr/bin/ffmpeg" | grep -q "ARM aarch64" || die "ffmpeg is not arm64"
 grep -q "#define CONFIG_V4L2_REQUEST 1" "$SRC/config.h" || die "v4l2_request not compiled in"
 for c in H264 HEVC AV1 VP8 VP9 MPEG2; do
   grep -q "#define CONFIG_${c}_V4L2REQUEST_HWACCEL 1" "$SRC/config_components.h" \
@@ -118,10 +153,24 @@ done
 # docs/video-decode.md.
 grep -q "#define CONFIG_LIBDAV1D 1" "$SRC/config.h" || die "dav1d not compiled in"
 
+# Where these files came from: dpkg still lists Debian's libav* packages (held below)
+# although their files are replaced, so the image records the real source here.
+mkdir -p "$STAGE/usr/share/doc/handtop-ffmpeg"
+{
+  echo "FFmpeg $FF_VERSION, built by Handtop's build/04c-v4l2-ffmpeg.sh."
+  echo "It replaces the files of Debian's libav* packages (held); dpkg still shows Debian's version."
+  echo "base:      FFmpeg $FFMPEG_VERSION, $FFMPEG_URL commit $FFMPEG_COMMIT"
+  echo "patchset:  $KWIBOO_URL $KWIBOO_BASE..$KWIBOO_PIN ($KWIBOO_COMMITS commits)"
+  echo "patch:     build/patches/ffmpeg-v4l2request-drm.patch sha256 $(sha256sum "$FF_PATCH" | cut -d' ' -f1)"
+} > "$STAGE/usr/share/doc/handtop-ffmpeg/BUILDINFO"
+chmod -R u=rwX,go=rX "$STAGE"
+# --no-overwrite-dir: leave the rootfs' own directories (owner, mode) as they are.
+tar -C "$STAGE" -cf - . | tar -C "$ROOTFS" -xf - --no-overwrite-dir
+
 chroot_mount
 in_chroot "ldconfig"
 [[ "$(in_chroot "command -v ffmpeg")" == "/usr/bin/ffmpeg" ]] || die "ffmpeg in PATH is not /usr/bin/ffmpeg"
-[[ "$(in_chroot "ffmpeg -version")" == *"${KWIBOO_PIN:0:7}"* ]] || die "patched ffmpeg is not the installed one"
+[[ "$(in_chroot "ffmpeg -version")" == *"$FF_VERSION"* ]] || die "patched ffmpeg is not the installed one"
 in_chroot "ffmpeg -hide_banner -hwaccels" | grep -w v4l2request >/dev/null || die "installed ffmpeg has no v4l2request hwaccel"
 in_chroot "ffmpeg -hide_banner -hwaccels" | grep -w vaapi >/dev/null || die "installed ffmpeg has no vaapi hwaccel"
 in_chroot "ffmpeg -hide_banner -decoders" | grep -w libdav1d >/dev/null || die "installed ffmpeg has no dav1d decoder"
@@ -172,4 +221,4 @@ done
 in_chroot "apt-get purge -y -qq ${DEV_PKGS[*]} && apt-get autoremove -y -qq --purge && apt-get clean"
 safe_rm -r "$ROOTFS"/var/lib/apt/lists/*
 mkdir -p "$ROOTFS/var/lib/apt/lists/partial"
-echo "kwiboo-ffmpeg $KWIBOO_PIN installed to /usr."
+echo "ffmpeg $FF_VERSION installed to /usr."

@@ -30,12 +30,21 @@ JOYPAD_URL="https://github.com/ROCKNIX/rocknix-joypad/archive/${JOYPAD_COMMIT}.t
 JOYPAD_SHA256="89ade1769d6eb7b4f37265f26407a422cdbcf517487f80eb1c29964904ca138e"
 CMA_SIZE="256M"                    # contiguous memory for the decoder (no IOMMU, see docs/video-decode.md)
 
-# FFmpeg with the V4L2 request-API hwaccels (04c-v4l2-ffmpeg.sh): Kwiboo's tree, the same
-# patchset Moonlight embeds. Pinned commit of branch v4l2-request-n7.1.3, which is rebased on
-# FFmpeg n7.1.3 and reports the same libav ABI as Debian's ffmpeg 7.1.5, so nothing else is
-# rebuilt (mpv keeps working against the replaced libs).
-FFMPEG_V4L2REQ_URL="https://github.com/Kwiboo/FFmpeg"
-FFMPEG_V4L2REQ_PIN="fad85d9c76611c09b561167ab405c667a0dcdeb7"
+# FFmpeg with the V4L2 request-API hwaccels (04c-v4l2-ffmpeg.sh) = FFmpeg release + Kwiboo's
+# patchset (the one Moonlight embeds), applied as a diff.
+# - Base: the FFmpeg release Debian ships (trixie: 7.1.5), so the security fixes Debian has are
+#   in ours too and the libav ABI matches the one mpv, Chromium and VLC were built against.
+#   When Debian moves on (7.1.6, ...), bump FFMPEG_VERSION / FFMPEG_COMMIT to the same release:
+#   docs/video-decode.md, "Updating FFmpeg".
+# - Patchset: branch v4l2-request-n7.1.3 is KWIBOO_COMMITS commits on top of n7.1.3
+#   (KWIBOO_BASE); the build applies diff KWIBOO_BASE..KWIBOO_PIN onto the base.
+FFMPEG_URL="https://github.com/FFmpeg/FFmpeg"
+FFMPEG_VERSION="7.1.5"
+FFMPEG_COMMIT="3a0867c2bfda4a4d4309ca1a8cbdc6175e67f587"   # tag n7.1.5
+KWIBOO_URL="https://github.com/Kwiboo/FFmpeg"
+KWIBOO_BASE="f46e514491172d15bd74b4abb1814cd2f05a763e"     # tag n7.1.3
+KWIBOO_PIN="fad85d9c76611c09b561167ab405c667a0dcdeb7"      # head of v4l2-request-n7.1.3
+KWIBOO_COMMITS=14
 
 # Target system identity
 HOSTNAME_TARGET="rg35xxh"

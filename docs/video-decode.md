@@ -8,8 +8,8 @@ Moonlight already did (it links its own patched FFmpeg).
 
 Debian trixie's FFmpeg 7.1 ships only the mainline `drm` hwaccel, which does
 not work against Cedrus here, so `build/04c-v4l2-ffmpeg.sh` cross-builds
-**Kwiboo's FFmpeg** (`v4l2-request-n7.1.3` — the V4L2 Request API patchset,
-the same code Moonlight embeds) and installs it over the system libs. It
+**FFmpeg 7.1.5 (the release Debian ships) with Kwiboo's V4L2 Request API
+patchset** (the same code Moonlight embeds) and installs it over the system libs. It
 registers the `v4l2request` hwdevice with the
 `h264/hevc/av1/vp8/vp9/mpeg2video_v4l2request` hwaccels and, with
 `build/patches/ffmpeg-v4l2request-drm.patch`, the same decoders again under the
@@ -327,7 +327,26 @@ GPU cannot import the decoded picture (see "The blue video").
 
 Review notes: all phandles/IDs the node uses exist in 7.2 (`ve_sram`, `sram_c`, `iommu`, `CLK_BUS_VE`/`CLK_VE`/`CLK_MBUS_VE`, `RST_BUS_VE`); `sunxi_sram` already supports `sun50i-h616-ve-sram`; the request API is always built in 7.2.
 
-For the userspace side, the FFmpeg tree is [Kwiboo/FFmpeg](https://github.com/Kwiboo/FFmpeg) branch `v4l2-request-n7.1.3` (pinned by commit in `build/04c-v4l2-ffmpeg.sh`); it is rebased on FFmpeg n7.1.3 and reports the same `libavutil 59.39.100` / `libavcodec 61.19.101` soname ABI as Debian's ffmpeg 7.1.5, so no other package is rebuilt. It is the only tree that has `libavutil/hwcontext_v4l2request.c`.
+For the userspace side, the source is the FFmpeg release Debian ships (now **n7.1.5**) with the patchset from [Kwiboo/FFmpeg](https://github.com/Kwiboo/FFmpeg) branch `v4l2-request-n7.1.3` applied on top. That branch is 14 commits on n7.1.3; `build/04c-v4l2-ffmpeg.sh` applies exactly those 14 (the diff from n7.1.3 to the pinned head, all pins in `build/config.sh`) onto n7.1.5. It is the only tree that has `libavutil/hwcontext_v4l2request.c`. Same release as Debian means the same `libavutil 59.39.100` / `libavcodec 61.19.101` soname ABI that mpv, Chromium and VLC were built against, so no other package is rebuilt.
+
+`ffmpeg -version` shows `7.1.5-handtop-v4l2request-fad85d9`. dpkg still lists Debian's `libav*` packages (they are held, see below) although their files are replaced: `/usr/share/doc/handtop-ffmpeg/BUILDINFO` records the real source (base commit, patchset range, local patch checksum).
+
+### Why the release Debian ships, not Kwiboo's branch as is
+
+Up to v0.3.5 the image built Kwiboo's branch unchanged, which is FFmpeg n7.1.3. Debian had moved on to 7.1.5, about 388 upstream commits later, including the fixes for CVE-2026-8461 (MagicYUV) and CVE-2026-38347 (swscale), and the apt hold kept those from ever arriving, while dpkg still reported Debian's version (codebase audit of 2026-10-30, finding H01). Kwiboo has no branch on 7.1.5, but his 14 commits apply onto it with no conflicts and give the identical diff; six of the files they touch also changed between 7.1.3 and 7.1.5 (`configure`, `libavcodec/Makefile`, and the decoders `av1dec.c`, `h264_slice.c`, `vp8.c`, `vp9.c`, which got bounds and consistency fixes), and those changes are now in. Rejected: cherry-picking only the two CVE fixes onto n7.1.3 (leaves the other ~386 commits out); committing the patchset (~5,200 lines) into this repo (bigger repo and a copy of upstream code to keep in sync; the build fetches it from Kwiboo's repo by commit instead, like before).
+
+The build stops if the base is not the pinned release, if the patchset is not exactly `KWIBOO_COMMITS` commits on its base, if it does not apply, or if a line of either CVE fix is missing (`SECURITY_FIXES` in `04c`, a guard against going back to an older base by mistake).
+
+### Updating FFmpeg
+
+When Debian's `ffmpeg` moves to a new release (`apt-cache policy ffmpeg` in the chroot, or the Debian tracker), move ours to the same one:
+
+1. In `build/config.sh` set `FFMPEG_VERSION` and `FFMPEG_COMMIT` (the commit of tag `n<version>` in FFmpeg's repo).
+2. Rebuild: `04c` stops with "does not apply" if the patchset no longer fits; then check Kwiboo's repo for a newer branch (set `KWIBOO_BASE`, `KWIBOO_PIN`, `KWIBOO_COMMITS`) or port the conflict.
+3. Keep the soname ABI: `libavcodec/version_major.h` and `libavutil/version.h` must still give the major versions Debian's packages have (61 / 59 on trixie); otherwise mpv and the rest would need rebuilding.
+4. Test on the device as in *Status*: mpv H.264, HEVC, MPEG-2 and VP8 (`vaapi` and `drm`), Chromium on YouTube, `tools/check-video-decode.sh`.
+
+Debian security updates inside the same release (`7.1.5-0+deb13u2` and so on) are patches on top of 7.1.5; compare them with the next FFmpeg point release and pick them up the same way when they matter. The planned updates without reflashing will ship this build as packages; until then a fix reaches handhelds only with a new image.
 
 ## Why no IOMMU
 

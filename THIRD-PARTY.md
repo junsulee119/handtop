@@ -25,7 +25,7 @@ Taken unmodified from the official image
 | `sunxi-cedrus.ko` (video decoder module) | GPL-2.0 | linux 7.2 (kernel.org) + ROCKNIX `20261001` kernel patches + `build/kernel/0001-cedrus-add-h616-variant.patch` (Chen-Yu Tsai, upstream "arm64: allwinner: h616: Support Video Engine" v3), built by `build/06b-cedrus.sh` |
 | Video-engine device-tree overlay | GPL-2.0 / MIT (as upstream sunxi DTs) | `build/dts/rg35xxh-video-engine.dtso`, based on patch 7/7 of the same series |
 | nwg-drawer v0.7.5 | MIT | https://github.com/nwg-piotr/nwg-drawer, built by `build/04b-nwg-drawer.sh` |
-| FFmpeg 7.1.3 with the V4L2 request-API patchset, plus a local patch registering the decoders under the DRM device type | GPL-2.0-or-later | https://github.com/Kwiboo/FFmpeg, commit `fad85d9c76611c09b561167ab405c667a0dcdeb7` (branch `v4l2-request-n7.1.3`) + `build/patches/ffmpeg-v4l2request-drm.patch`, built by `build/04c-v4l2-ffmpeg.sh` |
+| FFmpeg 7.1.5 with the V4L2 request-API patchset, plus a local patch registering the decoders under the DRM device type | GPL-2.0-or-later | https://github.com/FFmpeg/FFmpeg tag `n7.1.5` (commit `3a0867c2bfda4a4d4309ca1a8cbdc6175e67f587`) + the patchset from https://github.com/Kwiboo/FFmpeg (`f46e514491172d15bd74b4abb1814cd2f05a763e..fad85d9c76611c09b561167ab405c667a0dcdeb7`, branch `v4l2-request-n7.1.3`) + `build/patches/ffmpeg-v4l2request-drm.patch`, built by `build/04c-v4l2-ffmpeg.sh` |
 
 ## Data from other projects
 
