@@ -46,7 +46,7 @@ Where they come from:
 ## 6. Power states and radios
 
 1. **Power-state changes check the others.** Before suspending, turning the screen off, taking CPU cores offline or switching a controller mode, check which of the others is active. Either combine them deliberately and test the combination, or refuse. Example: auto-sleep never suspends during Screen off, which has cores 1–3 offline (*review*, done; [apps/power-menu.md](apps/power-menu.md)).
-2. **Restore on every path:** a power state entered by one session must be undone if that session ends (log-out, crash).
+2. **Restore on every path:** a power state entered by one session must be undone if that session ends (log-out, crash). Screen off: the next session's autostart leaves it (done 2026-11, codebase audit M12).
 3. **Do as little to the radio as possible.** Wi-Fi and Bluetooth share one chip (RTL8821CS, rtw88). Power-cycling Bluetooth or restarting `bluetoothd` can stall Wi-Fi, which takes SSH with it. Changes there get a stress test (enter and leave 10 times while pinging the handheld) (*review*, done 2026-10-26: BT Controller mode 20 times on and off, 340/340 pings answered, worst 13.5 ms, no new rtw88 errors).
 4. **Nothing writes to the power chip, regulators or charging limits** (`axp*`, `regulator`, `input_current_limit`, `/dev/mem`, `i2cset`) without a documented reason and a recovery plan. As of 2026-10-26, nothing in Handtop does.
 

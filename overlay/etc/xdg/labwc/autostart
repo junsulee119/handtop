@@ -20,6 +20,12 @@ if [ -n "$OLD" ] && [ "$OLD" != "$ME" ] \
 fi
 echo "$ME" > "$R/rg35xxh-autostart.pgid"
 echo 0 > "$R/rg35xxh-session-starts"   # labwc is up: reset the failed-start counter (zz-rg35xxh-session.sh)
+# Screen off left on by the previous session (log-out or crash while the screen was off): its
+# low-power state is in /run and outlives the session, so this one would start with the
+# backlight off, CPU cores 1-3 offline and the audio off. The old session's helpers are gone by
+# now, so leave it before the input daemon starts (codebase audit 2026-10-30, M12).
+rm -f "$R/rg35xxh-screen-off"
+[ -e /run/rg35xxh-lowpower ] && sudo -n /usr/local/sbin/rg35xxh-lowpower off >>"$L/lowpower.log" 2>&1
 dbus-update-activation-environment --systemd WAYLAND_DISPLAY XDG_CURRENT_DESKTOP >/dev/null 2>&1
 (while :; do rg35xxh-inputd >>"$L/inputd.log" 2>&1; sleep 2; done) &
 rg35xxh-osd >"$L/osd.log" 2>&1 &     # volume / brightness bar, left edge (src/osd)
