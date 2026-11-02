@@ -173,6 +173,7 @@ class Daemon:
         self.devices = []          # grabbed physical devices
         self.gamepad = None
         self.absinfo = {}
+        self.dropped = set()       # paths of devices whose events are being dropped until SYN_REPORT
         self.pad = None            # virtual Xbox pad (gamepad mode only)
         self.pad_ff = {}           # virtual effect id -> physical effect id
         self.bt = None             # socket to rg35xxh-btpad / -usbpad (external controller modes)
@@ -582,6 +583,19 @@ class Daemon:
         now = time.monotonic()
         try:
             for ev in dev.read():
+                # SYN_DROPPED: the kernel's event queue for this device overflowed (the main
+                # loop was busy) and events were lost, possibly a button release or a stick
+                # returning to the centre. Skip everything up to the next SYN_REPORT, then
+                # read the device's real state (codebase audit 2026-10-30, M06; the kernel's
+                # input event-codes documentation asks for exactly this).
+                if ev.type == E.EV_SYN and ev.code == E.SYN_DROPPED:
+                    self.dropped.add(dev.path)
+                    continue
+                if dev.path in self.dropped:
+                    if ev.type == E.EV_SYN and ev.code == E.SYN_REPORT:
+                        self.dropped.discard(dev.path)
+                        self._resync(dev, now)
+                    continue
                 if ev.type == E.EV_KEY and ev.value in (0, 1):
                     log.debug("key 0x%x %s -> %s", ev.code, "down" if ev.value else "up",
                               HW_BUTTONS.get(ev.code))
@@ -594,6 +608,23 @@ class Daemon:
         except OSError as e:
             log.error("read error on %s: %s", dev.path, e)
         return True
+
+    def _resync(self, dev, now):
+        """Bring the core in line with what dev reports now: buttons that changed while events
+        were dropped are pressed or released, and the sticks get their current position."""
+        down = set(dev.active_keys())
+        keys = set(dev.capabilities().get(E.EV_KEY, []))
+        changed = []
+        for code, name in HW_BUTTONS.items():
+            if code in keys and (code in down) != (name in self.core.held):
+                changed.append(name)
+                self._run(self.core.button(name, code in down, now))
+        if self.gamepad is not None and dev.path == self.gamepad.path:
+            for code, name in HW_AXES.items():
+                if code in self.absinfo:
+                    self._run(self.core.axis(name, self._norm(code, dev.absinfo(code).value), now))
+        log.warning("input events dropped on %s; state read again (changed: %s)",
+                    dev.path, ", ".join(changed) or "no buttons")
 
     def _norm(self, code, value):
         info = self.absinfo.get(code)

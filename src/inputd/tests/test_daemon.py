@@ -1,7 +1,7 @@
 """Unit tests for failure paths in rg35xxh_inputd.daemon, with python-evdev and GLib replaced
 by small fakes: no hardware, no display, nothing is grabbed or vibrated. Run with pytest
 (cd src/inputd && python3 -m pytest -q tests). The cases come from the codebase audit of
-2026-10-30 (M02, M05, M07)."""
+2026-10-30 (M02, M05, M06, M07)."""
 import os
 import sys
 import types
@@ -110,6 +110,8 @@ def bare_daemon():
     d.motor_ext_ids = {}
     d.motor_game_endless, d.motor_game_active = set(), set()
     d.devices = []
+    d.dropped = set()
+    d.absinfo = {}
     return d
 
 
@@ -163,6 +165,82 @@ def test_device_read_oserror_keeps_running():
     GLib.idle.clear()
     assert d._on_device(3, GLib.IO_IN, dev) is True
     assert GLib.idle == []
+
+
+# ---- M06: events dropped by the kernel are recovered from the device's state
+class Core:
+    def __init__(self, held=()):
+        self.held = dict.fromkeys(held, 0.0)
+        self.calls = []
+
+    def button(self, name, pressed, t):
+        self.calls.append((name, pressed))
+        if pressed:
+            self.held[name] = t
+        else:
+            self.held.pop(name, None)
+        return []
+
+    def axis(self, name, value, t):
+        self.calls.append((name, round(value, 2)))
+        return []
+
+
+def _ev(t, code, value=0):
+    return types.SimpleNamespace(type=t, code=code, value=value)
+
+
+def _dropped_gamepad(events, active=(), axes=None):
+    dev = FakeGamepad()
+    dev.read = lambda: list(events)
+    dev.active_keys = lambda: list(active)
+    keys = list(daemon.HW_BUTTONS)
+    dev.capabilities = lambda: {E.EV_KEY: keys, E.EV_ABS: []}
+    dev.absinfo = lambda code: types.SimpleNamespace(value=(axes or {}).get(code, 0))
+    return dev
+
+
+A = next(c for c, n in daemon.HW_BUTTONS.items() if n == "a")
+B = next(c for c, n in daemon.HW_BUTTONS.items() if n == "b")
+
+
+def test_release_lost_in_a_queue_overflow_is_recovered():
+    d = bare_daemon()
+    d.core = Core(held=["a"])
+    d._run = lambda actions: None
+    # A was released while the queue overflowed: the kernel sends SYN_DROPPED, maybe stale
+    # events, then SYN_REPORT; the device now reports A up.
+    dev = _dropped_gamepad([_ev(E.EV_SYN, E.SYN_DROPPED), _ev(E.EV_KEY, B, 1),
+                            _ev(E.EV_SYN, E.SYN_REPORT)], active=[])
+    d.gamepad = dev
+    assert d._on_device(3, GLib.IO_IN, dev) is True
+    assert ("a", False) in d.core.calls and "a" not in d.core.held
+    assert ("b", True) not in d.core.calls            # the stale event inside the gap is skipped
+    assert d.dropped == set()
+
+
+def test_resync_presses_held_buttons_and_reads_the_sticks():
+    d = bare_daemon()
+    d.core = Core()
+    d._run = lambda actions: None
+    d.absinfo = {E.ABS_X: types.SimpleNamespace(min=-100, max=100)}
+    d.axis_offset, d.hw = {}, {}
+    dev = _dropped_gamepad([_ev(E.EV_SYN, E.SYN_DROPPED), _ev(E.EV_SYN, E.SYN_REPORT)],
+                           active=[B], axes={E.ABS_X: 50})
+    d.gamepad = dev
+    d._on_device(3, GLib.IO_IN, dev)
+    assert d.core.calls == [("b", True), ("lx", 0.5)]
+
+
+def test_events_after_the_gap_are_handled_normally():
+    d = bare_daemon()
+    d.core = Core()
+    d._run = lambda actions: None
+    dev = _dropped_gamepad([_ev(E.EV_SYN, E.SYN_DROPPED), _ev(E.EV_SYN, E.SYN_REPORT),
+                            _ev(E.EV_KEY, A, 1), _ev(E.EV_SYN, E.SYN_REPORT)])
+    d.gamepad = None                                   # not the gamepad: no stick read
+    d._on_device(3, GLib.IO_IN, dev)
+    assert d.core.calls == [("a", True)]
 
 
 # ---- M07: a device that cannot be grabbed is not used
