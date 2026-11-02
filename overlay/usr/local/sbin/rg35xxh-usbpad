@@ -410,10 +410,24 @@ class Pad:
             pass
 
 
+def _stop_during_setup(sig, _frame):
+    """SIGTERM / SIGINT before the main loop runs: leave through the finally below, which removes
+    the gadget. Python's default for SIGTERM ends the process at once, skipping it (a mode change
+    or shutdown during set-up left the gadget bound; codebase audit 2026-10-30, M08). A second
+    signal is ignored so it can't interrupt the clean-up."""
+    for s in (signal.SIGTERM, signal.SIGINT):
+        signal.signal(s, signal.SIG_IGN)
+    raise SystemExit(f"{signal.Signals(sig).name} during set-up")
+
+
 def main():
     # Everything from the first step that touches the USB controller is inside the try: a set-up
     # that fails halfway (no UDC, FunctionFS refused, endpoint not opening) still unbinds and
     # removes the gadget (docs/hardware-safety.md, rule 2.3). gadget_down() copes with any stage.
+    # The same holds for a stop request during set-up: the handler is in place before the first
+    # step; the main loop's own handlers replace it once everything is up.
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        signal.signal(sig, _stop_during_setup)
     loop = GLib.MainLoop()
     fds = []
     status = pad = None
@@ -433,6 +447,10 @@ def main():
         log("USB gadget on", udc, "(right USB-C port, OTG2/DC)")
         if os.environ.get("RG35XXH_USBPAD_TEST_FAIL"):     # testing: fail right after binding
             raise RuntimeError("test failure after binding the gadget (RG35XXH_USBPAD_TEST_FAIL)")
+        stall = os.environ.get("RG35XXH_USBPAD_TEST_STALL")    # testing: time to stop it mid-set-up
+        if stall:
+            log(f"test: waiting {stall} s after binding (RG35XXH_USBPAD_TEST_STALL)")
+            time.sleep(float(stall))
         ep_in = os.open(f"{FFS}/ep1", os.O_RDWR)
         fds.append(ep_in)
         ep_out = os.open(f"{FFS}/ep2", os.O_RDWR)
@@ -515,6 +533,8 @@ def main():
             GLib.unix_signal_add(GLib.PRIORITY_DEFAULT, sig, lambda *a: (loop.quit(), False)[1])
         loop.run()
     finally:
+        for sig in (signal.SIGTERM, signal.SIGINT):     # nothing may interrupt the clean-up
+            signal.signal(sig, signal.SIG_IGN)
         for part in (pad, status):
             if part is not None:
                 try:
@@ -530,6 +550,8 @@ if __name__ == "__main__":
     code = 0
     try:
         main()
+    except SystemExit as e:      # stopped during set-up (_stop_during_setup); gadget already removed
+        log("stopped:", e)
     except Exception:
         import traceback
         traceback.print_exc()

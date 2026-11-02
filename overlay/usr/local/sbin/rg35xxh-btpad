@@ -61,6 +61,7 @@ CHR_IFACE = "org.bluez.GattCharacteristic1"
 DSC_IFACE = "org.bluez.GattDescriptor1"
 ADV_IFACE = "org.bluez.LEAdvertisement1"
 AGENT_IFACE = "org.bluez.Agent1"
+RETRY_MS = 10              # link busy: send the newest report again after this
 
 PROFILE_NAMES = {"xbox": "Handtop (Xbox)", "generic": "Handtop Gamepad"}   # short: fits the advertisement
 SOCKET = "/run/rg35xxh-extpad.sock"                 # shared with rg35xxh-usbpad (one runs at a time)
@@ -233,19 +234,22 @@ class Characteristic(dbus.service.Object):
         pass
 
     def notify(self, value):
+        """Send the value. Returns False if the link was busy and nothing was sent: the caller
+        sends again (the newest state) instead of assuming it arrived."""
         self.value = bytes(value)
         if self.notify_fd is not None:
             try:
                 os.write(self.notify_fd, self.value)
-                return
+                return True
             except BlockingIOError:
-                return                    # link busy: the next report carries the newest state
+                return False              # link busy
             except OSError:
                 self._release_notify_fd()
         # No socket (yet): emit the value. BlueZ delivers it to every client that enabled
         # notifications, including bonded clients whose subscription it remembered from an
         # earlier session (Windows does not subscribe again after reconnecting).
         self.PropertiesChanged(CHR_IFACE, {"Value": dbus.Array(self.value, signature="y")}, [])
+        return True
 
     @dbus.service.method(PROP_IFACE, in_signature="s", out_signature="a{sv}")
     def GetAll(self, interface):
@@ -391,8 +395,15 @@ class Pad:
         self.pending = False
         r = self.xbox_report() if PROFILE == "xbox" else self.report()
         if r != self.last:
+            if not self.chr.notify(r):
+                # Link busy: not sent. Remember nothing and try again shortly with the newest
+                # state; before, the report counted as sent, and when it was the last one (a
+                # button released, a stick back in the centre) the host kept the old state
+                # (codebase audit 2026-10-30, M01).
+                self.pending = True
+                GLib.timeout_add(RETRY_MS, self.flush)
+                return False
             self.last = r
-            self.chr.notify(r)
             if self.status:
                 self.status.report(self.report())
         return False

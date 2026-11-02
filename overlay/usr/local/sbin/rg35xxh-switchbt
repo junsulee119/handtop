@@ -126,6 +126,7 @@ XBOX_BUTTONS = {E.BTN_A: 0x0001, E.BTN_B: 0x0002, E.BTN_X: 0x0008, E.BTN_Y: 0x00
                 E.BTN_TR: 0x0080, E.BTN_START: 0x0800, E.BTN_THUMBL: 0x2000, E.BTN_THUMBR: 0x4000}
 XBOX_HAT = {(0, -1): 1, (1, -1): 2, (1, 0): 3, (1, 1): 4, (0, 1): 5, (-1, 1): 6, (-1, 0): 7, (-1, -1): 8}
 XBOX_MIN_MS = 8                             # input reports: on change, at most one per 8 ms
+RETRY_MS = 10                               # link busy: send the newest report again after this
 
 SDP_RECORD = """<?xml version="1.0" encoding="UTF-8" ?>
 <record>
@@ -506,6 +507,7 @@ class Link:
         self.seen = set()                 # subcommands logged once per connection
         self.sent = 0
         self.watches = []
+        self.watch_by_psm = {}
         self.stream = None
         self.servers = []
         for psm in (PSM_CTRL, PSM_ITR):
@@ -535,12 +537,29 @@ class Link:
     def attach(self, conn, psm, addr):
         conn.setblocking(False)
         self.peer = addr
+        # The same host can open a channel again before both are up (a retry): the new socket
+        # replaces the old one, so the old one's watch goes too. Left behind, it kept watching a
+        # descriptor that is closed once the old socket is collected, and a watch on a closed
+        # descriptor can wake the main loop over and over (codebase audit 2026-10-30, M03).
+        old = self.ctrl if psm == PSM_CTRL else self.itr
+        if old is not None:
+            log(f"channel {psm} opened again by {addr}: replacing the old one")
+            w = self.watch_by_psm.pop(psm, None)
+            if w is not None:
+                GLib.source_remove(w)
+                if w in self.watches:
+                    self.watches.remove(w)
+            try:
+                old.close()
+            except OSError:
+                pass
         if psm == PSM_CTRL:
             self.ctrl = conn
         else:
             self.itr = conn
-        self.watches.append(GLib.io_add_watch(conn.fileno(), GLib.IO_IN | GLib.IO_HUP | GLib.IO_ERR,
-                                              self.on_data, psm))
+        w = GLib.io_add_watch(conn.fileno(), GLib.IO_IN | GLib.IO_HUP | GLib.IO_ERR, self.on_data, psm)
+        self.watch_by_psm[psm] = w
+        self.watches.append(w)
         if self.ctrl and self.itr:
             self.connected()
 
@@ -608,9 +627,16 @@ class Link:
         self.xbox_pending = False
         r = self.pad.xbox_report()
         if r != self.xbox_last:
+            sent = self.send_itr(b"\xa1\x01" + r)
+            if sent is False:
+                # Link busy: not sent. Try again shortly with the newest state instead of
+                # counting it as sent; when it was the last report (a release, a stick back in
+                # the centre) the host kept the old state (codebase audit 2026-10-30, M01).
+                self.xbox_pending = True
+                GLib.timeout_add(RETRY_MS, self._xbox_send)
+                return False
             self.xbox_last = r
             self.xbox_sent_at = time.monotonic()
-            self.send_itr(b"\xa1\x01" + r)
         return False
 
     def xbox_rumble(self, data):
@@ -642,6 +668,7 @@ class Link:
         for w in self.watches:
             GLib.source_remove(w)
         self.watches = []
+        self.watch_by_psm = {}
         if self.stream:
             GLib.source_remove(self.stream)
             self.stream = None
@@ -766,15 +793,19 @@ class Link:
         return True
 
     def send_itr(self, data):
+        """True: sent. False: link busy, nothing sent (a caller that must deliver this state sends
+        again). None: no link (not connected, or dropped by this failure)."""
         if not self.itr:
-            return
+            return None
         try:
             self.itr.send(data, socket.MSG_DONTWAIT)
             self.sent += 1
+            return True
         except BlockingIOError:
-            pass                                         # link busy: the next report carries the state
+            return False                                 # link busy (the 0x30 stream just sends the next one)
         except OSError as e:
             self.drop(f"send failed: {e}")
+            return None
 
     def send_ctrl(self, data):
         if self.ctrl:

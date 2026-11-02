@@ -37,6 +37,7 @@ Go through **[docs/reliability-checklist.md](docs/reliability-checklist.md)** fo
 | `overlay/` | Files copied as-is into the root filesystem (`/etc`, `/usr/local/bin`, `/usr/local/sbin`, systemd units, udev rules, icons) |
 | `src/inputd/` | Input daemon (Python): `core.py` (pure logic, unit-tested), `daemon.py` (devices, motor, modes), `ui.py` + `osk.py` (on-screen keyboard and other windows, in a separate process), `config.py`, `tests/` |
 | `src/osd/`, `src/bootsplash/` | Small C programs (volume / brightness bar, boot screen), cross-compiled by the build |
+| `tests/` | Unit tests for the External Controller services (`overlay/usr/local/sbin`), with D-Bus, evdev and GLib faked; run by CI |
 | `tools/` | Test helpers (QEMU, headless screenshots); `tools/icons/`: generators for all pixel-art icons, cursors, logo and wallpapers |
 | `docs/` | One document per app or background service, plus general topics |
 | `boot-files/`, `media/` | Boot partition files; logo and README images |

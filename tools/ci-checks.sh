@@ -53,7 +53,8 @@ done
 # ---- input daemon unit tests, both ways: pytest, and the direct run the image build uses
 # (build/08-input.sh). Both must run the same number of tests (audit 2026-10-30, L01).
 step "input daemon tests"
-(cd src/inputd && python3 -m pytest -q tests) || bad "pytest"
+(cd src/inputd && python3 -m pytest -q tests) || bad "pytest (input daemon)"
+python3 -m pytest -q tests || bad "pytest (tests/: External Controller services)"
 direct="$(PYTHONDONTWRITEBYTECODE=1 python3 src/inputd/tests/test_core.py)" || bad "direct test run"
 echo "$direct" | tail -n1
 n_direct="$(echo "$direct" | tail -n1 | sed -n 's#^[0-9]*/\([0-9]*\) passed$#\1#p')"
