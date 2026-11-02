@@ -236,8 +236,8 @@ def choose():
         d.format_secondary_markup(
             "Bluetooth restarts as a Switch Pro Controller. These disconnect now:\n"
             + "".join(f"  • {esc(n)}\n" for n in names)
-            + "\nKeyboards, mice and controllers on classic Bluetooth stay off until you end "
-              "Switch mode. Others (headphones, BLE devices) may need reconnecting afterwards.")
+            + "\nBluetooth keyboards, mice and controllers stay off until you end "
+              "Switch mode. Others (headphones) may need reconnecting afterwards.")
         d.add_button("Cancel", Gtk.ResponseType.CANCEL)
         d.add_button("Start Switch mode", Gtk.ResponseType.OK)
         d.set_default_response(Gtk.ResponseType.OK)

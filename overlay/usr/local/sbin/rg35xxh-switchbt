@@ -218,9 +218,22 @@ FLASH = flash_image()
 
 
 # ------------------------------------------------------------------ BlueZ objects
+def strangers(devices, paired_before):
+    """Devices to unpair when the mode ends: paired during it (not before), never trusted, i.e.
+    never used the handheld as a controller (codebase audit 2026-10-30, H02)."""
+    return sorted(path for path, d in devices.items()
+                  if d.get("Paired") and not d.get("Trusted") and path not in paired_before)
+
+
+class Rejected(dbus.exceptions.DBusException):
+    _dbus_error_name = "org.bluez.Error.Rejected"
+
+
 class Agent(dbus.service.Object):
-    """Just-works pairing: accept everything (the Switch starts pairing). BlueZ's default agent
-    would reject the confirmation (Authentication Failure)."""
+    """Just-works pairing (the Switch starts pairing; BlueZ's default agent would reject the
+    confirmation: Authentication Failure). Service authorisation only for the HID profile this
+    mode registers; anything else is a device asking for more than a controller offers
+    (codebase audit 2026-10-30, H02)."""
     path = "/org/handtop/switchbt/agent"
 
     @dbus.service.method(AGENT_IFACE)
@@ -229,6 +242,9 @@ class Agent(dbus.service.Object):
 
     @dbus.service.method(AGENT_IFACE, in_signature="os")
     def AuthorizeService(self, device, uuid):
+        if str(uuid).lower() != HID_UUID:
+            log("service refused", device, uuid)
+            raise Rejected("Switch Controller mode accepts only its HID profile")
         log("authorize service", device, uuid)
 
     @dbus.service.method(AGENT_IFACE, in_signature="o")
@@ -917,10 +933,11 @@ def identity(on):
         os.makedirs(os.path.dirname(DROPIN), exist_ok=True)
         with open(DROPIN, "w") as f:
             f.write("# Switch Controller mode over Bluetooth (rg35xxh-switchbt): Pro Controller identity,\n"
-                    "# no input plugin (our sockets own the HID channels), no hostname plugin (it would\n"
-                    "# set the class from the chassis). Removed when it ends.\n"
+                    "# no input plugin (our sockets own the HID channels), no hog plugin (no keyboards\n"
+                    "# or mice over BLE during the mode, see the audit note in the agent), no hostname\n"
+                    "# plugin (it would set the class from the chassis). Removed when it ends.\n"
                     f"[Service]\nExecStart=\nExecStart={BLUETOOTHD} -f {RUN_DIR}/main.conf "
-                    "--noplugin=input,hostname\n")
+                    "--noplugin=input,hog,hostname\n")
         log("bluetoothd:", NAME, "identity", DEVICE_ID, CLASS)
     else:
         if not os.path.exists(DROPIN):
@@ -1095,6 +1112,29 @@ def run():
         if host:
             reconnect_start()
 
+    # Clean-up (codebase audit 2026-10-30, H02): pairing is open while no Switch is connected,
+    # but only a host that connected both HID channels is trusted (on_connected). Devices that
+    # paired during the mode and never did are unpaired when it ends.
+    om = dbus.Interface(bus.get_object(BLUEZ, "/"), OM_IFACE)
+
+    def devices():
+        try:
+            objs = om.GetManagedObjects()
+        except dbus.exceptions.DBusException:
+            return {}
+        return {str(p): ifs[DEVICE_IFACE] for p, ifs in objs.items()
+                if DEVICE_IFACE in ifs and str(p).startswith(adapter_path + "/")}
+
+    paired_before = {p for p, d in devices().items() if d.get("Paired")}
+
+    def forget_strangers():
+        for path in strangers(devices(), paired_before):
+            try:
+                dbus.Interface(adapter, ADAPTER_IFACE).RemoveDevice(path)
+                log("unpaired (paired during the mode, never used it):", path)
+            except dbus.exceptions.DBusException as e:
+                log("could not unpair", path, e)
+
     running = {"on": True}
     link = Link(pad, status, local_addr, on_connected, on_lost)
     discoverable(True)
@@ -1127,6 +1167,7 @@ def run():
         except Exception as e:
             log("close:", e)
     btmgmt("discov", "no")
+    forget_strangers()
     for call in (lambda: profiles.UnregisterProfile(Profile.path), lambda: agents.UnregisterAgent(Agent.path),
                  lambda: props.Set(ADAPTER_IFACE, "Alias", old_alias)):
         try:

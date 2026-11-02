@@ -273,3 +273,32 @@ def test_stop_during_usb_setup_removes_the_gadget(monkeypatch):
     finally:
         for s, h in old.items():
             signal.signal(s, h)
+
+
+# ---- H02: pairing accepts only what a controller needs, and strangers don't stay paired
+def test_ble_agent_refuses_every_service():
+    agent = btpad.Agent.__new__(btpad.Agent)
+    with pytest.raises(btpad.Rejected):
+        agent.AuthorizeService("/org/bluez/hci0/dev_X", "00001124-0000-1000-8000-00805f9b34fb")
+
+
+def test_classic_agent_allows_only_its_hid_profile():
+    agent = switchbt.Agent.__new__(switchbt.Agent)
+    agent.AuthorizeService("/org/bluez/hci0/dev_X", switchbt.HID_UUID)          # no exception
+    for uuid in ("0000110d-0000-1000-8000-00805f9b34fb",                       # A2DP
+                 "00001105-0000-1000-8000-00805f9b34fb"):                      # OBEX push
+        with pytest.raises(switchbt.Rejected):
+            agent.AuthorizeService("/org/bluez/hci0/dev_X", uuid)
+
+
+@pytest.mark.parametrize("mod", [btpad, switchbt], ids=["btpad", "switchbt"])
+def test_strangers_are_new_untrusted_pairings_only(mod):
+    devs = {
+        "/a/old_pc": {"Paired": True, "Trusted": True},       # paired before the mode
+        "/a/old_untrusted": {"Paired": True},                 # paired before, never trusted: keep
+        "/a/new_host": {"Paired": True, "Trusted": True},      # paired now and used as host: keep
+        "/a/new_stranger": {"Paired": True},                  # paired now, never used: remove
+        "/a/seen_only": {"Paired": False},                    # only discovered: nothing to do
+    }
+    before = {"/a/old_pc", "/a/old_untrusted"}
+    assert mod.strangers(devs, before) == ["/a/new_stranger"]

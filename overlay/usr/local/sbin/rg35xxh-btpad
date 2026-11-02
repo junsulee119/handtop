@@ -132,6 +132,17 @@ class InvalidArgs(dbus.exceptions.DBusException):
     _dbus_error_name = "org.freedesktop.DBus.Error.InvalidArgs"
 
 
+def strangers(devices, paired_before):
+    """Devices to unpair when the mode ends: paired during it (not before), never trusted, i.e.
+    never used the handheld as a controller (codebase audit 2026-10-30, H02)."""
+    return sorted(path for path, d in devices.items()
+                  if d.get("Paired") and not d.get("Trusted") and path not in paired_before)
+
+
+class Rejected(dbus.exceptions.DBusException):
+    _dbus_error_name = "org.bluez.Error.Rejected"
+
+
 # ------------------------------------------------------------------ GATT objects
 class Application(dbus.service.Object):
     def __init__(self, bus):
@@ -173,6 +184,7 @@ class Characteristic(dbus.service.Object):
         self.notifying = False
         self.notify_fd = None             # set by AcquireNotify: notifications go straight to bluetoothd
         self.notify_watch = None
+        self.on_subscribe = None          # called with the subscriber's device path (or None)
         super().__init__(service.bus, self.path)
         service.chars.append(self)
 
@@ -199,6 +211,8 @@ class Characteristic(dbus.service.Object):
     def StartNotify(self):
         self.notifying = True
         log(f"notify on: {self.uuid}")
+        if self.on_subscribe:
+            self.on_subscribe(None)
 
     @dbus.service.method(CHR_IFACE)
     def StopNotify(self):
@@ -216,6 +230,8 @@ class Characteristic(dbus.service.Object):
         self.notify_watch = GLib.io_add_watch(self.notify_fd, GLib.IO_HUP | GLib.IO_ERR,
                                               lambda *a: (self._release_notify_fd(), False)[1])
         log(f"notify acquired (socket): {self.uuid}, mtu {int(options.get('mtu', 0))}")
+        if self.on_subscribe:
+            self.on_subscribe(options.get("device"))
 
     def _release_notify_fd(self):
         if self.notify_watch:
@@ -312,7 +328,9 @@ class Advertisement(dbus.service.Object):
 
 
 class Agent(dbus.service.Object):
-    """Just-works pairing: accept everything (the user starts pairing from the other device)."""
+    """Just-works pairing (the user starts pairing from the other device). Pairing is accepted,
+    service authorisation is not: a BLE gamepad needs none (the host reads our GATT service), so
+    any request is a device asking for something else (codebase audit 2026-10-30, H02)."""
     path = "/org/handtop/btpad/agent"
 
     @dbus.service.method(AGENT_IFACE)
@@ -321,7 +339,8 @@ class Agent(dbus.service.Object):
 
     @dbus.service.method(AGENT_IFACE, in_signature="os")
     def AuthorizeService(self, device, uuid):
-        log("authorize service", device, uuid)
+        log("service refused", device, uuid)
+        raise Rejected("BT Controller mode accepts no services")
 
     @dbus.service.method(AGENT_IFACE, in_signature="o")
     def RequestAuthorization(self, device):
@@ -747,7 +766,7 @@ def xbox_identity(on):
         os.makedirs(os.path.dirname(DROPIN), exist_ok=True)
         with open(DROPIN, "w") as f:
             f.write(f"# BT Controller mode (rg35xxh-btpad): Xbox controller identity. Removed when it ends.\n"
-                    f"[Service]\nExecStart=\nExecStart={BLUETOOTHD} -f {RUN_DIR}/main.conf\n")
+                    f"[Service]\nExecStart=\nExecStart={BLUETOOTHD} -f {RUN_DIR}/main.conf --noplugin=input,hog\n")
         log("bluetoothd: Xbox controller identity", XBOX_DEVICE_ID)
     else:
         if not os.path.exists(DROPIN):
@@ -881,16 +900,43 @@ def run():
             GLib.timeout_add(1000, advertise)
     advertise()
 
-    def trust(interface, changed, invalidated, path=None):
-        # Mark newly paired devices as trusted so they reconnect without asking.
-        if interface == "org.bluez.Device1" and changed.get("Paired"):
+    # Trust and clean-up (codebase audit 2026-10-30, H02). Pairing stays open while the mode is
+    # on (the PC starts it), but only a device that then uses the handheld as a gamepad, i.e.
+    # subscribes to its input reports, is trusted. Before, every device that paired was trusted
+    # for good, a stranger's "keyboard" included. Devices that paired during the mode and never
+    # became a host are unpaired when it ends.
+    om = dbus.Interface(bus.get_object(BLUEZ, "/"), OM_IFACE)
+
+    def devices():
+        try:
+            objs = om.GetManagedObjects()
+        except dbus.exceptions.DBusException:
+            return {}
+        return {str(p): ifs["org.bluez.Device1"] for p, ifs in objs.items()
+                if "org.bluez.Device1" in ifs and str(p).startswith(adapter_path + "/")}
+
+    paired_before = {p for p, d in devices().items() if d.get("Paired")}
+
+    def trust_host(device):
+        targets = [str(device)] if device else \
+            [p for p, d in devices().items() if d.get("Paired") and d.get("Connected")]
+        for path in targets:
             try:
-                dbus.Interface(bus.get_object(BLUEZ, path), PROP_IFACE).Set("org.bluez.Device1", "Trusted", True)
-                log("paired and trusted:", path)
+                dp = dbus.Interface(bus.get_object(BLUEZ, path), PROP_IFACE)
+                if dp.Get("org.bluez.Device1", "Paired") and not dp.Get("org.bluez.Device1", "Trusted"):
+                    dp.Set("org.bluez.Device1", "Trusted", True)
+                    log("host trusted (subscribed to the gamepad):", path)
             except dbus.exceptions.DBusException as e:
                 log("could not trust", path, e)
-    bus.add_signal_receiver(trust, signal_name="PropertiesChanged", dbus_interface=PROP_IFACE,
-                            bus_name=BLUEZ, path_keyword="path")
+    report.on_subscribe = trust_host
+
+    def forget_strangers():
+        for path in strangers(devices(), paired_before):
+            try:
+                dbus.Interface(adapter, ADAPTER_IFACE).RemoveDevice(path)
+                log("unpaired (paired during the mode, never used it):", path)
+            except dbus.exceptions.DBusException as e:
+                log("could not unpair", path, e)
 
     status = Status()
     Hosts(bus, adapter_path, status)
@@ -912,6 +958,7 @@ def run():
     loop.run()
     pad.close()
     status.close()
+    forget_strangers()
 
     for call in (lambda: advm.UnregisterAdvertisement(adv.path), lambda: gatt.UnregisterApplication(app.path),
                  lambda: agents.UnregisterAgent(Agent.path), lambda: props.Set(ADAPTER_IFACE, "Alias", old_alias)):
