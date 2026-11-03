@@ -154,9 +154,13 @@ dmabuf-wayland only accepts dmabuf frames, and mpv moves to the next VO only
 when one fails to initialise, not when it rejects frames later: a
 software-decoded file (AV1) would play audio with no picture.
 `overlay/etc/mpv/scripts/vo-by-codec.lua` sets `vo=gpu` for anything outside
-`hwdec-codecs`. The trade-off is one extra script and a codec-keyed choice; a
-whitelisted codec that the VPU rejects at runtime still falls back to software
-and lands on dmabuf-wayland, which is the case to fix if one shows up.
+`hwdec-codecs`, from an `on_preloaded` hook so the choice happens before the
+decoder opens (switching later reopens it mid-stream and breaks software
+codecs). It only does that when the configured VO is the shipped
+`dmabuf-wayland,gpu`; an explicit `--vo=` is left alone. The trade-off is one
+extra script and a codec-keyed choice; a whitelisted codec that the VPU rejects
+at runtime still falls back to software and lands on dmabuf-wayland, which is
+the case to fix if one shows up.
 
 ### The blue video: the driver's stride
 
