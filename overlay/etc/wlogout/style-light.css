@@ -3,11 +3,18 @@
 * { background-image: none; box-shadow: none; font-family: "Noto Sans"; }
 window { background-color: rgba(236, 239, 244, 0.92); }
 button {
+  min-width: 240px;   /* both columns equally wide: without it each column took its labels'
+                         width first (Restart / Shut down wider), 275 vs 303 px at 640x480 */
   color: #2b303b; font-size: 20px;
   background-color: #f8f9fb; border: 2px solid #c9ced8; border-radius: 12px;
   background-repeat: no-repeat; background-position: center 32%; background-size: 72px 72px;
 }
-button:focus, button:hover { background-color: #c9dbff; border-color: #3d68b0; outline-style: none; }
+/* Highlight = the button under the pointer only. wlogout opens with GTK's keyboard focus on the
+   first button (Sleep), and the D-pad moves the pointer, never that focus, so styling :focus like
+   :hover left Sleep lit next to the hovered button. Keyboard focus (a USB keyboard's arrows / Tab)
+   is a thin outline, which GTK draws only once such a key has been used. */
+button:hover { background-color: #c9dbff; border-color: #3d68b0; }
+button:focus { outline: 2px solid #3d68b0; outline-offset: -6px; }
 #sleep     { background-image: image(url("/usr/local/share/rg35xxh/icons/power-sleep-light.png")); }
 #reboot    { background-image: image(url("/usr/local/share/rg35xxh/icons/power-reboot-light.png")); }
 #logout    { background-image: image(url("/usr/local/share/rg35xxh/icons/power-logout-light.png")); }

@@ -6,6 +6,7 @@
 - Change: mpv's default video output is `vo=dmabuf-wayland,gpu` (was `vo=gpu`). dmabuf-wayland hands the decoder's dmabufs straight to the compositor and costs about half the CPU of the gpu VO (paced 1080p24 VP9: 11 % of one core against 21 %), and subtitles and OSD were verified to render on it. Trade-off: it only accepts dmabuf frames and mpv does not fall back when a VO rejects frames after initialising, so `overlay/etc/mpv/scripts/vo-by-codec.lua` sets `vo=gpu` for codecs outside `hwdec-codecs` (AV1); the cost is one extra script and a choice keyed on the codec whitelist rather than on what the decoder actually did.
 
 - New: the screen dims 10 seconds before auto-sleep, as a warning; touch anything and it comes back and the 10 minutes start over. Only when a sleep would really follow (not while charging, in controller modes, with HDMI or in Screen off). Seconds in `/etc/rg35xxh/power.conf` (`AUTOSLEEP_DIM_SECONDS`, 0 = off).
+- Fixed: in the power menu, Sleep no longer stays highlighted while the pointer is on another button, and the four buttons are the same width (the right column was wider).
 
 ## v0.3.6
 

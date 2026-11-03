@@ -6,7 +6,7 @@ Power button, the power menu (`rg35xxh-power-menu`, wlogout: Sleep / Restart / L
 
 | Action | Result |
 |---|---|
-| Tap | Power menu: Sleep, Restart / Log out, Shut down (2×2; the highlight starts on Sleep, Shut down is last). Pixel-art icons, one colour per action (blue moon, amber arrow, grey door, red power symbol; white on the highlighted button in the dark theme), `tools/icons/gen_power_icons.py` |
+| Tap | Power menu: Sleep, Restart / Log out, Shut down (2×2, Shut down last; the button under the pointer is highlighted. GTK puts keyboard focus on Sleep when the menu opens and the D-pad moves the pointer, not that focus, so focus is only a thin outline, drawn after a USB keyboard's arrow or Tab key; until v0.3.6 it was styled like hover and Sleep stayed lit next to the hovered button). Pixel-art icons, one colour per action (blue moon, amber arrow, grey door, red power symbol; white on the highlighted button in the dark theme), `tools/icons/gen_power_icons.py` |
 | Hold 3 s | Clean shutdown (`systemctl poweroff`) with feedback, see below |
 | Hold ~8–10 s | PMIC hardware power cut — last resort, not configurable, may corrupt the SD card |
 | R (Reset) button | Instant hardware reset — not visible to Linux |
