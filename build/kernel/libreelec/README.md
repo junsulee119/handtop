@@ -36,8 +36,9 @@ of being applied one line off.
 | 0441-media-cedrus-free-MV-col-buffers-in-buf-cleanup.patch | frees the H.264/HEVC MV-col buffers when a process dies without STREAMOFF |
 | 0900-cedrus-vp9-stride-align.patch | **ours**: derive `SCALE1_STRIDE_ALIGN` from the capture stride |
 | 0901-cedrus-clear-padding-all-codecs.patch | **ours**: clear the 16-line capture padding rows, neutral chroma |
+| 0902-cedrus-2bit-plane-size.patch | **ours**: size the 10-bit low-2-bit plane from the stride the engine programs (it under-allocated at widths 128k+1 to 128k+3); drop it with `0438` |
 
-Our two are numbered `09xx` on purpose: LibreELEC's set grows into the `04xx`
+Our three are numbered `09xx` on purpose: LibreELEC's set grows into the `04xx`
 range (their 2026-11-01 update added `0430` and `0432`, VC-1 and UAPI patches),
 so a future re-sync cannot collide with our files or silently change apply
 order. The patches are applied sorted by name.
@@ -47,7 +48,7 @@ LibreELEC's set is not needed), and the H616 variant itself comes from
 `build/kernel/0001-cedrus-add-h616-variant.patch` (Chen-Yu Tsai's upstream
 series), so LibreELEC's `0406` is not carried either.
 
-What was changed on top: only `0900` and `0901` are ours; the rest are applied
+What was changed on top: only `0900`, `0901` and `0902` are ours; the rest are applied
 as published apart from the `0418` rebase described below. Design and code of
 the series are Jernej's.
 
@@ -107,3 +108,15 @@ kept the 16-byte stride the driver used before `0002-cedrus-64-byte-stride.patch
 the remaining mismatch. This is what LibreELEC's `0438` addresses with the
 low-2-bit plane stride and the 1 KiB-aligned P010 reconstruct surface; 8-bit at
 the same widths is exact.
+10-bit at 1282x720 and 1410x792 (2 pixels past a 128 multiple) is also close
+but not exact: 53.9 and 55.2 dB (2026-11-03, DDR4, with `0902`; `0902` only
+changes the allocation size, not where anything is written).
+
+`0902`: the buffer reserved `ALIGN(width / 4, 32)` bytes per row for the 10-bit
+low-2-bit plane, while VP9 programs `ALIGN(bytesperline / 4, 32)` of the
+reconstruction surface (64-byte aligned capture stride, or `ALIGN(width, 16)`
+behind P010). At widths 128k+1 to 128k+3 that is 32 bytes more per row, so the
+engine wrote up to 32 x 1.5 x height bytes past the buffer, into CMA (no IOMMU).
+Found by stockmind (issue #8). Tested: 20 full decodes each of 10-bit
+1282x720 and 1410x792, no failure, H.264 / HEVC fine afterwards. LibreELEC's
+`0438` fixes the same allocation as part of its layout rework.

@@ -106,6 +106,13 @@ Known limits:
   low-2-bit plane stride and the P010 reconstruct offset that cause this, but it
   is written against their AFBC tree and is deliberately not carried yet; see
   `build/kernel/libreelec/README.md`.
+  Also close but not exact: 10-bit at 1282x720 (`53.9 dB`) and 1410x792
+  (`55.2 dB`), measured 2026-11-03.
+- 10-bit buffer size: at widths 128k+1 to 128k+3 (1281, 1282, 1409, ...) the
+  engine writes the low-2-bit plane with a wider stride than the buffer used to
+  reserve for it, so it wrote past the end of the decode buffer.
+  `build/kernel/libreelec/0902-cedrus-2bit-plane-size.patch` sizes the plane from
+  the stride the engine is given (found by stockmind, issue #8).
 - Chromium can show the padding rows described above until the compositor
   crops them; mpv and ffmpeg do not.
 
