@@ -36,7 +36,8 @@ Power-off permission: polkit rule `/etc/polkit-1/rules.d/50-rg35xxh-power.rules`
 
 - `AUTOSLEEP_MINUTES=10` (0 = off), `AUTOSLEEP_ON_CHARGER=no`.
 - Skipped while charging, in gamepad mode (controller input is invisible to the compositor; the input daemon writes `$XDG_RUNTIME_DIR/rg35xxh-gamepad-mode`), with HDMI connected, or in Screen off (see below). Video/streaming apps block idle themselves (Wayland idle-inhibit).
-- Log: `~/.local/state/session/autosleep.log`.
+- **Dims first:** `AUTOSLEEP_DIM_SECONDS=10` (0 = off) before auto-sleep the screen dims to 30 % of its brightness (not below the 5 % floor of the brightness keys) as a warning; any input restores it, and so does waking from the sleep (`rg35xxh-dim`, swayidle `resume` / `after-resume`). It dims only when `rg35xxh-autosleep --check` says a sleep would follow, so never while charging, in gamepad or controller modes, with HDMI or in Screen off. A brightness change made while dimmed is kept (restore only if the value is still the dimmed one). The state is in `~/.local/state/session/dim`, so a log-out or crash while dimmed is undone by the next session's autostart. Known edge: if the charger or HDMI is connected during those 10 s without any input, the sleep is skipped and the screen stays dimmed until the next input. Idea from 2026-10-26, added in v0.3.7.
+- Log: `~/.local/state/session/autosleep.log` (also the dim / restore lines).
 
 Notes:
 

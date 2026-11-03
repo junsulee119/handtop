@@ -1,0 +1,40 @@
+#!/bin/sh
+# Dim the screen shortly before auto-sleep, as a warning; any input brings it back (labwc
+# autostart: swayidle runs "on" AUTOSLEEP_DIM_SECONDS before rg35xxh-autosleep, and "off" on
+# resume from idle and after waking from sleep).
+#   rg35xxh-dim on    dim to 30 % of the current brightness (not below the 5 % floor the
+#                     brightness keys use), only if auto-sleep would really follow
+#   rg35xxh-dim off   restore the brightness from before "on", unless it was changed meanwhile
+# Only writes the backlight's brightness (group video, 71-rg35xxh-backlight.rules), as the
+# brightness keys do; never bl_power, never 0. State: ~/.local/state/session/dim
+# ("<brightness before> <dimmed value>"); in $HOME so that a log-out or crash while dimmed is
+# undone by the next session's "off" (autostart), even after /run/user is gone.
+B=/sys/class/backlight/backlight
+S="$HOME/.local/state/session/dim"
+log() { echo "$(date '+%F %T') rg35xxh-dim: $*"; }
+
+case "${1:-}" in
+on)
+  [ -e "$S" ] && exit 0                       # already dimmed
+  rg35xxh-autosleep --check || exit 0         # no sleep coming (charging, controller mode, ...)
+  max=$(cat "$B/max_brightness" 2>/dev/null) && cur=$(cat "$B/brightness" 2>/dev/null) || exit 0
+  floor=$(( (max * 5 + 50) / 100 ))
+  dim=$(( cur * 30 / 100 )); [ "$dim" -lt "$floor" ] && dim=$floor
+  [ "$dim" -lt "$cur" ] || exit 0             # already at or below the floor
+  mkdir -p "${S%/*}" && echo "$cur $dim" > "$S" || exit 0
+  echo "$dim" > "$B/brightness" && log "dimmed $cur -> $dim"
+  ;;
+off)
+  [ -r "$S" ] || exit 0
+  read -r was dim < "$S"
+  rm -f "$S"
+  cur=$(cat "$B/brightness" 2>/dev/null) || exit 0
+  # Changed while dimmed (brightness keys): keep the user's choice.
+  if [ "$cur" = "$dim" ] && [ -n "$was" ]; then
+    echo "$was" > "$B/brightness" && log "restored $was"
+  else
+    log "brightness changed while dimmed ($dim -> $cur), kept"
+  fi
+  ;;
+*) echo "usage: rg35xxh-dim on|off" >&2; exit 2 ;;
+esac

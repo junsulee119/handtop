@@ -43,4 +43,14 @@ rg35xxh-bluetooth --watch >"$L/bluetooth.log" 2>&1 &   # taskbar Bluetooth icon 
 command -v tailscale >/dev/null && { gdbus wait --session --timeout 30 org.kde.StatusNotifierWatcher; \
   exec tailscale systray; } >"$L/tailscale-systray.log" 2>&1 &
 . /etc/rg35xxh/power.conf 2>/dev/null   # auto-sleep after AUTOSLEEP_MINUTES without input (0 = off)
-[ "${AUTOSLEEP_MINUTES:-0}" -gt 0 ] && swayidle -w timeout $((AUTOSLEEP_MINUTES * 60)) rg35xxh-autosleep >>"$L/autosleep.log" 2>&1 &
+# Screen dimmed by a previous session (log-out or crash during the warning): put it back.
+rg35xxh-dim off >>"$L/autosleep.log" 2>&1
+# The screen dims AUTOSLEEP_DIM_SECONDS before auto-sleep as a warning (rg35xxh-dim); any input,
+# or waking from the sleep, restores it.
+T=$((${AUTOSLEEP_MINUTES:-0} * 60)); D=${AUTOSLEEP_DIM_SECONDS:-0}
+if [ "$T" -gt 0 ] && [ "$D" -gt 0 ] && [ "$D" -lt "$T" ]; then
+  swayidle -w timeout $((T - D)) 'rg35xxh-dim on' resume 'rg35xxh-dim off' \
+    timeout "$T" rg35xxh-autosleep after-resume 'rg35xxh-dim off' >>"$L/autosleep.log" 2>&1 &
+elif [ "$T" -gt 0 ]; then
+  swayidle -w timeout "$T" rg35xxh-autosleep >>"$L/autosleep.log" 2>&1 &
+fi
