@@ -1,6 +1,6 @@
 # Pinned upstreams and the weekly drift check
 
-Most of Handtop comes from Debian, and apt keeps it updated. A few pieces don't: we build or download them ourselves at a pinned version (FFmpeg with the V4L2 request patches, the VA-API driver, ROCKNIX's kernel and firmware, our kernel modules, Go, nwg-drawer). **Nothing updates those by itself, and nothing told us when they fell behind.** The codebase audit of 2026-10-30 found exactly that: our FFmpeg was about 390 upstream commits behind Debian's, two CVE fixes among them, while dpkg still showed Debian's version (finding H01, fixed by moving to the release Debian ships, see [video-decode.md](video-decode.md)).
+Most of Handtop comes from Debian, and apt keeps it updated. A few pieces don't: we build or download them ourselves at a pinned version (FFmpeg with the V4L2 request patches, the VA-API driver, ROCKNIX's kernel and firmware, our kernel modules, the cedrus VP9 series, Go, nwg-drawer). **Nothing updates those by itself, and nothing told us when they fell behind.** The codebase audit of 2026-10-30 found exactly that: our FFmpeg was about 390 upstream commits behind Debian's, two CVE fixes among them, while dpkg still showed Debian's version (finding H01, fixed by moving to the release Debian ships, see [video-decode.md](video-decode.md)).
 
 So every such piece is listed in **`build/upstreams.conf`**, and **`tools/check-upstreams.py`** compares each pin with its upstream: weekly in GitHub Actions (`.github/workflows/upstreams.yml`) and whenever you run it by hand.
 

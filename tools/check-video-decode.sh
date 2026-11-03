@@ -127,6 +127,87 @@ else
   echo "  skip  416-wide check (no libx264 to make the test file)"
 fi
 
+# VP9: the VPU now has a VP9 backend (out-of-tree series, docs/video-decode.md).
+# Decode a clip twice, once through the VPU and once in software, and require
+# the first 10 frames to be bit-identical: "decodes with no errors" alone has
+# already passed on frames that were visually wrong.
+#
+# The clip is generated at 416 wide when none is present. Widths that are not a
+# multiple of 64 are the case that was broken until the backend derived its
+# reference stride from the capture surface: key frames decoded, every inter
+# frame read its references with the wrong stride.
+vp9_check() {
+	local f=$1 label=$2
+	local wh pix_fmt raw_fmt psnr rc
+	wh=$(ffprobe -v error -select_streams v:0 -show_entries stream=width,height -of csv=p=0:s=x "$f")
+	pix_fmt=$(ffprobe -v error -select_streams v:0 -show_entries stream=pix_fmt -of csv=p=0 "$f")
+	case "$pix_fmt" in
+		yuv420p) raw_fmt=nv12 ;;
+		yuv420p10le) raw_fmt=p010le ;;
+		*) chk "VP9 $label has supported pixel format ($pix_fmt)" 1; return ;;
+	esac
+	timeout 120 ffmpeg -hide_banner -nostdin -v verbose -hwaccel v4l2request \
+		-hwaccel_output_format drm_prime -i "$f" -frames:v 10 \
+		-vf "hwdownload,format=$raw_fmt" -f rawvideo "$T/vp9-hw.yuv" -y > "$T/vp9-hw.log" 2>&1
+	rc=$?
+	grep -qa 'Using V4L2 media driver cedrus' "$T/vp9-hw.log" \
+		&& chk "VP9 $label goes through the VPU (cedrus)" 0 \
+		|| chk "VP9 $label goes through the VPU (cedrus)" 1
+	[ $rc -eq 0 ] && chk "VP9 $label decodes without crashing (exit 0)" 0 \
+		|| chk "VP9 $label decodes without crashing (exit $rc)" 1
+	if [ $rc -ne 0 ]; then
+		tail -20 "$T/vp9-hw.log" | sed 's/^/        /'
+	fi
+	timeout 120 ffmpeg -hide_banner -nostdin -v error -i "$f" -frames:v 10 \
+		-pix_fmt "$raw_fmt" -f rawvideo "$T/vp9-sw.yuv" -y >/dev/null 2>&1
+	psnr=$(ffmpeg -hide_banner -nostdin -f rawvideo -pix_fmt "$raw_fmt" -s "$wh" -i "$T/vp9-hw.yuv" \
+		-f rawvideo -pix_fmt "$raw_fmt" -s "$wh" -i "$T/vp9-sw.yuv" -lavfi psnr -f null - 2>&1 \
+		| grep -o 'average:[^ ]*' | head -1)
+	case "$psnr" in
+	average:inf|average:infinity*)
+		chk "VP9 $label matches software ($psnr)" 0 ;;
+	average:*)
+		awk -v a="${psnr#average:}" 'BEGIN { exit !(a + 0 >= 35) }' \
+			&& chk "VP9 $label matches software ($psnr, >= 35 dB)" 0 \
+			|| chk "VP9 $label matches software ($psnr, below 35 dB)" 1 ;;
+	*)
+		chk "VP9 $label matches software (no PSNR measured)" 1 ;;
+	esac
+}
+
+echo
+echo "VP9 hardware decode (10 frames, compared against software):"
+VP9F=""; VP9ODD=""
+for f in "$HOME"/Downloads/*vp9*.mkv "$HOME"/Downloads/*vp9*.webm "$HOME"/Videos/*vp9*.mkv; do
+	[ -r "$f" ] || continue
+	[ "$(ffprobe -v error -select_streams v:0 -show_entries stream=codec_name -of csv=p=0 "$f" 2>/dev/null)" = vp9 ] || continue
+	w=$(ffprobe -v error -select_streams v:0 -show_entries stream=width -of csv=p=0 "$f" 2>/dev/null)
+	if [ -z "$VP9F" ]; then
+		VP9F="$f"
+	elif [ -z "$VP9ODD" ] && [ $((w % 64)) -ne 0 ]; then
+		VP9ODD="$f"
+	fi
+done
+if [ -z "$VP9F" ] && ffmpeg -hide_banner -encoders 2>/dev/null | grep -qw libvpx-vp9; then
+	GEN8="$T/vp9-640x360.mkv"; GEN10="$T/vp9-416x240-10.mkv"
+	timeout 180 ffmpeg -hide_banner -v error -f lavfi -i testsrc2=s=640x360:r=24 -t 2 \
+		-c:v libvpx-vp9 -b:v 800k -pix_fmt yuv420p "$GEN8" -y >/dev/null 2>&1
+	timeout 180 ffmpeg -hide_banner -v error -f lavfi -i testsrc2=s=416x240:r=24 -t 2 \
+		-c:v libvpx-vp9 -b:v 500k -pix_fmt yuv420p10le "$GEN10" -y >/dev/null 2>&1
+	[ -s "$GEN8" ] && VP9F="$GEN8"
+	[ -s "$GEN10" ] && VP9ODD="$GEN10"
+fi
+if [ -n "$VP9F" ]; then
+	vp9_check "$VP9F" ""
+	if [ -n "$VP9ODD" ]; then
+		vp9_check "$VP9ODD" "at $(( $(ffprobe -v error -select_streams v:0 -show_entries stream=width -of csv=p=0 "$VP9ODD") % 64 ))-off-64 width"
+	else
+		echo "  skip  VP9 width-not-multiple-of-64 check (no such clip)"
+	fi
+else
+	echo "  skip  VP9 check (no test clip and libvpx-vp9 not available)"
+fi
+
 echo
 [ $fail -eq 0 ] && echo "RESULT: VPU path OK" || echo "RESULT: VPU path NOT working (see docs/video-decode.md)"
 exit $fail

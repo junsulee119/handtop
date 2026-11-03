@@ -1,0 +1,102 @@
+From: stockmind <slysimo@gmail.com>
+Subject: [PATCH] media: cedrus: clear the 16-line padding rows for every codec
+
+Not part of the LibreELEC series. Clears the capture padding once for every codec.
+
+The capture buffer is sized to ALIGN(height, 16) because the engine writes the
+reconstruction in 16-line blocks. Those rows are never written, so they keep
+stale contents, and consumers that size their surfaces from G_FMT - Chromium's
+VA-API path - show them as a line of colour noise at the bottom of clips whose
+height is not a multiple of 16 (H.264 at 1920x804, for instance; mpv and VLC
+crop to the coded size and never show it).
+
+Do it once in cedrus_device_run() for all codecs, using the coded height from
+the output queue (ctx->src_fmt.height, which userspace sets from the bitstream).
+~23 KB per frame at 1080p, nothing when the height is already aligned.
+---
+--- a/drivers/staging/media/sunxi/cedrus/cedrus_dec.c
++++ b/drivers/staging/media/sunxi/cedrus/cedrus_dec.c
+@@ -14,4 +14,5 @@
++#include <linux/kernel.h>
+ #include <media/v4l2-device.h>
+ #include <media/v4l2-ioctl.h>
+ #include <media/v4l2-event.h>
+ #include <media/v4l2-mem2mem.h>
+@@ -22,6 +23,64 @@
+ #include "cedrus_dec.h"
+ #include "cedrus_hw.h"
+ 
++
++/*
++ * The capture buffer is sized to ALIGN(height, 16) because the engine writes the
++ * reconstruction in 16-line blocks.  The padding rows are never written, so they
++ * keep stale contents, and consumers that size their surfaces from G_FMT
++ * (Chromium's VA-API path) display them as a line of colour noise at the bottom
++ * of clips whose height is not a multiple of 16.  Clear them before the job;
++ * nothing to do when the stream height is already aligned.
++ */
++static void cedrus_clear_padding(struct cedrus_ctx *ctx, struct vb2_buffer *dst)
++{
++	struct v4l2_pix_format *fmt = &ctx->dst_fmt;
++	unsigned int coded_h = ctx->src_fmt.height;
++	unsigned int bpl = fmt->bytesperline;
++	unsigned int chroma_h, chroma_pad, chroma_stride, chroma_size, i;
++	u8 *base, *chroma;
++
++	if (!coded_h || fmt->height <= coded_h)
++		return;
++
++	switch (fmt->pixelformat) {
++	case V4L2_PIX_FMT_NV12:
++	case V4L2_PIX_FMT_NV21:
++	case V4L2_PIX_FMT_P010:
++		chroma_stride = bpl;
++		break;
++	case V4L2_PIX_FMT_YUV420:
++	case V4L2_PIX_FMT_YVU420:
++		chroma_stride = bpl / 2;
++		break;
++	default:
++		return;
++	}
++
++	base = vb2_plane_vaddr(dst, 0);
++	if (!base)
++		return;
++
++	memset(base + bpl * coded_h, 0, bpl * (fmt->height - coded_h));
++	chroma_h = DIV_ROUND_UP(coded_h, 2);
++	chroma_pad = fmt->height / 2 - chroma_h;
++	chroma = base + bpl * fmt->height + chroma_stride * chroma_h;
++	chroma_size = chroma_stride * (fmt->height / 2);
++	/* Neutral chroma keeps displayed padding rows from taking on a tint. */
++	if (fmt->pixelformat == V4L2_PIX_FMT_P010) {
++		__le16 *chroma16 = (__le16 *)chroma;
++
++		for (i = 0; i < chroma_stride * chroma_pad / sizeof(*chroma16); i++)
++			chroma16[i] = cpu_to_le16(0x8000);
++	} else {
++		memset(chroma, 0x80, chroma_stride * chroma_pad);
++		if (fmt->pixelformat == V4L2_PIX_FMT_YUV420 ||
++		    fmt->pixelformat == V4L2_PIX_FMT_YVU420)
++			memset(chroma + chroma_size, 0x80,
++			       chroma_stride * chroma_pad);
++	}
++}
++
+ void cedrus_device_run(void *priv)
+ {
+ 	struct cedrus_ctx *ctx = priv;
+@@ -33,6 +92,10 @@
+ 	run.src = v4l2_m2m_next_src_buf(ctx->fh.m2m_ctx);
+ 	run.dst = v4l2_m2m_next_dst_buf(ctx->fh.m2m_ctx);
+ 
++	/* Every codec: keep the 16-line padding rows from being displayed. */
++	if (run.dst)
++		cedrus_clear_padding(ctx, &run.dst->vb2_buf);
++
+ 	/* Apply request(s) controls if needed. */
+ 	src_req = run.src->vb2_buf.req_obj.req;
+ 
+-- 
+2.43.0

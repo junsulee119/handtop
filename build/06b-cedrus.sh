@@ -55,6 +55,9 @@ for d in "$P/packages/linux/patches/$LINUX_VERSION" "$P/packages/linux/patches/m
   while IFS= read -r f; do PATCHES+=("$f"); done < <(find "$d" -maxdepth 1 -name '*.patch' | sort)
 done
 PATCHES+=("$TOP"/build/kernel/*.patch)
+# Then the LibreELEC cedrus series (provenance: build/kernel/libreelec/README.md).
+# Inside PATCHES so that editing or re-syncing one of them rebuilds the tree.
+while IFS= read -r f; do PATCHES+=("$f"); done < <(find "$TOP/build/kernel/libreelec" -maxdepth 1 -name '*.patch' | sort)
 INPUTS="$( { echo "linux $LINUX_SHA256 rocknix $ROCKNIX_VERSION gcc $KTOOLCHAIN_VERSION host $KTOOLCHAIN_HOST"
              for f in "${PATCHES[@]}"; do
                n="${f#"$K/"}"; echo "${n#"$TOP/"} $(sha256sum < "$f" | cut -d' ' -f1)"
@@ -67,7 +70,16 @@ if [ "$(cat "$T/.rg35xxh-patched" 2>/dev/null)" != "$INPUTS" ]; then
   fi
   [ ! -e "$K/linux-$LINUX_VERSION" ] || die "$K/linux-$LINUX_VERSION is in the way"
   tar xf "$K/linux-$LINUX_VERSION.tar.xz" -C "$K" && mv "$K/linux-$LINUX_VERSION" "$T"
-  for f in "${PATCHES[@]}"; do patch -d "$T" -p1 -s --forward < "$f"; done
+  for f in "${PATCHES[@]}"; do
+    # Our patches (build/kernel/ and the series it carries) must apply exactly:
+    # the series is a snapshot of someone else's tree, so a context line that
+    # moved since has to stop the build instead of landing one line off.
+    # ROCKNIX's own patches keep patch's default fuzz.
+    case "$f" in
+      "$TOP"/build/kernel/*) patch -d "$T" -p1 -s --forward --fuzz=0 < "$f" ;;
+      *) patch -d "$T" -p1 -s --forward < "$f" ;;
+    esac
+  done
   echo "$INPUTS" > "$T/.rg35xxh-patched"
 fi
 
@@ -77,6 +89,12 @@ fi
 grep -q "bytesperline = ALIGN(width, 64)" \
   "$T/drivers/staging/media/sunxi/cedrus/cedrus_video.c" \
   || die "the 64-byte stride patch did not apply (build/kernel/0002-cedrus-64-byte-stride.patch)"
+# Same for the VP9 backend and the padding fix: a patch that quietly stopped
+# applying would leave the image without the codec and with a visible artefact.
+[ -s "$T/drivers/staging/media/sunxi/cedrus/cedrus_vp9.c" ] \
+  || die "the VP9 backend is missing (0411 in build/kernel/libreelec/)"
+grep -q "cedrus_clear_padding" "$T/drivers/staging/media/sunxi/cedrus/cedrus_dec.c" \
+  || die "the padding fix did not apply (0901 in build/kernel/libreelec/)"
 
 # 3. ROCKNIX's .config (from the KERNEL image) + the decoder as a module
 "$T/scripts/extract-ikconfig" "$ROCKNIX_EX/boot/KERNEL" > "$K/rocknix.config"
@@ -86,18 +104,22 @@ cp "$K/rocknix.config" "$T/.config"
 make -C "$T" -s olddefconfig
 make -C "$T" -s -j"$(nproc)" vmlinux modules
 
-# 4. Every symbol version the module imports must match ROCKNIX's own modules
+# 4. Every symbol version the module imports must match ROCKNIX's own modules.
+# cedrus now also needs the v4l2-vp9 helper module (VP9 probability adaptation),
+# which ROCKNIX does not ship, so it is built and installed with it.
 KO="$T/drivers/staging/media/sunxi/cedrus/sunxi-cedrus.ko"
+VKO="$T/drivers/media/v4l2-core/v4l2-vp9.ko"
 # shellcheck disable=SC2044  # module paths never contain spaces
 for m in $(find "$ROCKNIX_EX/modules/$KVER" -name '*.ko*'); do /sbin/modprobe --dump-modversions "$m" 2>/dev/null; done \
   | sort -u -k2 > "$K/rocknix.versions"
-bad=$(/sbin/modprobe --dump-modversions "$KO" | awk 'NR==FNR{r[$2]=$1; next} ($2 in r) && r[$2]!=$1' "$K/rocknix.versions" -)
+bad=$(/sbin/modprobe --dump-modversions "$KO" "$VKO" | awk 'NR==FNR{r[$2]=$1; next} ($2 in r) && r[$2]!=$1' "$K/rocknix.versions" -)
 [ -z "$bad" ] || die "symbol version mismatch against the ROCKNIX kernel:\n$bad"
 [ "$(/sbin/modinfo -F vermagic "$KO")" = "$(/sbin/modinfo -F vermagic "$(find "$ROCKNIX_EX/modules/$KVER" -name '*.ko*' | head -1)")" ] \
   || die "vermagic mismatch"
 
 # 5. Install
 install -D -m644 "$KO" "$ROOTFS/usr/lib/modules/$KVER/extra/sunxi-cedrus.ko"
+install -D -m644 "$VKO" "$ROOTFS/usr/lib/modules/$KVER/kernel/drivers/media/v4l2-core/v4l2-vp9.ko"
 chroot_mount
 in_chroot "depmod -a $KVER"
 echo "Cedrus decoder module installed ($(/sbin/modinfo -F vermagic "$KO"))."

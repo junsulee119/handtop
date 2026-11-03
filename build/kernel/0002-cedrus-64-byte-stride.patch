@@ -1,4 +1,3 @@
-From: handtop <handtop@localhost>
 Subject: [PATCH] staging: media: sunxi: cedrus: use a 64-byte aligned output stride
 
 A DRM PRIME consumer that hands the decoded picture straight to the GPU

@@ -2,9 +2,10 @@
 
 ## Status
 
-**Working.** The Cedrus VPU decodes H.264, HEVC, MPEG-2 and VP8 in the system
-FFmpeg and mpv, zero-copy by default, and in Chromium and VLC through VA-API.
-Moonlight already did (it links its own patched FFmpeg).
+**Working.** The Cedrus VPU decodes H.264, HEVC (8- and 10-bit), MPEG-2, VP8
+and VP9 (8- and 10-bit) in the system FFmpeg and mpv, zero-copy by default, and
+in Chromium and VLC through VA-API. Moonlight already did (it links its own
+patched FFmpeg) for the codecs it ships hwaccels for.
 
 Debian trixie's FFmpeg 7.1 ships only the mainline `drm` hwaccel, which does
 not work against Cedrus here, so `build/04c-v4l2-ffmpeg.sh` cross-builds
@@ -17,13 +18,13 @@ registers the `v4l2request` hwdevice with the
 *Zero-copy*).
 
 mpv only tries hardware for the codecs on its whitelist, which by default
-leaves MPEG-2 and VP8 on the CPU, so `/etc/mpv/mpv.conf` sets
-`hwdec-codecs=h264,hevc,mpeg2video,vp8` (the option replaces the default
-list). All four formats this kernel's Cedrus has reach the VPU: MPEG-2 1080i
+leaves MPEG-2, VP8 and VP9 on the CPU, so `/etc/mpv/mpv.conf` sets
+`hwdec-codecs=h264,hevc,mpeg2video,vp8,vp9` (the option replaces the default
+list). All the formats this kernel's Cedrus decodes reach the VPU: MPEG-2 1080i
 drops from 88.8 % to 45.6 % CPU and VP8 720p from 92.1 % to 48.1 %, at the same
-fps. VP9 and AV1 are deliberately absent: this kernel's Cedrus has no decoder
-for them and mpv's attempt at them fails per frame, so they decode in software
-right away (AV1 in dav1d, which this build enables).
+fps; VP9 is in the section below. AV1 is deliberately absent: this kernel's
+Cedrus has no decoder for it and mpv's attempt fails per frame, so it decodes in
+software right away (dav1d, which this build enables).
 
 On the device (kernel 7.2.0, `tools/check-video-decode.sh`):
 
@@ -32,6 +33,88 @@ $ ffmpeg -hwaccel v4l2request -i <540p HEVC episode, 23:55> -f null -
 [AVHWFramesContext] Using V4L2 media driver cedrus (7.2.0) for S265
 frame=34405 fps=108 ... speed=4.5x          # whole episode, 0 decode errors, exit 0
 ```
+
+### VP9 (8- and 10-bit)
+
+The H616/H700 video engine also has a VP9 decoder, in the same slot as H.265
+(the SoC has no separate VP9 block). Mainline cedrus has no backend for it, so
+the image carries Jernej Skrabec's out-of-tree series from LibreELEC's
+Allwinner patch set, a snapshot of their master at `f59641e` (2026-11-01)
+taken 2026-11-02, plus the `v4l2-vp9` helper module it needs, which ROCKNIX
+does not ship (files, provenance and what is deliberately left out:
+`build/kernel/libreelec/README.md`). `build/06b-cedrus.sh` applies the series
+with `--fuzz=0`, builds `sunxi-cedrus.ko` and `v4l2-vp9.ko`, checks both sets
+of symbol versions against ROCKNIX's modules and installs them.
+
+Verified on the device, 10 frames per clip against a software decode in the
+matching format: VP9 profile 0 (8-bit) is **bit-identical** at 416x234, 720p,
+854x480, 1366x768, 1080p and 4K, and profile 2 (10-bit) at 384x216, 448x256,
+512x288, 640x360, 720p, 854x480 and 1366x768. `tools/check-video-decode.sh`
+compares 10 VPU frames against software in NV12 or P010 and fails below 35 dB;
+it generates a 416-wide clip when there is none, because that width is the
+regression case for the stride fix below.
+
+Paced 1080p24 playback, 30 s per run, whole-mpv CPU as a share of one core:
+
+| path | CPU |
+|---|---|
+| shipped config (`vo=dmabuf-wayland`, zero-copy) | 11 % |
+| zero-copy (`--hwdec=drm`), `vo=gpu --profile=fast` | 21 % |
+| copy (`--hwdec=v4l2request-copy`), `vo=gpu` | 106 % |
+| software, `vo=gpu` | 107 % |
+
+720p is 9 % (8- and 10-bit), 4K (3840x2160, also bit-exact) 13 %, all
+zero-copy. A 5-minute soak of paced 1080p24 showed 12 % average CPU, 60/60
+samples alive, flat `CmaFree` and RSS, and no decoder errors. Zero-copy is what
+makes VP9 cheap; the copy path downloads every frame and costs what software
+does. `--hwdec=v4l2request` is a copy spelling that falls back to software for
+VP9; `--hwdec=drm` is the zero-copy name, and `vp9` is in `hwdec-codecs` so mpv
+tries it at all.
+
+Two fixes on top of the series are ours:
+
+- **Reference stride.** The backend kept the vendor's `SCALE1_STRIDE_ALIGN(1)`,
+  the value for the 16-byte stride cedrus used before
+  `0002-cedrus-64-byte-stride.patch` made the capture stride 64-byte aligned, so
+  the engine read reference pictures back with a 16-byte aligned stride. Key
+  frames decoded and every inter frame was garbage, invisible at 1280/1920/3840
+  and fatal at 416/854/1366.
+  `build/kernel/libreelec/0900-cedrus-vp9-stride-align.patch` derives the field
+  from the reconstruct surface's `bytesperline`; its header carries the width
+  sweep.
+- **Capture padding.** The driver rounds the capture height up to 16 lines
+  (1088 for 1080), because the engine writes the reconstruct surface in 16-line
+  blocks and chroma has to sit where the hardware puts it. mpv and ffmpeg crop
+  to the coded size; Chromium's VA-API path sizes its surfaces from the format,
+  so up to 15 padding rows can be shown, and stale chroma showed as a thin
+  green/magenta line.
+  `build/kernel/libreelec/0901-cedrus-clear-padding-all-codecs.patch` clears
+  those rows with neutral chroma for the supported linear 4:2:0 layouts (about
+  23 KB per frame), for every codec. Reporting the coded height instead is not
+  an option: chroma would land at `bpl*coded_h` while the engine writes it at
+  `bpl*ALIGN(coded_h,16)`, and heights that are not a multiple of 16 hang the
+  engine (the decode never completes and the process cannot be killed).
+
+Known limits:
+
+- 10-bit at widths that sit 32 bytes past a 64-byte multiple is close but not
+  exact: measured `26.5 dB` at 352x234, `28.2 dB` at 416x234, `29.2 dB` at
+  416x240, `26.4 dB` at 480x234 and `25.5 dB` at 544x234, against `inf` at every
+  other width tested, including heights that are not a multiple of 16 (384x216,
+  640x360, 448x250). 8-bit at the same widths is `inf`. LibreELEC's later
+  `0438` ("fix the 10-bit and VP9 reconstruction buffer layout") rewrites the
+  low-2-bit plane stride and the P010 reconstruct offset that cause this, but it
+  is written against their AFBC tree and is deliberately not carried yet; see
+  `build/kernel/libreelec/README.md`.
+- Chromium can show the padding rows described above until the compositor
+  crops them; mpv and ffmpeg do not.
+
+YouTube in Chromium goes through the enhanced-h264ify policy described in the
+VA-API section above, which caps it at H.264 (1080p) on the VPU. This backend is
+not wired into that path: one policy for the browser is easier to keep working
+than a second extension arguing with it, and 1080p is well past what a 640x480
+panel shows. VP9 here serves local files, other sites, and clients that take the
+codec as it comes (mpv, ffmpeg, VLC).
 
 ### Throughput
 
@@ -60,9 +143,24 @@ rate. Ten-second playback runs of 540p/1080p HEVC and 1080p H.264 with
 `vo=gpu --profile=fast` drop 0 frames; the copy path at 1080p drops 149.
 
 `overlay/etc/mpv/mpv.conf` ships `hwdec=auto-safe` (zero-copy first, the copy
-variants behind it, software last) and `profile=fast`; `vo=dmabuf-wayland` is
-faster still but renders video only (no OSD, no subtitles), so it stays an
-option rather than the default.
+variants behind it, software last), `profile=fast` and `vo=dmabuf-wayland,gpu`.
+dmabuf-wayland hands the decoder's dmabufs to the compositor; `gpu` goes through
+libplacebo and costs about twice the CPU (paced 1080p24 VP9: 11 % of one core
+against 21 %, software 107 %). Subtitles and OSD render on dmabuf-wayland
+(verified with screenshots), so the cheaper VO comes first and `gpu` is the
+fallback.
+
+dmabuf-wayland only accepts dmabuf frames, and mpv moves to the next VO only
+when one fails to initialise, not when it rejects frames later: a
+software-decoded file (AV1) would play audio with no picture.
+`overlay/etc/mpv/scripts/vo-by-codec.lua` sets `vo=gpu` for anything outside
+`hwdec-codecs`, from an `on_preloaded` hook so the choice happens before the
+decoder opens (switching later reopens it mid-stream and breaks software
+codecs). It only does that when the configured VO is the shipped
+`dmabuf-wayland,gpu`; an explicit `--vo=` is left alone. The trade-off is one
+extra script and a codec-keyed choice; a whitelisted codec that the VPU rejects
+at runtime still falls back to software and lands on dmabuf-wayland, which is
+the case to fix if one shows up.
 
 ### The blue video: the driver's stride
 
@@ -143,7 +241,8 @@ $ ffmpeg -hwaccel drm -hwaccel_device /dev/dri/renderD128 -i in.mp4 -f null -
 
 `--hwdec=drm` also works under `--vo=dmabuf-wayland`, the fastest combination
 measured (62 fps at 1080p HEVC, 50 fps at 1080p H.264, 0 dropped frames over
-10 s in both — video only).
+10 s in both; that VO used to be video only, but subtitles and OSD were verified
+on it and it is now first in the list).
 
 ### Why the FFmpeg side
 
@@ -211,8 +310,9 @@ Enabling it in an app:
 
 - **Chromium** needs nothing beyond the session variable.
 - **YouTube in Chromium**: YouTube sends VP9 or AV1 to any browser that says it
-  can play them, and this VPU has neither (see *Decoder hardware*), so YouTube
-  would decode on the CPU. The image force-installs
+  can play them. AV1 has no decoder on this SoC at all, and VP9 is only decodable
+  through the out-of-tree backend this image carries; Chromium is kept on H.264
+  on purpose (see *VP9*), so the browser does not depend on either. The image force-installs
   [enhanced-h264ify](https://github.com/alextrv/enhanced-h264ify)
   (`omkfmpieigblcllmkgbflkikinpkodlk`, in
   `/etc/chromium/policies/managed/extensions.json`). On YouTube pages it makes
@@ -294,15 +394,17 @@ What the label says:
   above — the decoder is engaged while it happens, which is why "hwdec is on"
   is not a test.
 
-Limits: Cedrus has no VP9 or AV1, so sites that serve those (YouTube among
-them) stay software; Firefox does not engage its VA-API decoder on this device.
+Limits: Cedrus has no AV1, so AV1 itself stays software. YouTube in Chromium
+plays H.264 on the VPU through enhanced-h264ify (see *VA-API*), not VP9: that
+path does not depend on the out-of-tree backend. Firefox does not engage its
+VA-API decoder on this device.
 
 ## How it works
 
 | Piece | What | Where |
 |---|---|---|
-| Decoder hardware | Allwinner Cedar video engine (same as H6): MPEG-2, H.264, H.265 8/10-bit, VP8. No VP9 yet (separate upstream series), no AV1 (not in hardware). | `video-codec@1c0e000` |
-| Kernel driver | Cedrus, V4L2 **stateless** (request API) → `/dev/video0`, `/dev/media0` | `sunxi-cedrus.ko` in `/usr/lib/modules/7.2.0/extra/`, loaded automatically from the DT node; our patch gives the decoded picture a 64-byte aligned stride, which is what the GPU needs to import it (see "The blue video") |
+| Decoder hardware | Allwinner Cedar video engine (same as H6): MPEG-2, H.264, H.265 8/10-bit, VP8, and VP9 8/10-bit in the H.265 slot through an out-of-tree series. No AV1 (not in hardware). | `video-codec@1c0e000` |
+| Kernel driver | Cedrus, V4L2 **stateless** (request API) → `/dev/video0`, `/dev/media0` | `sunxi-cedrus.ko` in `/usr/lib/modules/7.2.0/extra/`, loaded automatically from the DT node; our patch gives the decoded picture a 64-byte aligned stride, which is what the GPU needs to import it (see "The blue video"). VP9 also needs `v4l2-vp9.ko` (probability adaptation), installed under `kernel/drivers/media/v4l2-core/` and pulled in by `depmod` |
 | Device tree | ROCKNIX DTB + overlay adding the video-engine node, for both screen panels | `/boot/firmware/dtb-regular.img` / `dtb-rev6.img`, the matching one copied to `dtb.img` at boot ([services/panel.md](services/panel.md)); original kept as `dtb-rocknix.img` |
 | Memory | Decoder buffers come from CMA: `cma=256M` on the kernel command line (ROCKNIX default is 32 MB). Unused CMA stays available to normal programs. 1080p streaming uses ~140 MB. | `extlinux/extlinux.conf` |
 | Heap access | dma-buf heaps are `root:root 0600` in the kernel; the overlay's `72-rg35xxh-dma-heap.rules` gives group `video` access, otherwise ffmpeg logs `Unable to open any dma_heap device` and no dmabuf path can allocate. | `overlay/etc/udev/rules.d/` |
@@ -336,6 +438,19 @@ GPU cannot import the decoded picture (see "The blue video").
 
 Review notes: all phandles/IDs the node uses exist in 7.2 (`ve_sram`, `sram_c`, `iommu`, `CLK_BUS_VE`/`CLK_VE`/`CLK_MBUS_VE`, `RST_BUS_VE`); `sunxi_sram` already supports `sun50i-h616-ve-sram`; the request API is always built in 7.2.
 
+The VP9 backend is not from that series. It is Jernej Skrabec's out-of-tree set
+from LibreELEC.tv (`projects/Allwinner/patches/linux/`, snapshot of their
+master at `f59641e`, 2026-11-01), rebased on 7.2 like the ROCKNIX kernel here;
+the files, their per-patch purpose, what was deliberately left out and the two
+fixes below are listed in `build/kernel/libreelec/README.md`. `0411` is the
+backend itself, `0412`/`0413` add P010 capture and VP9 10-bit output, `0414`
+adds H.265 P010 output (without it HEVC Main10 decodes to garbage), `0441`
+frees the MV-col buffers of a session that is closed without STREAMOFF, and
+`0415`/`0417`/`0418`/`0421` name the H616 mode bits and make the
+format/depth selection and the `V4L2_VP9` dependency explicit. Our two on top:
+`0900-cedrus-vp9-stride-align.patch` and
+`0901-cedrus-clear-padding-all-codecs.patch`, both described under *VP9*.
+
 For the userspace side, the source is the FFmpeg release Debian ships (now **n7.1.5**) with the patchset from [Kwiboo/FFmpeg](https://github.com/Kwiboo/FFmpeg) branch `v4l2-request-n7.1.3` applied on top. That branch is 14 commits on n7.1.3; `build/04c-v4l2-ffmpeg.sh` applies exactly those 14 (the diff from n7.1.3 to the pinned head, all pins in `build/config.sh`) onto n7.1.5. It is the only tree that has `libavutil/hwcontext_v4l2request.c`. Same release as Debian means the same `libavutil 59.39.100` / `libavcodec 61.19.101` soname ABI that mpv, Chromium and VLC were built against, so no other package is rebuilt.
 
 `ffmpeg -version` shows `7.1.5-handtop-v4l2request-fad85d9`. dpkg still lists Debian's `libav*` packages (they are held, see below) although their files are replaced: `/usr/share/doc/handtop-ffmpeg/BUILDINFO` records the real source (base commit, patchset range, local patch checksum).
@@ -365,12 +480,13 @@ With `iommus = <&iommu 3>, <&iommu 2>` (as upstream) the decoder probed, but ena
 
 The ROCKNIX kernel has everything Cedrus needs built in; only the driver is off. Instead of replacing the kernel, the module is built for it:
 
-1. linux 7.2 (sha256 pinned) + ROCKNIX patches from the tag in `ROCKNIX_VERSION` (now `20261001`) (`packages/linux/patches/7.2`, `mainline`, `devices/H700/patches/linux`, same order as ROCKNIX's `package.mk`) + our Cedrus patches.
+1. linux 7.2 (sha256 pinned) + ROCKNIX patches from the tag in `ROCKNIX_VERSION` (now `20261001`) (`packages/linux/patches/7.2`, `mainline`, `devices/H700/patches/linux`, same order as ROCKNIX's `package.mk`) + our Cedrus patches + the LibreELEC VP9 series from `build/kernel/libreelec/`.
 2. ROCKNIX's own `.config`, extracted from `KERNEL` (`extract-ikconfig`), with `VIDEO_SUNXI_CEDRUS=m`.
 3. **GCC 15** (Arm GNU Toolchain 15.2.Rel1, sha256 pinned): ROCKNIX uses GCC 15; with GCC 13 compiler-feature options (`CC_HAS_COUNTED_BY`, …) changed type definitions and 8–50 symbol versions differed. Arm publishes the same release for x86_64 and arm64 hosts; the step takes the one for the build host (`KTOOLCHAIN_SHA256_X86_64` / `_AARCH64` in `config.sh`). Before, it always took the x86_64 one, which cannot run on an arm64 host (codebase audit 2026-10-30, M13).
-4. Check: every symbol version the module imports must equal the one ROCKNIX's own modules import, and vermagic must match — otherwise the build stops. (Verified: all 1696 symbols imported by ROCKNIX modules match this build.)
+4. Check: every symbol version both modules import must equal the one ROCKNIX's own modules import, and vermagic must match — otherwise the build stops. (Verified: all 1696 symbols imported by ROCKNIX modules match this build.)
+5. Install `sunxi-cedrus.ko` under `extra/` and `v4l2-vp9.ko` under `kernel/drivers/media/v4l2-core/`, then `depmod` so the helper loads as a dependency.
 
-Takes ~6 min on a 28-core x86_64 build host. **The kernel tree is rebuilt from scratch whenever anything that went into it changes**: `work/kernel/…/.rg35xxh-patched` holds a hash of the Linux tarball, the ROCKNIX tag, every patch file (ROCKNIX's and `build/kernel/`, names and contents), the compiler release and the host architecture. A re-run with nothing changed reuses the tree. (Before 2026-11 the marker was an empty file, so an edited patch in `build/kernel/` was silently left out until `work/kernel` was deleted by hand: codebase audit 2026-10-30, L02. A tree with the old empty marker is rebuilt once.) The checks catch mismatches.
+Takes ~6 min on a 28-core x86_64 build host. **The kernel tree is rebuilt from scratch whenever anything that went into it changes**: `work/kernel/…/.rg35xxh-patched` holds a hash of the Linux tarball, the ROCKNIX tag, every patch file (ROCKNIX's, `build/kernel/` and the LibreELEC series in `build/kernel/libreelec/`, names and contents), the compiler release and the host architecture. A re-run with nothing changed reuses the tree. (Before 2026-11 the marker was an empty file, so an edited patch in `build/kernel/` was silently left out until `work/kernel` was deleted by hand: codebase audit 2026-10-30, L02. A tree with the old empty marker is rebuilt once.) The checks catch mismatches.
 
 ## Undo / fallback
 
