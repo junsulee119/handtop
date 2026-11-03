@@ -26,6 +26,7 @@ Kinds of check:
 | `git-branch <url> <branch> <VAR>` | The branch head is no longer the pinned commit |
 | `git-newer-branches <url> <branch> <VAR>` | A newer branch exists **for our FFmpeg release line** (major.minor of VAR); branches for other lines (n8.x: another libav ABI) are only mentioned |
 | `git-head <url> <VAR>` | The default branch has moved past the pinned commit |
+| `git-path <url> <branch> <path> <VAR>` | A commit on the branch after the pinned one touches `path`. For a piece taken from one folder of a busy repo (a patch series), where `git-head` would report "behind" almost every week. Fetches the branch's history without file contents (LibreELEC.tv: about 50 MB, a few seconds). Also behind when the pinned commit is no longer on the branch |
 | `git-tags <url> <regex> <VAR>` | A newer release tag (by version order) exists |
 | `go <VAR>` | A newer patch release of the same Go minor exists (those carry security fixes); a newer minor is only mentioned |
 | `follows <section>` | Not checked on its own: updated together with that section (our kernel modules follow ROCKNIX) |

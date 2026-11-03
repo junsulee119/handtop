@@ -17,6 +17,7 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 import urllib.request
 
 TOP = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -168,6 +169,40 @@ def check_git_head(args, cvars, section):
     return short(ours), short(head), head != ours, "default branch"
 
 
+def git(repo, *cmd, timeout=TIMEOUT):
+    try:
+        return subprocess.run(["git", "-C", repo, *cmd], capture_output=True, text=True,
+                              timeout=timeout, check=True).stdout.strip()
+    except subprocess.CalledProcessError as e:
+        raise CheckError(f"git {cmd[0]} failed: {e.stderr.strip() or e}") from e
+    except (subprocess.SubprocessError, OSError) as e:
+        raise CheckError(f"git {cmd[0]} failed: {e}") from e
+
+
+def check_git_path(args, cvars, section):
+    """Commits on the branch after the pinned one that touch the path. For pieces taken from
+    one folder of a busy repo (a patch series), where git-head would always show "behind".
+    Fetches the branch's history without file contents (LibreELEC.tv: ~50 MB, a few seconds)."""
+    url, branch, path, var = args
+    ours = pin_value(var, cvars)
+    with tempfile.TemporaryDirectory(prefix="upstream-") as repo:
+        git(repo, "init", "-q", "--bare")
+        git(repo, "fetch", "-q", "--filter=blob:none", url, f"refs/heads/{branch}", timeout=TIMEOUT * 10)
+        head = git(repo, "rev-parse", "FETCH_HEAD")
+        try:
+            pin = git(repo, "rev-parse", "--verify", "-q", f"{ours}^{{commit}}")
+        except CheckError:
+            return short(ours), short(head), True, f"pinned commit not found on {branch} (rewritten history?)"
+        if subprocess.run(["git", "-C", repo, "merge-base", "--is-ancestor", pin, head]).returncode != 0:
+            return short(ours), short(head), True, f"pinned commit is no longer part of {branch}"
+        total = int(git(repo, "rev-list", "--count", f"{pin}..{head}"))
+        touching = git(repo, "rev-list", f"{pin}..{head}", "--", path).split()
+    if not touching:
+        return short(ours), short(ours), False, f"{total} commits on {branch} since the pin, none touch {path}"
+    return (short(ours), short(touching[0]), True,
+            f"{len(touching)} of {total} commits on {branch} since the pin touch {path}")
+
+
 def check_git_tags(args, cvars, section):
     url, pattern, var = args
     ours = pin_value(var, cvars)
@@ -200,6 +235,7 @@ CHECKS = {
     "git-branch": check_git_branch,
     "git-newer-branches": check_git_newer_branches,
     "git-head": check_git_head,
+    "git-path": check_git_path,
     "git-tags": check_git_tags,
     "go": check_go,
 }
