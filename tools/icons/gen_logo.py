@@ -14,10 +14,7 @@ silhouette keeps it readable on light and dark backgrounds.
                                          own: light from the upper left, shadow on the upper-left inner
                                          edges, highlight on the lower-right ones, the shapes a shade
                                          darker), at 3x, centred above the taskbar (swaybg centres it,
-                                         same colour around it on bigger screens). The logo is carved
-                                         against the left and upper neighbours (orth) so the pointer's
-                                         45-degree edge shows; face buttons cut as plain dots, a gap
-                                         in the keys around the pointer (wall_depth)
+                                         same colour around it on bigger screens)
 
   overlay/usr/local/share/rg35xxh/bootlogo.xrgb.gz  boot logo: the full-colour logo at 4x with the
                                          wordmark under it on the dark wallpaper colour, 640x480,
@@ -132,48 +129,22 @@ def _lum(p):
     return (0.299 * p[0] + 0.587 * p[1] + 0.114 * p[2]) / 255
 
 
-def carve(im, bg, strength=0.10, inset=0.015, flat=False, orth=False, depth=None):
+def carve(im, bg, strength=0.10, inset=0.015, flat=False):
     """Engraving: each pixel = the background colour shifted by the brightness step from its
-    upper-left (negated, so edges facing the light are in shadow: pressed in), and the shape itself
-    a little darker. Done on the 1x art, scaled afterwards. flat: the shape is cut as one even step
-    (its own colours ignored), so every letter of the wordmark is equally deep.
-    orth: compare with the average of the left and upper neighbours instead of the diagonal one.
-    With the diagonal one, an edge that itself runs at 45 degrees (the pointer's long edge) has
-    the same brightness on both sides of the comparison and vanished. depth: {(x, y): brightness}
-    overriding the art's own brightness (see wall_depth)."""
+    upper-left neighbour (negated, so edges facing the light are in shadow: pressed in), and
+    the shape itself a little darker. Done on the 1x art, scaled afterwards. flat: the shape is cut
+    as one even step (its own colours ignored), so every letter of the wordmark is equally deep."""
     w, h, px, bl = im.width, im.height, im.load(), _lum(bg)
     L = [[(bl + 0.6 if flat else _lum(px[x, y])) if px[x, y][3] else bl for x in range(w)] for y in range(h)]
-    for (x, y), v in (depth or {}).items():
-        L[y][x] = v
     get = lambda x, y: L[y][x] if 0 <= x < w and 0 <= y < h else bl  # noqa: E731
     out = Image.new("RGBA", (w, h), (0, 0, 0, 0))
     o = out.load()
     for y in range(h):
         for x in range(w):
-            ref = (get(x - 1, y) + get(x, y - 1)) / 2 if orth else get(x - 1, y - 1)
-            v = (get(x, y) - ref) * strength - (inset if px[x, y][3] else 0)
+            v = (get(x, y) - get(x - 1, y - 1)) * strength - (inset if px[x, y][3] else 0)
             if abs(v) >= 0.004:
                 o[x, y] = tuple(max(0, min(255, round(bg[k] + v * 255))) for k in range(3)) + (255,)
     return out
-
-
-def wall_depth(im):
-    """Brightness overrides for carving the logo into the wallpaper. The face buttons are four
-    colours of different brightness that carved into diagonal scratches: cut them as the D-pad's
-    grey, four even dots. Keys touching the pointer: cut as the keyboard body, a 1 px gap that
-    keeps the pointer's tail from running into the keys."""
-    px, d = im.load(), {}
-    rgb = lambda x, y: px[x, y][:3] if px[x, y][3] else None  # noqa: E731
-    cursor = {(31 + x, 22 + y) for y, r in enumerate(CURSOR) for x, c in enumerate(r) if c != "."}
-    for y in range(im.height):
-        for x in range(im.width):
-            c = rgb(x, y)
-            if c in (C["x"], C["a"], C["b"], C["y"]):
-                d[(x, y)] = _lum(C["g"])
-            elif c == C["k"] and (x, y) not in cursor and any(
-                    (x + dx, y + dy) in cursor for dx in (-1, 0, 1) for dy in (-1, 0, 1)):
-                d[(x, y)] = _lum(C["K"])
-    return d
 
 
 def big(im, z):
@@ -299,7 +270,7 @@ if __name__ == "__main__":
         wm.paste(t, (lg.width + 24, (lg.height - 7 * 4) // 2), t)
         wm.save(f"media/logo/handtop-wordmark-{theme}.png")
         wall = Image.new("RGB", (640, 480), WALL[theme])   # wallpaper: carved logo 3x, wordmark below
-        lg3 = big(carve(L, WALL[theme], strength=0.14, orth=True, depth=wall_depth(L)), 3)
+        lg3 = big(carve(L, WALL[theme]), 3)
         t3 = big(carve(wordmark_text(theme), WALL[theme], flat=True), 3)
         top = (448 - (lg3.height + 14 + 7 * 3)) // 2       # centred in the area above the 32 px taskbar
         wall.paste(lg3, ((640 - lg3.width) // 2, top), lg3)
