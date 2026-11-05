@@ -16,6 +16,8 @@ Output (into the folder given as the first argument, default "."):
   battery-low-<bars>[-light].png           level <= 20 % (red bars)
   battery-charging-<bars>[-light].png      the same with the bolt
   battery-charging-low-<bars>[-light].png
+  ...-<bars>-saver[-light].png             every one of the above with a green shell: Battery saver
+                                           is on (rg35xxh-battery-saver)
 """
 import sys
 
@@ -35,9 +37,9 @@ BOLT = ["...YY.",                                   # 6 x 7, centred on the shel
 BOLT_AT = (6, 2)
 THEMES = {
     "dark":  {"ink": (232, 234, 238), "red": (255, 107, 107), "slot": ((255, 255, 255), 0.16),
-              "bolt": (255, 214, 64)},
+              "bolt": (255, 214, 64), "saver": (80, 200, 110)},
     "light": {"ink": (43, 48, 59), "red": (204, 51, 51), "slot": ((43, 48, 59), 0.14),
-              "bolt": (230, 160, 0)},
+              "bolt": (230, 160, 0), "saver": (46, 158, 79)},
 }
 
 
@@ -48,13 +50,14 @@ def fill(im, rect, rgb, alpha=1.0):
             im.putpixel((x, y), tuple(rgb) + (round(alpha * 255),))
 
 
-def icon(theme, bars, low, charging):
+def icon(theme, bars, low, charging, saver=False):
     T = THEMES[theme]
+    shell = T["saver"] if saver else T["ink"]           # Battery saver: green shell, bars unchanged
     im = Image.new("RGBA", (W, H), (0, 0, 0, 0))
     x, y, w, h = SHELL
     for r in ((x, y, w, 1), (x, y + h - 1, w, 1), (x, y, 1, h), (x + w - 1, y, 1, h)):
-        fill(im, r, T["ink"])
-    fill(im, NUB, T["ink"])
+        fill(im, r, shell)
+    fill(im, NUB, shell)
     for i, bar in enumerate(BARS):
         if i < bars:
             fill(im, bar, T["red"] if low else T["ink"])
@@ -81,3 +84,4 @@ if __name__ == "__main__":
                 for charging in (False, True):
                     name = "battery" + ("-charging" if charging else "") + ("-low" if low else "")
                     icon(theme, bars, low, charging).save(f"{out}/{name}-{bars}{sfx}.png")
+                    icon(theme, bars, low, charging, True).save(f"{out}/{name}-{bars}-saver{sfx}.png")

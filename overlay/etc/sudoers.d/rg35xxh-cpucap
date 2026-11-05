@@ -1,0 +1,2 @@
+# Desktop user may switch Battery saver's CPU speed cap without a password.
+%sudo ALL=(root) NOPASSWD: /usr/local/sbin/rg35xxh-cpucap on, /usr/local/sbin/rg35xxh-cpucap off

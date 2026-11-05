@@ -3,8 +3,9 @@
 * { background-image: none; box-shadow: none; font-family: "Noto Sans"; }
 window { background-color: rgba(236, 239, 244, 0.92); }
 button {
-  min-width: 240px;   /* both columns equally wide: without it each column took its labels'
-                         width first (Restart / Shut down wider), 275 vs 303 px at 640x480 */
+  min-width: 150px;   /* all three columns equally wide (without it each column took its labels'
+                         width first); 150 + GTK's padding and border still fits three columns and
+                         the gaps in 640 px (176 overflowed the right edge) */
   color: #2b303b; font-size: 20px;
   background-color: #f8f9fb; border: 2px solid #c9ced8; border-radius: 12px;
   background-repeat: no-repeat; background-position: center 32%; background-size: 72px 72px;
@@ -13,9 +14,17 @@ button {
    first button (Sleep), and the D-pad moves the pointer, never that focus, so styling :focus like
    :hover left Sleep lit next to the hovered button. Keyboard focus (a USB keyboard's arrows / Tab)
    is a thin outline, which GTK draws only once such a key has been used. */
+/* Battery saver's label is the longest ("Battery saver: Off"); 18 px keeps it inside its button. */
+#saver { font-size: 18px; }
+/* wlogout 1.2.2 fills the rest of the grid's last column with an empty button (5 buttons, 3 + 2):
+   draw it as nothing. */
+button:not(#sleep):not(#reboot):not(#logout):not(#shutdown):not(#saver) {
+  background-color: transparent; border-color: transparent;
+}
 button:hover { background-color: #c9dbff; border-color: #3d68b0; }
 button:focus { outline: 2px solid #3d68b0; outline-offset: -6px; }
 #sleep     { background-image: image(url("/usr/local/share/rg35xxh/icons/power-sleep-light.png")); }
 #reboot    { background-image: image(url("/usr/local/share/rg35xxh/icons/power-reboot-light.png")); }
 #logout    { background-image: image(url("/usr/local/share/rg35xxh/icons/power-logout-light.png")); }
 #shutdown  { background-image: image(url("/usr/local/share/rg35xxh/icons/power-shutdown-light.png")); }
+#saver     { background-image: image(url("/usr/local/share/rg35xxh/icons/power-saver-light.png")); }

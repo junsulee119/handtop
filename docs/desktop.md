@@ -58,7 +58,7 @@ Auto-login on tty1 starts labwc (`/etc/profile.d/zz-rg35xxh-session.sh`); **Log 
 |---|---|---|
 | Panel | **Waybar** | Bottom taskbar, classic-desktop styling: open windows, clock, battery, tray |
 | Launcher | **nwg-drawer** | Full-screen app icon grid — usable with mouse/D-pad (type-to-search launchers rejected: no keyboard) |
-| Power menu | **wlogout** | Full-screen large buttons: Sleep, Restart / Log out, Shut down. Opened by Power (tap) |
+| Power menu | **wlogout** | Full-screen large buttons: Sleep, Restart, Shut down / Battery saver, Log out. Opened by Power (tap) |
 | Notifications | **mako** | |
 
 Chosen over LXQt-on-labwc (heavier) and sfwbar (smaller community) for low RAM and gamepad-friendly large targets.

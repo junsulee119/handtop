@@ -6,7 +6,8 @@
 #                              full, ~0.45 s each); otherwise refresh Waybar when the level or the
 #                              charger state changes.
 # Icons: /usr/local/share/rg35xxh/icons/battery-*.png (tools/icons/gen_battery.py). Light set
-# with the light theme (rg35xxh-theme).
+# with the light theme (rg35xxh-theme); -saver set (green shell) while Battery saver is on.
+# Tapping the icon switches Battery saver (Waybar on-click).
 BAT=/sys/class/power_supply/battery
 USB=/sys/class/power_supply/axp20x-usb
 ICONS=/usr/local/share/rg35xxh/icons
@@ -62,4 +63,8 @@ name=battery
 [ "$cap" -le 20 ] && name=$name-low
 tip="Battery $cap %"
 [ "$plugged" = 1 ] && tip="$tip, charging"
-printf '%s\n%s\n' "$ICONS/$name-$shown$suffix.png" "$tip"
+saver=
+if [ "$(cat "$c/battery-saver" 2>/dev/null)" = on ]; then    # rg35xxh-battery-saver: green shell
+  saver=-saver; tip="$tip, Battery saver on"
+fi
+printf '%s\n%s\n' "$ICONS/$name-$shown$saver$suffix.png" "$tip"

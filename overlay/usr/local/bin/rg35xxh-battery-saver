@@ -1,0 +1,83 @@
+#!/bin/sh
+# Battery saver for the desktop: a CPU speed cap and a dimmer screen, behind one switch.
+#   rg35xxh-battery-saver on|off|toggle   switch it (taskbar: tap the battery; power menu strip)
+#   rg35xxh-battery-saver --get           print on / off
+#   rg35xxh-battery-saver --apply         session start (labwc autostart): apply the saved choice
+# On:  the CPU top speed is capped at 1.0 GHz (rg35xxh-cpucap through sudo; the top is 1.4 GHz)
+#      and the screen brightness is halved, never below the 5 % floor of the brightness keys.
+#      F + Vol can still change the brightness afterwards.
+# Off: the cap is lifted and the brightness goes back to what it was, unless it was changed in
+#      the meantime (then it is left alone, like the dim before auto-sleep).
+# The choice is remembered (~/.config/rg35xxh/battery-saver) and applied again at every session
+# start; --apply also lifts a cap a previous session left behind when the saver is off
+# (docs/hardware-safety.md rule 6.2). The cap is unmeasured: idle the CPU already runs at its
+# lowest speed most of the time, so most of the gain is expected from the screen.
+C="${XDG_CONFIG_HOME:-$HOME/.config}/rg35xxh"
+STATE="$C/battery-saver"
+R="${XDG_RUNTIME_DIR:-/tmp}"
+BRIGHT="$R/rg35xxh-battery-saver-brightness"   # "<before> <set>" while the saver dimmed the screen
+B=/sys/class/backlight/backlight
+L="$HOME/.local/state/session"
+log() { mkdir -p "$L"; echo "$(date '+%F %T') rg35xxh-battery-saver: $*" >> "$L/battery-saver.log"; }
+
+get() { [ "$(cat "$STATE" 2>/dev/null)" = on ] && echo on || echo off; }
+
+# Re-run the taskbar battery icon (green outline while on). Only a Waybar up for >= 3 s.
+refresh() {
+  pid=$(pidof -s waybar) || return 0
+  age=$(ps -o etimes= -p "$pid" 2>/dev/null | tr -d ' ')
+  [ "${age:-0}" -ge 3 ] && env kill -RTMIN+9 "$pid" 2>/dev/null
+  return 0
+}
+
+cap() {  # cap on|off
+  # shellcheck disable=SC2024  # the log is the user's own file: written as the user on purpose
+  sudo -n /usr/local/sbin/rg35xxh-cpucap "$1" >> "$L/battery-saver.log" 2>&1 || log "cpucap $1 failed"
+}
+
+dim() {
+  cur=$(cat "$B/brightness" 2>/dev/null) || return 0
+  mx=$(cat "$B/max_brightness" 2>/dev/null) || return 0
+  floor=$(( (mx * 5 + 50) / 100 ))
+  new=$(( cur / 2 ))
+  [ "$new" -lt "$floor" ] && new=$floor
+  [ "$new" -ge "$cur" ] && return 0
+  echo "$new" > "$B/brightness" 2>/dev/null || return 0
+  echo "$cur $new" > "$BRIGHT"
+  log "brightness $cur -> $new"
+}
+
+undim() {
+  [ -r "$BRIGHT" ] || return 0
+  read -r before set < "$BRIGHT"
+  rm -f "$BRIGHT"
+  [ "$(cat "$B/brightness" 2>/dev/null)" = "$set" ] || return 0   # changed meanwhile: keep it
+  echo "$before" > "$B/brightness" 2>/dev/null && log "brightness $set -> $before"
+}
+
+set_on() {
+  mkdir -p "$C"; echo on > "$STATE"
+  cap on; dim; refresh; log "on"
+  notify-send -t 4000 "Battery saver on" "CPU limited to 1.0 GHz, screen dimmed. Tap the battery icon to turn it off." 2>/dev/null
+}
+
+set_off() {
+  mkdir -p "$C"; echo off > "$STATE"
+  cap off; undim; refresh; log "off"
+  notify-send -t 3000 "Battery saver off" 2>/dev/null
+}
+
+case "${1:-}" in
+  on) set_on ;;
+  off) set_off ;;
+  toggle) if [ "$(get)" = on ]; then set_off; else set_on; fi ;;
+  --get) get ;;
+  --apply)
+    if [ "$(get)" = on ]; then
+      cap on; log "session start: on (CPU cap)"
+    elif [ -e /run/rg35xxh-cpucap ]; then
+      cap off; log "session start: lifted a leftover cap"
+    fi
+    rm -f "$BRIGHT" ;;
+  *) echo "usage: rg35xxh-battery-saver on|off|toggle|--get|--apply" >&2; exit 2 ;;
+esac

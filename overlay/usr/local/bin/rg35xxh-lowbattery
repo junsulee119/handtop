@@ -1,58 +1,131 @@
 #!/bin/sh
-# Low battery during "Screen off" (power menu). Screen off keeps things running (SSH, downloads),
-# so auto-sleep skips it (rg35xxh-autosleep); this watcher keeps the battery from running flat:
-#   <= WARN_PCT % (not charging): the screen comes back on, a notification stays until tapped,
-#                                 and the handheld vibrates. Once per discharge: going back to
-#                                 Screen off below WARN_PCT does not warn again (it would only turn
-#                                 the screen straight back on).
-#   <= OFF_PCT %  (not charging, still in Screen off): a notification, then a clean shutdown.
-# Outside Screen off it does nothing. Vibration goes through the input daemon, which owns the
-# motor (docs/hardware-safety.md): this script only leaves a request file for it.
+# Low battery watcher: keeps the battery from running flat, which can leave the SD card's
+# filesystem half-written. Not charging:
+#   Normal use:
+#     <= LOW_BATTERY_WARN_PCT %      a warning that stays until tapped, plus a vibration. Once per
+#                                    discharge (charging, or rising above the level, re-arms it).
+#     <= LOW_BATTERY_SHUTDOWN_PCT %  a notification and a 3-minute countdown, then a clean shutdown.
+#                                    Plugging in the charger during the countdown cancels it.
+#   Screen off (power menu; it keeps SSH and downloads running, and auto-sleep skips it):
+#     <= SCREEN_OFF_WARN_PCT %       the screen comes back on, a warning stays until tapped, and
+#                                    the handheld vibrates. Once per discharge: going back to Screen
+#                                    off below the level does not warn again (it would only turn the
+#                                    screen straight back on).
+#     <= SCREEN_OFF_SHUTDOWN_PCT %   still in Screen off: a notification, then a clean shutdown.
+# 0 turns a level off. While asleep nothing runs; the check happens again on wake.
+# Every warning buzzes three times. Vibration goes through the input daemon, which owns the motor (docs/hardware-safety.md): this
+# script only leaves a request file for it.
 #   rg35xxh-lowbattery --watch     loop (labwc autostart; a log-out stops it)
 #   rg35xxh-lowbattery --check     one check, then exit (testing)
 # Testing: RG35XXH_POWER_CONF=<file> uses another config (e.g. thresholds above today's level);
-# RG35XXH_LOWBATTERY_DRYRUN=1 logs the shutdown instead of doing it.
-# Thresholds in /etc/rg35xxh/power.conf (SCREEN_OFF_WARN_PCT, SCREEN_OFF_SHUTDOWN_PCT).
+# RG35XXH_LOWBATTERY_DRYRUN=1 logs the shutdown instead of doing it; RG35XXH_LOWBATTERY_DELAY=<s>
+# shortens the countdown.
+# Levels in /etc/rg35xxh/power.conf.
 BAT=/sys/class/power_supply/battery
 USB=/sys/class/power_supply/axp20x-usb
 R="${XDG_RUNTIME_DIR:-/tmp}"
 SCREEN_OFF="$R/rg35xxh-screen-off"
-WARNED="$R/rg35xxh-lowbattery-warned"
+WARNED="$R/rg35xxh-lowbattery-warned"      # Screen off warning given (this discharge)
+LOW_WARNED="$R/rg35xxh-lowbattery-low-warned"  # normal-use warning given (this discharge)
 HAPTIC="$R/rg35xxh-haptic-request"         # read and removed by rg35xxh-inputd
 WARN_PCT=20
 OFF_PCT=5
+LOW_WARN_PCT=10
+LOW_OFF_PCT=5
 INTERVAL=30
+DELAY=${RG35XXH_LOWBATTERY_DELAY:-180}
 CONF="${RG35XXH_POWER_CONF:-/etc/rg35xxh/power.conf}"
 # shellcheck source=/dev/null  # site config, path set at run time
 [ -r "$CONF" ] && . "$CONF"
-WARN_PCT=${SCREEN_OFF_WARN_PCT:-$WARN_PCT}
-OFF_PCT=${SCREEN_OFF_SHUTDOWN_PCT:-$OFF_PCT}
 log() { echo "$(date '+%F %T') rg35xxh-lowbattery: $*"; }
+# A typo in power.conf must not stop the watcher: that one value falls back to its default.
+num() {  # num NAME VALUE DEFAULT
+  case "$2" in
+    ''|*[!0-9]*) [ -n "$2" ] && log "bad $1='$2' in $CONF, using $3" >&2; echo "$3" ;;
+    *) echo "$2" ;;
+  esac
+}
+WARN_PCT=$(num SCREEN_OFF_WARN_PCT "${SCREEN_OFF_WARN_PCT:-}" "$WARN_PCT")
+OFF_PCT=$(num SCREEN_OFF_SHUTDOWN_PCT "${SCREEN_OFF_SHUTDOWN_PCT:-}" "$OFF_PCT")
+LOW_WARN_PCT=$(num LOW_BATTERY_WARN_PCT "${LOW_BATTERY_WARN_PCT:-}" "$LOW_WARN_PCT")
+LOW_OFF_PCT=$(num LOW_BATTERY_SHUTDOWN_PCT "${LOW_BATTERY_SHUTDOWN_PCT:-}" "$LOW_OFF_PCT")
+DELAY=$(num RG35XXH_LOWBATTERY_DELAY "$DELAY" 180)
+# Three of the input daemon's standard buzzes (450 ms each), 0.8 s apart: a request file is
+# taken within 0.1 s and each buzz has ended before the next request. Runs in the background so
+# the notification is not held up.
+buzz3() {
+  for _ in 1 2 3; do : > "$HAPTIC"; sleep 0.8; done
+}
+charging() { [ "$(cat "$USB/online" 2>/dev/null)" = 1 ]; }
+
+shutdown_now() {
+  sync
+  [ -n "${RG35XXH_LOWBATTERY_DRYRUN:-}" ] && { log "dry run: not shutting down"; return 0; }
+  exec systemctl poweroff
+}
+
+# Normal use at LOW_OFF_PCT: count down, cancel if the charger comes.
+countdown() {
+  log "battery ${1}%: shutting down in ${DELAY} s unless charging"
+  buzz3 &
+  id=""
+  t=$DELAY
+  while [ "$t" -gt 0 ]; do
+    # One notification, its seconds counting down (same id each time, so mako replaces it;
+    # dismissing it only hides it until the next second).
+    id=$(notify-send -p ${id:+-r "$id"} -u critical -t 0 "Battery ${1}%: shutting down in ${t} s" \
+      "Plug in the charger to stay on. Save your work now." 2>/dev/null) || id=""
+    sleep 1
+    t=$((t - 1))
+    if charging; then
+      log "charger connected: shutdown cancelled"
+      notify-send ${id:+-r "$id"} -u normal "Charging" "Shutdown cancelled." 2>/dev/null
+      return 0
+    fi
+  done
+  log "battery ${1}%: shutting down"
+  shutdown_now
+}
 
 check() {
   cap=$(cat "$BAT/capacity" 2>/dev/null) || return 0
   case "$cap" in ''|*[!0-9]*) return 0 ;; esac
-  if [ "$(cat "$USB/online" 2>/dev/null)" = 1 ] || [ "$cap" -gt "$WARN_PCT" ]; then
-    rm -f "$WARNED"                          # charging or charged again: warn again next time
+  if charging; then
+    rm -f "$WARNED" "$LOW_WARNED"            # charging: warn again next time
     return 0
   fi
-  [ -e "$SCREEN_OFF" ] || return 0
-  if [ "$cap" -le "$OFF_PCT" ]; then
-    log "battery ${cap}% in Screen off: shutting down"
-    : > "$HAPTIC"
-    notify-send -u critical -t 0 "Battery ${cap}%" "Shutting down to protect the system." 2>/dev/null
-    sync
-    sleep 5
-    [ -n "${RG35XXH_LOWBATTERY_DRYRUN:-}" ] && { log "dry run: not shutting down"; return 0; }
-    exec systemctl poweroff
+  [ "$cap" -gt "$WARN_PCT" ] && rm -f "$WARNED"
+  [ "$cap" -gt "$LOW_WARN_PCT" ] && rm -f "$LOW_WARNED"
+  if [ -e "$SCREEN_OFF" ]; then
+    if [ "$OFF_PCT" -gt 0 ] && [ "$cap" -le "$OFF_PCT" ]; then
+      log "battery ${cap}% in Screen off: shutting down"
+      buzz3 &
+      notify-send -u critical -t 0 "Battery ${cap}%" "Shutting down to protect the system." 2>/dev/null
+      sleep 5
+      shutdown_now
+      return 0
+    fi
+    if [ "$WARN_PCT" -gt 0 ] && [ "$cap" -le "$WARN_PCT" ] && [ ! -e "$WARNED" ]; then
+      log "battery ${cap}% in Screen off: screen on, warning"
+      : > "$WARNED"
+      : > "$LOW_WARNED"                      # this warning covers the normal-use one too
+      rg35xxh-screen-on
+      buzz3 &
+      notify-send -u critical -t 0 "Battery low: ${cap}%" \
+        "Screen off ended. Plug in the charger. At ${OFF_PCT}% in Screen off, the handheld shuts down. Tap to dismiss." 2>/dev/null
+    fi
+    return 0
   fi
-  if [ ! -e "$WARNED" ]; then
-    log "battery ${cap}% in Screen off: screen on, warning"
-    : > "$WARNED"
-    rg35xxh-screen-on
-    : > "$HAPTIC"
+  if [ "$LOW_OFF_PCT" -gt 0 ] && [ "$cap" -le "$LOW_OFF_PCT" ]; then
+    countdown "$cap"
+    return 0
+  fi
+  if [ "$LOW_WARN_PCT" -gt 0 ] && [ "$cap" -le "$LOW_WARN_PCT" ] && [ ! -e "$LOW_WARNED" ]; then
+    log "battery ${cap}%: warning"
+    : > "$LOW_WARNED"
+    buzz3 &
     notify-send -u critical -t 0 "Battery low: ${cap}%" \
-      "Screen off ended. Plug in the charger. At ${OFF_PCT}% in Screen off, the handheld shuts down. Tap to dismiss." 2>/dev/null
+      "Plug in the charger. At ${LOW_OFF_PCT}% the handheld shuts down. Tap to dismiss." 2>/dev/null
   fi
 }
 

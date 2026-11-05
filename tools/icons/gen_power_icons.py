@@ -2,8 +2,9 @@
 
   power-<action>.png        power menu buttons, 24x24 art x3 = 72 px: sleep (crescent moon and a
   power-<action>-light.png  star), reboot (ring with an arrowhead, clockwise), logout (door frame
-  power-<action>-focus.png  with an arrow out), shutdown (the power symbol). Each action has its own
-                            colour (blue / amber / grey / red); -light = darker inks for the light
+  power-<action>-focus.png  with an arrow out), shutdown (the power symbol), saver (a leaf with its
+                            midrib and stem: Battery saver). Each action has its own colour (blue /
+                            amber / grey / red / green); -light = darker inks for the light
                             theme; -focus = white, for the highlighted button in the dark theme
                             (the coloured icon would be lost on the blue highlight).
   panel-apps.png            taskbar Apps button: 3x3 app grid, 8x8 art x2 = 16 px, white (both themes)
@@ -77,6 +78,24 @@ def sleep():
     return p
 
 
+def saver():
+    """A leaf from lower left to upper right: two overlapping circles (a vesica, 20 px tip to tip,
+    10 px wide), the midrib left open along the axis, and a short stem out of the lower tip."""
+    p = set()
+    cx, cy, off, r = 12.5, 11.5, 7.5, 12.5
+    nx, ny = 1 / math.sqrt(2), 1 / math.sqrt(2)              # across the leaf
+    for y in range(G):
+        for x in range(G):
+            px_, py_ = x + .5, y + .5
+            if (math.hypot(px_ - (cx + nx * off), py_ - (cy + ny * off)) <= r
+                    and math.hypot(px_ - (cx - nx * off), py_ - (cy - ny * off)) <= r):
+                p.add((x, y))
+    for i in range(7, 18):                                    # midrib, one pixel stair
+        p.discard((i, 23 - i))
+    p.update({(3, 21), (4, 20), (5, 19), (2, 22)})            # stem
+    return {(x + 1, y - 1) for x, y in p}                     # centre leaf + stem in the grid
+
+
 def apps():
     p = set()
     for bx in (0, 3, 6):
@@ -100,9 +119,11 @@ def rgb(h):
     return tuple(int(h[i:i + 2], 16) for i in (1, 3, 5))
 
 
-ACTIONS = {"sleep": sleep, "reboot": restart, "logout": logout, "shutdown": power}
-COLOURS = {"": {"sleep": "#8fb4ff", "reboot": "#ffd28f", "logout": "#c9ced8", "shutdown": "#ff6b6b"},
-           "-light": {"sleep": "#3d68b0", "reboot": "#a36b00", "logout": "#4f5869", "shutdown": "#cc3333"}}
+ACTIONS = {"sleep": sleep, "reboot": restart, "logout": logout, "shutdown": power, "saver": saver}
+COLOURS = {"": {"sleep": "#8fb4ff", "reboot": "#ffd28f", "logout": "#c9ced8", "shutdown": "#ff6b6b",
+                "saver": "#50c86e"},
+           "-light": {"sleep": "#3d68b0", "reboot": "#a36b00", "logout": "#4f5869", "shutdown": "#cc3333",
+                      "saver": "#2e9e4f"}}
 
 if __name__ == "__main__":
     out = sys.argv[1] if len(sys.argv) > 1 else "."

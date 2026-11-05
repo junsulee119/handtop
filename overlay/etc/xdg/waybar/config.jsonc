@@ -15,7 +15,10 @@
   // 4 px above and below the 23 px icon (with the 1 px margin-top in style.css).
   // Battery icon (pixel art, 20x11; charging animation driven by "rg35xxh-battery --animate"),
   // followed by the percentage from the battery module.
-  "image#battery": { "exec": "rg35xxh-battery", "size": 20, "interval": 30, "signal": 9 },
+  // Tapping the icon or the percentage switches Battery saver (rg35xxh-battery-saver; the icon
+  // gets a green outline while it is on).
+  "image#battery": { "exec": "rg35xxh-battery", "size": 20, "interval": 30, "signal": 9,
+                     "on-click": "rg35xxh-battery-saver toggle" },
   "image#inputmode": { "exec": "rg35xxh-inputmode", "size": 23, "interval": 10, "signal": 8 },
   // Bluetooth: own icon instead of blueman's tray (rg35xxh-bluetooth; --watch sends signal 10)
   "image#bluetooth": { "exec": "rg35xxh-bluetooth", "size": 23, "interval": 60, "signal": 10,
@@ -36,7 +39,8 @@
     "states": { "warning": 20, "critical": 10 },
     "format": "{capacity}%",
     "format-charging": "{capacity}%",          // charging is shown by the icon
-    "tooltip-format": "{timeTo}"
+    "tooltip-format": "{timeTo}",
+    "on-click": "rg35xxh-battery-saver toggle"
   },
   "clock": { "format": "{:%H:%M}", "tooltip-format": "{:%Y-%m-%d %a}" }
 }

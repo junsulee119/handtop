@@ -1,6 +1,21 @@
 #!/bin/sh
 # Power menu (opened by Power tap and the panel button); toggles if already open.
+# Five wlogout buttons in a 3 + 2 grid: Sleep, Restart, Shut down / Battery saver, Log out.
+# The layout is written at each opening so the Battery saver button shows its state
+# ("Battery saver: On" / "Off"); /etc/wlogout/layout keeps the four fixed buttons.
 pgrep -x wlogout >/dev/null && exec pkill -x wlogout
 S=/etc/wlogout/style.css     # light theme: style-light.css (rg35xxh-theme)
 [ "$(cat "${XDG_CONFIG_HOME:-$HOME/.config}/rg35xxh/theme" 2>/dev/null)" = light ] && S=/etc/wlogout/style-light.css
-exec wlogout -l /etc/wlogout/layout -C "$S" -b 2 -c 12 -r 12 -m 24 -p layer-shell
+st=Off
+[ "$(rg35xxh-battery-saver --get)" = on ] && st=On
+LAY="${XDG_RUNTIME_DIR:-/tmp}/rg35xxh-power-menu.layout"
+# wlogout fills the grid column by column (2 rows here), so the order is: column 1 Sleep, Battery
+# saver; column 2 Restart, Log out; column 3 Shut down.
+{
+  grep '"sleep"' /etc/wlogout/layout
+  printf '{ "label": "saver", "action": "rg35xxh-battery-saver toggle", "text": "Battery saver: %s", "keybind": "b" }\n' "$st"
+  grep '"reboot"' /etc/wlogout/layout
+  grep '"logout"' /etc/wlogout/layout
+  grep '"shutdown"' /etc/wlogout/layout
+} > "$LAY"
+exec wlogout -l "$LAY" -C "$S" -b 3 -c 12 -r 12 -m 24 -p layer-shell

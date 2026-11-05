@@ -43,7 +43,7 @@ Where these come from: the log-out freeze (2026-10-26), the hardware review that
 
 - [ ] **Every subprocess and blocking call has a timeout**, and its failure is caught (`OSError`, `SubprocessError`, non-zero exit).
 - [ ] **Unexpected exceptions**: catch at the top, log where a user can see it, and leave the system as it was.
-- [ ] **Session events**: log-out, suspend and resume, Screen off, HDMI plugged or unplugged, low battery (20 % warning, 5 % shutdown) while your code runs.
+- [ ] **Session events**: log-out, suspend and resume, Screen off, HDMI plugged or unplugged, low battery (10 % warning and 5 % shutdown; 20 % and 5 % in Screen off) while your code runs.
 - [ ] **SD-card wear**: nothing written on every boot or every few seconds when nothing changed.
 
 ## 7. Seeing and fixing failures

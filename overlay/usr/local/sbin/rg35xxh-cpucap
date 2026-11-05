@@ -1,0 +1,24 @@
+#!/bin/sh
+# CPU speed cap for Battery saver (rg35xxh-battery-saver). Run as root (sudoers allows exactly
+# "on" and "off" for the desktop user, /etc/sudoers.d/rg35xxh-cpucap).
+#   on   remember the current top speed in /run/rg35xxh-cpucap, then cap all four cores at
+#        1.008 GHz (one policy covers them, so cores that Screen off took offline follow too)
+#   off  put the remembered top speed back; nothing to do if no cap is set
+# Only the cpufreq limit changes: no governor (Screen off's rg35xxh-lowpower owns that), no
+# voltages, nothing on the power chip. /run is cleared at boot, so a reboot always starts uncapped.
+P=/sys/devices/system/cpu/cpufreq/policy0
+S=/run/rg35xxh-cpucap
+CAP=1008000
+log() { echo "$(date '+%F %T') rg35xxh-cpucap: $*"; }
+case "$1" in
+  on)
+    [ -e "$S" ] || cat "$P/scaling_max_freq" > "$S" || exit 1
+    echo "$CAP" > "$P/scaling_max_freq" || exit 1
+    log "on: max $(cat "$P/scaling_max_freq") kHz (was $(cat "$S"))" ;;
+  off)
+    [ -e "$S" ] || exit 0
+    cat "$S" > "$P/scaling_max_freq" || exit 1
+    rm -f "$S"
+    log "off: max $(cat "$P/scaling_max_freq") kHz" ;;
+  *) echo "usage: rg35xxh-cpucap on|off" >&2; exit 2 ;;
+esac
