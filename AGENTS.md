@@ -52,6 +52,7 @@ Go through **[docs/reliability-checklist.md](docs/reliability-checklist.md)** fo
 - Without the device: `tools/qemu-test.sh`, `tools/headless-test.sh`, `tools/waybar-test.sh`, `tools/osk-test.sh`.
 - Shell scripts that run as `/bin/sh` run under **dash**: check them with `dash -n` and test them with `dash`, not bash (`kill -- -PGID` fails there, for example).
 - Python: `python3 -m py_compile` on every file you touch.
+- **Kernel modules use ROCKNIX's compiler.** `KTOOLCHAIN_VERSION` must be the same GCC release ROCKNIX built that kernel with. Don't bump `ROCKNIX_VERSION` without checking this; what to do while they differ is in [docs/kernel.md](docs/kernel.md).
 - **On the device:** anything that touches hardware, power, the session or controller modes must be tested on a real RG35XX H before it is merged. Say in the PR what you tested, on which unit (DDR4 or DDR3) and how. Test the stop and start paths by hand first, run `sync` before a test that may freeze the device, and if it does freeze, keep the card and read its journal (`/var/log/journal`) before re-flashing.
 
 ## Conventions

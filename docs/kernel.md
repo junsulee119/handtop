@@ -6,7 +6,11 @@ This page lists **every** place where Handtop differs at kernel level: the boot 
 
 All modules are built against an exact rebuild of ROCKNIX's kernel tree (`build/06b-cedrus.sh`: linux 7.2 + ROCKNIX's patches at the release tag + ROCKNIX's own `.config` read out of `KERNEL`, built with GCC 15 like ROCKNIX), and each build step checks that every symbol version a module imports matches ROCKNIX's modules, and that `vermagic` matches. The kernel image itself is never rebuilt.
 
-**Compiler, from ROCKNIX 20261101 on:** ROCKNIX now builds its kernel with its own GCC 16.2 toolchain, and Arm doesn't publish a 16.x build yet, so `06b` can't use the same compiler any more. 20261101 itself was waived (no H700 kernel source change, see `build/upstreams.conf`). Before taking a ROCKNIX release built with GCC 16, pick one: Arm's 16.x once it's published, a GCC 16 cross compiler we build ourselves, or GCC 15 kept on purpose (the symbol-version and `vermagic` checks still apply) with a full device test.
+**Compiler, from ROCKNIX 20261101 on:** ROCKNIX now builds its kernel with its own GCC 16.2 toolchain, and Arm doesn't publish a 16.x build yet, so `06b` can't use the same compiler any more. 20261101 itself was waived (no H700 kernel source change, see `build/upstreams.conf`). **Decided (2026-11-05): wait for Arm's GCC 16.** ROCKNIX releases built with GCC 16 are not taken until Arm publishes a 16.x toolchain; then `KTOOLCHAIN_VERSION` and its two checksums in `build/config.sh` change, and the build and device test run as usual. Until then, waive each such ROCKNIX tag in `build/upstreams.conf` with a note that it waits for Arm's GCC 16, so the weekly issue says why. The weekly check watches Arm (`arm-gnu`, under `[kernel-modules]`) and shows it as behind once 16.x is out.
+
+One exception: if a ROCKNIX release carries kernel security fixes before Arm's GCC 16 exists, look at it again; the fallback is keeping GCC 15 on purpose (the symbol-version and `vermagic` checks still apply) with a full device test (video decode matrix, rumble, controller modes, Bluetooth).
+
+Rejected for now: building our own GCC 16 cross compiler (a toolchain to build, cache and keep current ourselves, for a gap that Arm's next release is expected to close), and keeping GCC 15 as the default (modules built by a different compiler than the kernel can differ in ways the checks don't see, and two of ours drive the video engine and the vibration motor).
 
 ## Summary
 

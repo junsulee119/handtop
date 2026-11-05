@@ -18,6 +18,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import urllib.error
 import urllib.request
 
 TOP = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -25,6 +26,8 @@ CONF = os.path.join(TOP, "build", "upstreams.conf")
 TIMEOUT = 60
 DEBIAN_SECURITY_JSON = "https://security-tracker.debian.org/tracker/data/json"
 GO_RELEASES_JSON = "https://go.dev/dl/?mode=json"
+ARM_GNU_URL = ("https://developer.arm.com/-/media/Files/downloads/gnu/{v}/binrel/"
+               "arm-gnu-toolchain-{v}-x86_64-aarch64-none-linux-gnu.tar.xz")
 SUITE = "trixie"
 
 
@@ -230,7 +233,43 @@ def check_go(args, cvars, section):
     return ours, newest_same or newest, behind, note
 
 
+def url_exists(url):
+    """True on 2xx, False on 404; anything else (network, 403, 5xx) is a failed check."""
+    req = urllib.request.Request(url, method="HEAD", headers={"User-Agent": "handtop-check-upstreams"})
+    try:
+        with urllib.request.urlopen(req, timeout=TIMEOUT):
+            return True
+    except urllib.error.HTTPError as e:
+        if e.code == 404:
+            return False
+        raise CheckError(f"HEAD {url}: HTTP {e.code}") from e
+    except OSError as e:
+        raise CheckError(f"HEAD {url}: {e}") from e
+
+
+def check_arm_gnu(args, cvars, section):
+    """Arm publishes no release list that is easy to read, so probe the download URL (the
+    x86_64 build, as in build/config.sh) for the next names in Arm's X.Y.relN scheme: this
+    major and the next, minors 1-4, rel1-3. Our own version must still be found there, so
+    a change of Arm's URL layout fails the check instead of going quiet."""
+    (var,) = args
+    ours = pin_value(var, cvars)
+    m = re.fullmatch(r"(\d+)\.(\d+)\.rel(\d+)", ours)
+    if not m:
+        raise CheckError(f"{var}={ours} is not in Arm's X.Y.relN form")
+    if not url_exists(ARM_GNU_URL.format(v=ours)):
+        raise CheckError(f"Arm's download of our own {ours} is gone: the URL layout changed, update ARM_GNU_URL")
+    major = int(m.group(1))
+    found = [v for v in (f"{a}.{b}.rel{c}" for a in (major, major + 1) for b in range(1, 5) for c in range(1, 4))
+             if vkey(v) > vkey(ours) and url_exists(ARM_GNU_URL.format(v=v))]
+    if not found:
+        return ours, ours, False, f"no newer Arm GNU toolchain (probed {major}.x and {major + 1}.x)"
+    return (ours, max(found, key=vkey), True,
+            "newer Arm GNU toolchain; take it only when ROCKNIX builds its kernel with that GCC (docs/kernel.md)")
+
+
 CHECKS = {
+    "arm-gnu": check_arm_gnu,
     "debian-security": check_debian_security,
     "git-branch": check_git_branch,
     "git-newer-branches": check_git_newer_branches,

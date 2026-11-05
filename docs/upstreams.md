@@ -22,6 +22,7 @@ Kinds of check:
 
 | Check | Behind when |
 |---|---|
+| `arm-gnu <VAR>` | Arm has published a newer GNU toolchain than VAR (`X.Y.relN`). Arm has no release list that is easy to read, so the check asks whether the download file exists for the next names (this major and the next, minors 1–4, rel1–3). Fails if our own version's file is gone, so a change of Arm's URLs doesn't go unnoticed |
 | `debian-security <package> <VAR>` | Debian's newest version of the package (security tracker, `trixie` and `trixie-security`) differs from `debian_seen`, or its upstream release is newer than ours. Also reports how many CVEs are open in Debian too (nothing to take yet) |
 | `git-branch <url> <branch> <VAR>` | The branch head is no longer the pinned commit |
 | `git-newer-branches <url> <branch> <VAR>` | A newer branch exists **for our FFmpeg release line** (major.minor of VAR); branches for other lines (n8.x: another libav ABI) are only mentioned |
