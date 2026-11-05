@@ -23,7 +23,7 @@ an external monitor over mini HDMI, and everything else Debian's arm64 archive o
 Status: **v0.3.8**, developed and tested on the RG35XX H.
 
 <p align="center">
-  <img src="media/handtop-v0.3.5.png" width="800" alt="Handtop v0.3.5: the External Controller app with Xbox and Switch modes over Bluetooth or USB, the Battery saver pop-up, and the Switch Controller status screen while connected, all on the RG35XX H">
+  <img src="media/handtop-v0.3.8.png" width="800" alt="Handtop v0.3.5 to v0.3.8: the power menu with the new Battery saver button, the low-battery shutdown countdown and the green-outlined battery icon, and YouTube playing in Chromium on the video engine, all on the RG35XX H">
 </p>
 
 ## Features
