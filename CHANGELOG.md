@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **Fixed: 10-bit VP9 and HEVC are now exact at every width.** 10-bit VP9 at some widths (for example 352, 416, 480, 544, 1282) was close to the software result but not identical, and 10-bit HEVC at 1282 pixels wide was visibly wrong. The decoder now uses Jernej Skrabec's buffer layout fix from LibreELEC (`0438`), which replaces two of our own patches (`0900`, `0902`); every clip in a 25-clip test (VP9 8/10-bit, HEVC 8/10-bit, H.264, VP8, MPEG-2) matches the software decode bit for bit. Limit, unchanged: 10-bit VP9 at 4K doesn't fit in the decoder's memory. Closes #8.
 ## v0.3.7
 
 - ⚠️ **Known issue (still open):** Bluetooth is sometimes missing on the first boot after flashing. Restart once (Power → Restart); it works from then on.

@@ -10,6 +10,9 @@ Origin: LibreELEC.tv, `projects/Allwinner/patches/linux/`
 "allwinner-features"), fetched 2026-11-02 from
 `https://raw.githubusercontent.com/LibreELEC/LibreELEC.tv/master/projects/Allwinner/patches/linux/<file>`.
 Found by searching for `cedrus_vp9` (<https://grep.app/search?q=cedrus_vp9>).
+`0438` was added on 2026-11-05 from the same folder; every file carried here is
+unchanged at master `43711f2a265b` (2026-11-05), which is the pin the weekly
+upstream check uses (`LIBREELEC_CEDRUS_COMMIT`).
 
 Author of the series: Jernej Skrabec <jernej.skrabec@gmail.com>, the current
 cedrus maintainer. The patches carry his `Signed-off-by` and are labelled
@@ -33,12 +36,11 @@ of being applied one line off.
 | 0417-media-cedrus-add-format-filtering-based-on-depth-and.patch | format filtering by bit depth |
 | 0418-media-cedrus-filter-p010-by-depth.patch | wires the depth filter into P010, rebased, see below |
 | 0421-media-cedrus-Select-V4L2_VP9-for-the-VP9-helpers.patch | `select V4L2_VP9` in Kconfig, so `v4l2-vp9.ko` is built |
+| 0438-media-cedrus-10-bit-and-vp9-recon-layout.patch | 10-bit and VP9 reconstruction buffer layout (64-byte reference stride, 1 KiB-aligned P010 reconstruct surface, one 2-bit plane stride for allocation and hardware), rebased, see below |
 | 0441-media-cedrus-free-MV-col-buffers-in-buf-cleanup.patch | frees the H.264/HEVC MV-col buffers when a process dies without STREAMOFF |
-| 0900-cedrus-vp9-stride-align.patch | **ours**: derive `SCALE1_STRIDE_ALIGN` from the capture stride |
 | 0901-cedrus-clear-padding-all-codecs.patch | **ours**: clear the 16-line capture padding rows, neutral chroma |
-| 0902-cedrus-2bit-plane-size.patch | **ours**: size the 10-bit low-2-bit plane from the stride the engine programs (it under-allocated at widths 128k+1 to 128k+3); drop it with `0438` |
 
-Our three are numbered `09xx` on purpose: LibreELEC's set grows into the `04xx`
+Ours are numbered `09xx` on purpose: LibreELEC's set grows into the `04xx`
 range (their 2026-11-01 update added `0430` and `0432`, VC-1 and UAPI patches),
 so a future re-sync cannot collide with our files or silently change apply
 order. The patches are applied sorted by name.
@@ -48,8 +50,10 @@ LibreELEC's set is not needed), and the H616 variant itself comes from
 `build/kernel/0001-cedrus-add-h616-variant.patch` (Chen-Yu Tsai's upstream
 series), so LibreELEC's `0406` is not carried either.
 
-What was changed on top: only `0900`, `0901` and `0902` are ours; the rest are applied
-as published apart from the `0418` rebase described below. Design and code of
+What was changed on top: only `0901` is ours; the rest are applied as published
+apart from the `0418` and `0438` rebases described below. (`0900`, our VP9
+reference-stride fix, and `0902`, our 2-bit plane size fix, were dropped when
+`0438` came in: it does both the way the hardware expects.) Design and code of
 the series are Jernej's.
 
 ### 0418, rebased
@@ -62,6 +66,20 @@ adds, and leave the choice to the `fmt->depth` field that `0417` introduces.
 `0418-media-cedrus-filter-p010-by-depth.patch` here is that change with the
 hunks rebased onto this tree. The patch header says so.
 
+### 0438, rebased
+
+LibreELEC's `0438-media-cedrus-fix-the-10-bit-and-VP9-reconstruction-buffer-layout.patch`
+is written against the AFBC tree as well (`!afbc` conditions,
+`cedrus_dst_is_afbc()` as context), and its `cedrus_hw.c` hunk is already in
+this tree (the primary output takes its line stride and chroma size from
+`bytesperline`). `0438-media-cedrus-10-bit-and-vp9-recon-layout.patch` is the
+rest with the hunks rebased: `CEDRUS_RECON_STRIDE_ALIGN` (64), a
+`cedrus_dst_2bit_stride()` used for both the allocation and the VP9 / H.265
+registers, the hidden reconstruction surface behind P010 at a 64-byte stride
+and a 1 KiB-aligned offset, the VP9 reference stride alignment programmed as
+64 bytes, and the VP9 capture stride set to 64 instead of padding the height.
+Same code otherwise; the patch header says so.
+
 ### Deliberately not carried
 
 The rest of LibreELEC's Allwinner set is either about features this image does
@@ -70,8 +88,7 @@ cedrus and were considered:
 
 | file | why not |
 |---|---|
-| 0437 h616: use the 256-bit DDR mode | written against their separate `sun50i_h616_cedrus_variant` (VC-1 patch 0434) and changes the engine's DDR mode; our H.264, VP8 and VP9 inter frames are bit-exact with the 128-bit mode ROCKNIX's kernel uses, so the corruption it fixes does not show on this board. Revisit with a full series sync. |
-| 0438 fix the 10-bit and VP9 reconstruction buffer layout | supersedes our `0900` with a different mechanism (fix the reconstruct stride itself at 64 bytes) and also fixes the low-2-bit plane stride for widths not a multiple of 4. It is written against the AFBC tree (`!afbc`, `cedrus_dst_*` helpers) and drops the 1 KiB height padding that `0411`/`0412` add here, so it needs a rebase like `0418`; see the device results for what is left without it. |
+| 0437 h616: use the 256-bit DDR mode | written against their separate `sun50i_h616_cedrus_variant` (VC-1 patch 0434) and changes the engine's DDR mode; our H.264, HEVC, VP8 and VP9 (8- and 10-bit) frames are bit-exact with the 128-bit mode ROCKNIX's kernel uses, so the corruption it fixes does not show on this board (re-checked 2026-11-05 with `0438`). Revisit with a full series sync. |
 | 0439/0440/0444 VP8 fixes | VP8 correctness and >2048-wide support; unrelated to VP9, worth its own change. |
 | 0442/0443 H.264 SPS size check, long-term references | H.264 hardening; separate change. |
 | 0445 reset the decoder when switching codecs | depends on `0437` (`ve_mode_ddr`); the failures it describes are on H3, and repeated codec switches (H.264, VP9, HEVC in one session) are clean here. |
@@ -102,21 +119,25 @@ VP8 720p                                                       inf
 Widths that are not a multiple of 64 (416, 854, 1366) were broken in the first
 round: key frames decoded and every inter frame was garbage, because the backend
 kept the 16-byte stride the driver used before `0002-cedrus-64-byte-stride.patch`.
-`0900` fixes that; all widths now match software bit for bit.
+Our `0900` fixed that by deriving the reference stride alignment from the
+capture stride; `0438` now programs it as 64 bytes and gives the hidden 10-bit
+surface the same stride.
 
-10-bit widths that sit 32 bytes past a 64-byte multiple (352, 416, 480, 544) are
-the remaining mismatch. This is what LibreELEC's `0438` addresses with the
-low-2-bit plane stride and the 1 KiB-aligned P010 reconstruct surface; 8-bit at
-the same widths is exact.
-10-bit at 1282x720 and 1410x792 (2 pixels past a 128 multiple) is also close
-but not exact: 53.9 and 55.2 dB (2026-11-03, DDR4, with `0902`; `0902` only
-changes the allocation size, not where anything is written).
+That left 10-bit at some widths close but not exact (352, 416, 480 and 544 at
+25.5-33.4 dB, 1282 and 1410 at about 56 dB) and HEVC Main10 at 1282x720 at
+18 dB, because the hidden reconstruction surface behind P010 had a 16-byte
+stride; and the 2-bit plane was under-allocated at widths 128k+1 to 128k+3
+(found by stockmind, issue #8; our `0902` sized it from the stride until
+`0438`).
 
-`0902`: the buffer reserved `ALIGN(width / 4, 32)` bytes per row for the 10-bit
-low-2-bit plane, while VP9 programs `ALIGN(bytesperline / 4, 32)` of the
-reconstruction surface (64-byte aligned capture stride, or `ALIGN(width, 16)`
-behind P010). At widths 128k+1 to 128k+3 that is 32 bytes more per row, so the
-engine wrote up to 32 x 1.5 x height bytes past the buffer, into CMA (no IOMMU).
-Found by stockmind (issue #8). Tested: 20 full decodes each of 10-bit
-1282x720 and 1410x792, no failure, H.264 / HEVC fine afterwards. LibreELEC's
-`0438` fixes the same allocation as part of its layout rework.
+With `0438` (2026-11-05, DDR4, same method, 25 clips): every clip bit-exact
+(`inf`): VP9 10-bit 352x234, 384x216, 416x234, 416x240, 480x234, 544x234,
+720p, 1282x720, 1410x792, 1080p; VP9 8-bit 416x234, 854x480, 1366x768,
+1282x720, 1080p, 4K; HEVC Main10 854x480, 720p, 1282x720; HEVC 8-bit 1080p;
+H.264 1080p, 854x480; VP8 720p; MPEG-2 720p unchanged (70.9 dB against
+FFmpeg's software decoder, as before).
+
+VP9 10-bit 4K does not start: "Cannot allocate memory" for the capture buffers,
+before and after `0438`. With P010 output each buffer holds the visible P010
+picture, the hidden 8-bit reconstruction and the 2-bit plane (about 40 MB at
+4K), and the decoder's buffer set does not fit in `cma=256M`. 8-bit 4K fits.

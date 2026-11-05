@@ -40,7 +40,7 @@ The H616/H700 video engine also has a VP9 decoder, in the same slot as H.265
 (the SoC has no separate VP9 block). Mainline cedrus has no backend for it, so
 the image carries Jernej Skrabec's out-of-tree series from LibreELEC's
 Allwinner patch set, a snapshot of their master at `f59641e` (2026-11-01)
-taken 2026-11-02, plus the `v4l2-vp9` helper module it needs, which ROCKNIX
+taken 2026-11-02 (`0438` added 2026-11-05), plus the `v4l2-vp9` helper module it needs, which ROCKNIX
 does not ship (files, provenance and what is deliberately left out:
 `build/kernel/libreelec/README.md`). `build/06b-cedrus.sh` applies the series
 with `--fuzz=0`, builds `sunxi-cedrus.ko` and `v4l2-vp9.ko`, checks both sets
@@ -48,8 +48,10 @@ of symbol versions against ROCKNIX's modules and installs them.
 
 Verified on the device, 10 frames per clip against a software decode in the
 matching format: VP9 profile 0 (8-bit) is **bit-identical** at 416x234, 720p,
-854x480, 1366x768, 1080p and 4K, and profile 2 (10-bit) at 384x216, 448x256,
-512x288, 640x360, 720p, 854x480 and 1366x768. `tools/check-video-decode.sh`
+854x480, 1282x720, 1366x768, 1080p and 4K, and profile 2 (10-bit) at every
+width tested since `0438` (2026-11-05): 352x234, 384x216, 416x234, 416x240,
+480x234, 544x234, 720p, 1282x720, 1410x792 and 1080p (HEVC Main10 at
+854x480, 720p and 1282x720 too). `tools/check-video-decode.sh`
 compares 10 VPU frames against software in NV12 or P010 and fails below 35 dB;
 it generates a 416-wide clip when there is none, because that width is the
 regression case for the stride fix below.
@@ -71,17 +73,22 @@ does. `--hwdec=v4l2request` is a copy spelling that falls back to software for
 VP9; `--hwdec=drm` is the zero-copy name, and `vp9` is in `hwdec-codecs` so mpv
 tries it at all.
 
-Two fixes on top of the series are ours:
+Two layout fixes matter here:
 
-- **Reference stride.** The backend kept the vendor's `SCALE1_STRIDE_ALIGN(1)`,
-  the value for the 16-byte stride cedrus used before
-  `0002-cedrus-64-byte-stride.patch` made the capture stride 64-byte aligned, so
-  the engine read reference pictures back with a 16-byte aligned stride. Key
-  frames decoded and every inter frame was garbage, invisible at 1280/1920/3840
-  and fatal at 416/854/1366.
-  `build/kernel/libreelec/0900-cedrus-vp9-stride-align.patch` derives the field
-  from the reconstruct surface's `bytesperline`; its header carries the width
-  sweep.
+- **Reference stride and 10-bit layout** (`0438`, Jernej's, rebased). The
+  backend first kept the vendor's `SCALE1_STRIDE_ALIGN(1)`, the value for the
+  16-byte stride cedrus used before `0002-cedrus-64-byte-stride.patch` made the
+  capture stride 64-byte aligned, so the engine read reference pictures back
+  with a 16-byte aligned stride: key frames decoded and every inter frame was
+  garbage at 416/854/1366 (our `0900` fixed that from v0.3.7's PR on). The
+  hidden 8-bit reconstruction surface behind 10-bit (P010) output still had a
+  16-byte stride, which left 10-bit at some widths close but not exact, HEVC
+  Main10 at 1282 wide at 18 dB, and the 2-bit plane under-allocated at widths
+  128k+1 to 128k+3 (found by stockmind, issue #8; our `0902` in v0.3.7).
+  `build/kernel/libreelec/0438-media-cedrus-10-bit-and-vp9-recon-layout.patch`
+  programs the reference stride alignment as 64 bytes, gives the hidden surface
+  a 64-byte stride and a 1 KiB-aligned start, and uses one 2-bit plane stride
+  for allocation and hardware; it replaces `0900` and `0902`.
 - **Capture padding.** The driver rounds the capture height up to 16 lines
   (1088 for 1080), because the engine writes the reconstruct surface in 16-line
   blocks and chroma has to sit where the hardware puts it. mpv and ffmpeg crop
@@ -97,22 +104,10 @@ Two fixes on top of the series are ours:
 
 Known limits:
 
-- 10-bit at widths that sit 32 bytes past a 64-byte multiple is close but not
-  exact: measured `26.5 dB` at 352x234, `28.2 dB` at 416x234, `29.2 dB` at
-  416x240, `26.4 dB` at 480x234 and `25.5 dB` at 544x234, against `inf` at every
-  other width tested, including heights that are not a multiple of 16 (384x216,
-  640x360, 448x250). 8-bit at the same widths is `inf`. LibreELEC's later
-  `0438` ("fix the 10-bit and VP9 reconstruction buffer layout") rewrites the
-  low-2-bit plane stride and the P010 reconstruct offset that cause this, but it
-  is written against their AFBC tree and is deliberately not carried yet; see
-  `build/kernel/libreelec/README.md`.
-  Also close but not exact: 10-bit at 1282x720 (`53.9 dB`) and 1410x792
-  (`55.2 dB`), measured 2026-11-03.
-- 10-bit buffer size: at widths 128k+1 to 128k+3 (1281, 1282, 1409, ...) the
-  engine writes the low-2-bit plane with a wider stride than the buffer used to
-  reserve for it, so it wrote past the end of the decode buffer.
-  `build/kernel/libreelec/0902-cedrus-2bit-plane-size.patch` sizes the plane from
-  the stride the engine is given (found by stockmind, issue #8).
+- VP9 10-bit 4K does not start ("Cannot allocate memory"): with P010 output each
+  capture buffer holds the visible P010 picture, the hidden 8-bit
+  reconstruction and the 2-bit plane (about 40 MB at 4K), and the decoder's
+  buffer set does not fit in `cma=256M`. 10-bit 1080p and 8-bit 4K work.
 - Chromium can show the padding rows described above until the compositor
   crops them; mpv and ffmpeg do not.
 
@@ -454,9 +449,10 @@ backend itself, `0412`/`0413` add P010 capture and VP9 10-bit output, `0414`
 adds H.265 P010 output (without it HEVC Main10 decodes to garbage), `0441`
 frees the MV-col buffers of a session that is closed without STREAMOFF, and
 `0415`/`0417`/`0418`/`0421` name the H616 mode bits and make the
-format/depth selection and the `V4L2_VP9` dependency explicit. Our two on top:
-`0900-cedrus-vp9-stride-align.patch` and
-`0901-cedrus-clear-padding-all-codecs.patch`, both described under *VP9*.
+format/depth selection and the `V4L2_VP9` dependency explicit, and `0438`
+(rebased) fixes the 10-bit and VP9 reconstruction layout. Ours on top:
+`0901-cedrus-clear-padding-all-codecs.patch`, described under *VP9* with
+`0438`.
 
 For the userspace side, the source is the FFmpeg release Debian ships (now **n7.1.5**) with the patchset from [Kwiboo/FFmpeg](https://github.com/Kwiboo/FFmpeg) branch `v4l2-request-n7.1.3` applied on top. That branch is 14 commits on n7.1.3; `build/04c-v4l2-ffmpeg.sh` applies exactly those 14 (the diff from n7.1.3 to the pinned head, all pins in `build/config.sh`) onto n7.1.5. It is the only tree that has `libavutil/hwcontext_v4l2request.c`. Same release as Debian means the same `libavutil 59.39.100` / `libavcodec 61.19.101` soname ABI that mpv, Chromium and VLC were built against, so no other package is rebuilt.
 

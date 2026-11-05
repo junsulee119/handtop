@@ -38,7 +38,7 @@ KTOOLCHAIN_URL="https://developer.arm.com/-/media/Files/downloads/gnu/${KTOOLCHA
 # Cedrus VP9 series in build/kernel/libreelec/: the LibreELEC.tv commit its files were copied
 # from. The patches are in this repo, so the build never fetches it; it only tells the weekly
 # upstream check (git-path, build/upstreams.conf) where to look for newer changes.
-LIBREELEC_CEDRUS_COMMIT="f59641eb70c727cc81e33508177ac700abac81ab"
+LIBREELEC_CEDRUS_COMMIT="43711f2a265bc688675498fceaa91b3cfdf17c09"
 # Gamepad / motor driver rebuilt with our fix (06d-joypad.sh): the rocknix-joypad version ROCKNIX
 # $ROCKNIX_VERSION ships (its package.mk: PKG_VERSION / PKG_SHA256)
 JOYPAD_COMMIT="d02ed13aae08113f6f9e0e9d699cb29bb3450fa2"

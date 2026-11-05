@@ -1,0 +1,206 @@
+From: Jernej Skrabec <jernej.skrabec@gmail.com>
+Date: Sat, 31 Oct 2026 10:37:40 +0100
+Subject: [PATCH] media: cedrus: fix the 10-bit and VP9 reconstruction buffer
+ layout
+
+LibreELEC.tv projects/Allwinner/patches/linux/
+0438-media-cedrus-fix-the-10-bit-and-VP9-reconstruction-buffer-layout.patch,
+rebased onto this tree (like 0418): the original is written against the AFBC
+patches (0416/0419, not carried here), so its hunks carry AFBC context, and
+its cedrus_hw.c hunk is already in this tree (the primary output takes its
+line stride from bytesperline). Design and code are Jernej Skrabec's; only
+the context is ours. It replaces this tree's 0900 (VP9 reference stride
+alignment derived from the capture stride) and 0902 (low-2-bit plane size).
+
+Original description:
+
+Several layout details didn't match what the hardware does:
+ - The 2-bit plane stride was computed from the truncated width / 4 for
+   the allocation, but from the line stride for the hardware, so widths
+   like 1281 overran the buffer.
+ - The hidden P010 reconstruction surface must start 1 KiB aligned.
+ - The hardware derives the line stride of the VP9 references from
+   their width aligned to 64 bytes, so use that alignment for the
+   reconstruction stride and program it in LAST_SCALE1, instead of
+   padding the height until the chroma plane is 1 KiB aligned.
+ - The primary output line stride and chroma size were derived from the
+   width instead of the line stride of the format.
+
+This makes the 10-bit VP9 streams with widths of 352 and 1281 bit-exact.
+
+Signed-off-by: Jernej Skrabec <jernej.skrabec@gmail.com>
+---
+--- a/drivers/staging/media/sunxi/cedrus/cedrus.h
++++ b/drivers/staging/media/sunxi/cedrus/cedrus.h
+@@ -36,6 +36,14 @@
+ #define CEDRUS_CAPABILITY_H265_10_DEC	BIT(5)
+ #define CEDRUS_CAPABILITY_VP9_DEC	BIT(6)
+ 
++/*
++ * The VP9 decoder takes its reconstruction addresses in 1 KiB units, so
++ * the chroma plane, at bytesperline * height, must be 1 KiB aligned. A
++ * 64 byte aligned line stride guarantees it for any 16 line aligned
++ * height.
++ */
++#define CEDRUS_RECON_STRIDE_ALIGN	64
++
+ enum cedrus_irq_status {
+ 	CEDRUS_IRQ_NONE,
+ 	CEDRUS_IRQ_ERROR,
+@@ -260,12 +268,18 @@
+ }
+ 
+ /*
+- * Size of the low-2-bit plane the hardware appends after the 8-bit NV12
+- * planes for 10-bit reconstruction.  Shared by all codecs.
++ * Line stride of the low-2-bit plane the hardware appends after the 8-bit
++ * NV12 planes for 10-bit reconstruction. The same value must be used for
++ * the allocation and programmed into the hardware.
+  */
++static inline u32 cedrus_dst_2bit_stride(unsigned int width)
++{
++	return ALIGN(DIV_ROUND_UP(width, 4), 32);
++}
++
+ static inline u32 cedrus_dst_2bit_size(unsigned int width, unsigned int height)
+ {
+-	return ALIGN(width / 4, 32) * height * 3 / 2;
++	return cedrus_dst_2bit_stride(width) * height * 3 / 2;
+ }
+ 
+ static inline bool cedrus_dst_is_p010(struct cedrus_ctx *ctx)
+@@ -273,10 +287,14 @@
+ 	return ctx->dst_fmt.pixelformat == V4L2_PIX_FMT_P010;
+ }
+ 
+-/* Size of the userspace-visible P010 surface at the buffer start. */
+-static inline u32 cedrus_dst_p010_size(struct cedrus_ctx *ctx)
++/*
++ * Offset of the hidden reconstruction surface, which follows the
++ * userspace-visible P010 surface at the start of the buffer. The
++ * hardware needs it 1 KiB aligned.
++ */
++static inline u32 cedrus_p010_recon_offset(const struct v4l2_pix_format *fmt)
+ {
+-	return ctx->dst_fmt.bytesperline * ctx->dst_fmt.height * 3 / 2;
++	return ALIGN(fmt->bytesperline * fmt->height * 3 / 2, SZ_1K);
+ }
+ 
+ /*
+@@ -291,7 +309,7 @@
+ 
+ 	if (cedrus_dst_is_p010(ctx)) {
+ 		fmt.pixelformat = V4L2_PIX_FMT_NV12;
+-		fmt.bytesperline = ALIGN(fmt.width, 16);
++		fmt.bytesperline = ALIGN(fmt.width, CEDRUS_RECON_STRIDE_ALIGN);
+ 	}
+ 
+ 	return fmt;
+@@ -314,7 +332,7 @@
+ 
+ 	addr = vb2_dma_contig_plane_dma_addr(buf, 0);
+ 	if (cedrus_dst_is_p010(ctx))
+-		addr += cedrus_dst_p010_size(ctx);
++		addr += cedrus_p010_recon_offset(&ctx->dst_fmt);
+ 
+ 	return addr + (dma_addr_t)fmt.bytesperline * fmt.height * plane;
+ }
+@@ -336,8 +354,14 @@
+ 
+ 	extra = cedrus_dst_2bit_size(pix_fmt->width, pix_fmt->height);
+ 
+-	if (pix_fmt->pixelformat == V4L2_PIX_FMT_P010)
+-		extra += ALIGN(pix_fmt->width, 16) * pix_fmt->height * 3 / 2;
++	if (pix_fmt->pixelformat == V4L2_PIX_FMT_P010) {
++		u32 visible = pix_fmt->bytesperline * pix_fmt->height * 3 / 2;
++
++		/* Hidden NV12 reconstruction surface, 1 KiB aligned. */
++		extra += cedrus_p010_recon_offset(pix_fmt) - visible +
++			 ALIGN(pix_fmt->width, CEDRUS_RECON_STRIDE_ALIGN) *
++			 pix_fmt->height * 3 / 2;
++	}
+ 
+ 	return extra;
+ }
+--- a/drivers/staging/media/sunxi/cedrus/cedrus_h265.c
++++ b/drivers/staging/media/sunxi/cedrus/cedrus_h265.c
+@@ -802,7 +802,7 @@
+ 
+ 	if (ctx->bit_depth > 8) {
+ 		struct v4l2_pix_format recon = cedrus_dst_frame_fmt(ctx);
+-		unsigned int stride = ALIGN(recon.width / 4, 32);
++		unsigned int stride = cedrus_dst_2bit_stride(recon.width);
+ 
+ 		/*
+ 		 * Offset of the appended low-2-bit reconstruction plane from
+--- a/drivers/staging/media/sunxi/cedrus/cedrus_video.c
++++ b/drivers/staging/media/sunxi/cedrus/cedrus_video.c
+@@ -299,18 +299,18 @@
+ 	cedrus_prepare_format(pix_fmt);
+ 
+ 	/*
+-	 * The VP9 hardware requires the chroma plane offset (which equals
+-	 * bytesperline * height for all the untiled 4:2:0 layouts) to be
+-	 * 1 KiB aligned.  Grow the padded height until it is.
++	 * The VP9 decoder reconstructs into the capture buffer unless it
++	 * outputs P010. Its reconstruction addresses are in 1 KiB units, which
++	 * a 64 byte aligned stride guarantees for the chroma plane, and the
++	 * hardware computes the reference stride with that same alignment.
+ 	 */
+ 	if (ctx->src_fmt.pixelformat == V4L2_PIX_FMT_VP9_FRAME &&
+ 	    (pix_fmt->pixelformat == V4L2_PIX_FMT_NV12 ||
+ 	     pix_fmt->pixelformat == V4L2_PIX_FMT_NV21 ||
+-	     pix_fmt->pixelformat == V4L2_PIX_FMT_P010 ||
+ 	     pix_fmt->pixelformat == V4L2_PIX_FMT_YUV420 ||
+ 	     pix_fmt->pixelformat == V4L2_PIX_FMT_YVU420)) {
+-		while (!IS_ALIGNED(pix_fmt->bytesperline * pix_fmt->height, SZ_1K))
+-			pix_fmt->height += 16;
++		pix_fmt->bytesperline = ALIGN(pix_fmt->width,
++					      CEDRUS_RECON_STRIDE_ALIGN);
+ 		pix_fmt->sizeimage = pix_fmt->bytesperline * pix_fmt->height * 3 / 2;
+ 	}
+ 
+--- a/drivers/staging/media/sunxi/cedrus/cedrus_vp9.c
++++ b/drivers/staging/media/sunxi/cedrus/cedrus_vp9.c
+@@ -36,6 +36,13 @@
+ #define CEDRUS_VP9_SEGMAP_OFFSET	0x8000
+ #define CEDRUS_VP9_NEIGHBOR_BUF_SIZE	0x1f4000
+ 
++/*
++ * The hardware derives the line stride of the references from their width,
++ * aligned to CEDRUS_RECON_STRIDE_ALIGN; the field is log2(alignment / 8).
++ */
++#define CEDRUS_VP9_STRIDE_ALIGN \
++	VE_DEC_VP9_SCALE1_STRIDE_ALIGN(ilog2(CEDRUS_RECON_STRIDE_ALIGN / 8))
++
+ /* VP9 dequantisation tables from the spec / libvpx, one set per bit depth. */
+ static const u16 vp9_dc_qlookup[256] = {
+ 	4,    8,    8,    9,    10,   11,   12,   12,
+@@ -905,7 +912,7 @@
+ 
+ 	if (intra_only) {
+ 		cedrus_write(dev, VE_DEC_VP9_LAST_SCALE1,
+-			     VE_DEC_VP9_SCALE1_STRIDE_ALIGN(1));
++			     CEDRUS_VP9_STRIDE_ALIGN);
+ 	} else {
+ 		struct vb2_buffer *last_buf, *gold_buf, *alt_buf;
+ 		struct cedrus_buffer *last_cb, *gold_cb, *alt_cb;
+@@ -951,7 +958,7 @@
+ 		cedrus_vp9_ref_scale(last_w, last_h, cur_w, cur_h, &s0, &s1);
+ 		cedrus_write(dev, VE_DEC_VP9_LAST_SCALE0, s0);
+ 		cedrus_write(dev, VE_DEC_VP9_LAST_SCALE1,
+-			     s1 | VE_DEC_VP9_SCALE1_STRIDE_ALIGN(1));
++			     s1 | CEDRUS_VP9_STRIDE_ALIGN);
+ 
+ 		cedrus_vp9_ref_scale(gold_w, gold_h, cur_w, cur_h, &s0, &s1);
+ 		cedrus_write(dev, VE_DEC_VP9_GOLDEN_SCALE0, s0);
+@@ -1002,8 +1009,7 @@
+ 	if (dec->bit_depth > 8) {
+ 		struct v4l2_pix_format fmt = cedrus_dst_frame_fmt(ctx);
+ 		u32 stride = fmt.bytesperline;
+-		u32 stride2 = ALIGN(stride >> 2, 32);
+-		u32 cfg = VE_DEC_VP9_10BIT_CFG_STRIDE(stride2);
++		u32 cfg = VE_DEC_VP9_10BIT_CFG_STRIDE(cedrus_dst_2bit_stride(fmt.width));
+ 		u32 off;
+ 
+ 		/*

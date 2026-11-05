@@ -22,7 +22,7 @@ Taken unmodified from the official image
 
 | Component | License | Source |
 |---|---|---|
-| `sunxi-cedrus.ko` (video decoder module) | GPL-2.0 | linux 7.2 (kernel.org) + ROCKNIX `20261001` kernel patches + `build/kernel/0001-cedrus-add-h616-variant.patch` (Chen-Yu Tsai, upstream "arm64: allwinner: h616: Support Video Engine" v3) + `build/kernel/0002-cedrus-64-byte-stride.patch` (this project) + the cedrus patches in `build/kernel/libreelec/` (Jernej Skrabec, from LibreELEC.tv master `f59641e`, 2026-11-01, plus two of this project's), built by `build/06b-cedrus.sh` |
+| `sunxi-cedrus.ko` (video decoder module) | GPL-2.0 | linux 7.2 (kernel.org) + ROCKNIX `20261001` kernel patches + `build/kernel/0001-cedrus-add-h616-variant.patch` (Chen-Yu Tsai, upstream "arm64: allwinner: h616: Support Video Engine" v3) + `build/kernel/0002-cedrus-64-byte-stride.patch` (this project) + the cedrus patches in `build/kernel/libreelec/` (Jernej Skrabec, from LibreELEC.tv master `f59641e`, 2026-11-01, `0438` added 2026-11-05 and rebased, plus one of this project's), built by `build/06b-cedrus.sh` |
 | `v4l2-vp9.ko` (VP9 probability-adaptation helpers) | GPL-2.0 | linux 7.2 (kernel.org), with `CONFIG_V4L2_VP9` selected by `build/kernel/libreelec/0421-...`, built by `build/06b-cedrus.sh` |
 | Video-engine device-tree overlay | GPL-2.0 / MIT (as upstream sunxi DTs) | `build/dts/rg35xxh-video-engine.dtso`, based on patch 7/7 of the same series |
 | nwg-drawer v0.7.5 | MIT | https://github.com/nwg-piotr/nwg-drawer, built by `build/04b-nwg-drawer.sh` |
