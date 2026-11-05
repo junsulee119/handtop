@@ -1,0 +1,147 @@
+#!/bin/sh
+# Bluetooth start-up check (rg35xxh-bt-check.service, every boot, from early boot on).
+#
+# The problem (diagnosed 2026-11-05, docs/hardware.md "Bluetooth at boot"): on some boots, mostly
+# the first one after flashing, the Bluetooth half of the RTL8821CS stays mute. The H5 driver is
+# bound to the chip's UART and keeps sending its sync packets, the chip never answers (UART rx
+# stays at ~2 bytes), so no hci0 appears. One unbind + bind of the driver, which runs the chip's
+# power-on sequence again, brings hci0 up within ~1 s. Why the chip is mute is not known yet.
+#
+# This script does two things:
+#  1. Probe: from before the driver loads until ~30 s, samples the UART byte counters, the chip's
+#     GPIO lines (enable / reset / device-wake), whether the driver is bound and whether hci0
+#     exists, every 0.2 s, and writes the changes with timestamps, plus the kernel's Wi-Fi /
+#     Bluetooth / SDIO lines and the first-boot jobs, to logs/bt-NNNN.txt on the boot partition
+#     (last 5 kept). Good and bad boots side by side should show what the chip is waiting for.
+#  2. Recovery: when the chip is mute (bound for MUTE_S s, the host sent bytes, the chip sent
+#     almost none, no hci0), unbind + bind the driver ONCE. Also once, as a fallback, if there is
+#     still no hci0 FALLBACK_S s after binding and the chip has been silent for the last 3 s. On a
+#     mute boot Bluetooth is then up at ~10 s, before the desktop. Never more than one rebind per
+#     boot; if it does not help, the record says so and the user's workaround (restart) stays.
+#
+# Only reads sysfs / procfs / debugfs, and writes the driver's bind / unbind files. Nothing on the
+# power chip, no rfkill, no bluetoothd restart (bluetoothd picks up the new hci0 by itself).
+#
+#   rg35xxh-bt-check                 the boot service
+#   rg35xxh-bt-check --force-rebind  testing on a running system: rebind once now, while
+#                                    sampling as above (record in /run/rg35xxh-bt-check.txt and
+#                                    logs/bt-NNNN.txt); Bluetooth drops for ~2 s
+DRV=/sys/bus/serial/drivers/hci_uart_h5
+DEV=serial0-0
+UART=/proc/tty/driver/serial_8250
+GPIO=/sys/kernel/debug/gpio
+REC=/run/rg35xxh-bt-check.txt
+LOGDIR=/boot/firmware/logs
+COUNT=/var/lib/rg35xxh/bt-count
+KEEP=5
+WINDOW_S=30          # sample at least until this uptime
+AFTER_S=8            # ...and this long after hci0 appeared or the rebind
+MAX_S=60             # never sample past this uptime (unless started later: then 30 s from start)
+MUTE_S=3             # bound this long without an answer = mute
+MUTE_RX=16           # "almost none": at most this many bytes received from the chip since binding
+FALLBACK_S=15
+FORCE=
+[ "${1:-}" = --force-rebind ] && FORCE=1
+
+now() { cut -d' ' -f1 /proc/uptime | tr -d .; }      # centiseconds since boot
+fmt() { printf '%d.%02d' $(($1 / 100)) $(($1 % 100)); }
+say() { echo "$(fmt "$(now)") $*" >> "$REC"; echo "rg35xxh-bt-check: $*"; }
+uart() {   # sets tx, rx (ttyS1, the chip's UART)
+  l=$(grep '^1:' "$UART" 2>/dev/null)
+  tx=$(echo "$l" | sed -n 's/.* tx:\([0-9]*\).*/\1/p'); rx=$(echo "$l" | sed -n 's/.* rx:\([0-9]*\).*/\1/p')
+  tx=${tx:-0}; rx=${rx:-0}
+}
+gpios() { grep -E 'device-wake|enable |reset ' "$GPIO" 2>/dev/null | sed 's/  */ /g; s/^ //' | tr '\n' ';'; }
+bound() { [ -e "/sys/bus/serial/devices/$DEV/driver" ]; }
+have_hci() { [ -e /sys/class/bluetooth/hci0 ]; }
+
+rebind() {
+  uart; say "REBIND ($1): tx=$tx rx=$rx; unbind + bind $DEV"
+  echo "$DEV" > "$DRV/unbind" 2>>"$REC"
+  sleep 1
+  echo "$DEV" > "$DRV/bind" 2>>"$REC"
+  rebind_t=$(now); rebound=1
+}
+
+: > "$REC"
+start=$(now)
+{ echo "== Bluetooth start-up check, started at $(fmt "$start") s${FORCE:+ (forced rebind, test)}"
+  echo "== kernel $(uname -r), boot id $(cat /proc/sys/kernel/random/boot_id)"; } >> "$REC"
+end=$((WINDOW_S * 100)); [ "$end" -lt $((start + 3000)) ] && end=$((start + 3000))
+cap=$((MAX_S * 100)); [ "$cap" -lt $((start + 3000)) ] && cap=$((start + 3000))
+bind_t=; tx0=0; rx0=0; hci_t=; rebound=; rebind_t=; quiet_since=; last=; prev_rx=-1; prev_tx=-1
+result=
+
+while :; do
+  t=$(now)
+  uart; b=no; bound && b=yes; h=no; have_hci && h=yes; g=$(gpios)
+  state="bound=$b hci0=$h tx=$tx rx=$rx gpio: $g"
+  # A line when the driver, hci0 or a GPIO changes; while the byte counters move, at most one
+  # line per second (keeps the record short).
+  moved=
+  if [ "$rx" -ne "$prev_rx" ] || [ "$tx" -ne "$prev_tx" ]; then moved="bytes $((t / 100))"; fi
+  key="$b $h $g $moved"
+  if [ "$key" != "$last" ]; then echo "$(fmt "$t") $state" >> "$REC"; last=$key; fi
+  [ "$rx" -ne "$prev_rx" ] && quiet_since=$t
+  prev_rx=$rx; prev_tx=$tx
+  if [ "$b" = yes ] && [ -z "$bind_t" ]; then
+    bind_t=$t; tx0=$tx; rx0=$rx; quiet_since=$t
+    say "driver bound (tx=$tx rx=$rx)"
+  fi
+  if [ "$h" = yes ] && [ -z "$hci_t" ]; then
+    hci_t=$t; say "hci0 present"
+    [ "$end" -lt $((t + AFTER_S * 100)) ] && end=$((t + AFTER_S * 100))
+  fi
+  if [ -n "$FORCE" ] && [ -z "$rebound" ] && [ "$b" = yes ]; then
+    rebind forced; hci_t=; end=$((rebind_t + AFTER_S * 100 + 200))
+  elif [ -z "$rebound" ] && [ -n "$bind_t" ] && [ "$h" = no ] && [ "$b" = yes ]; then
+    if [ $((t - bind_t)) -ge $((MUTE_S * 100)) ] && [ "$tx" -gt "$tx0" ] && [ $((rx - rx0)) -le "$MUTE_RX" ]; then
+      rebind "chip mute $(fmt $((t - bind_t))) s after binding: host sent $((tx - tx0)) bytes, chip $((rx - rx0))"
+      end=$((rebind_t + AFTER_S * 100 + 200))
+    elif [ $((t - bind_t)) -ge $((FALLBACK_S * 100)) ] && [ $((t - quiet_since)) -ge 300 ]; then
+      rebind "no hci0 $(fmt $((t - bind_t))) s after binding, chip silent for 3 s"
+      end=$((rebind_t + AFTER_S * 100 + 200))
+    fi
+  fi
+  if [ "$t" -ge "$end" ] || [ "$t" -ge "$cap" ]; then break; fi
+  sleep 0.2
+done
+
+if [ -n "$hci_t" ] && [ -z "$rebound" ]; then
+  result="ok: hci0 $( [ -n "$bind_t" ] && echo "$(fmt $((hci_t - bind_t))) s after binding" || echo "already there")"
+elif [ -n "$rebound" ] && [ -n "$hci_t" ]; then
+  result="recovered: rebind at $(fmt "$rebind_t") s, hci0 $(fmt $((hci_t - rebind_t))) s later"
+elif [ -n "$rebound" ]; then
+  result="NOT recovered: rebind at $(fmt "$rebind_t") s, still no hci0 (restart to fix)"
+elif [ -z "$bind_t" ]; then
+  result="driver never bound (no Bluetooth device in this device tree?)"
+else
+  result="no hci0 and no rebind (chip answered but no adapter)"
+fi
+say "result: $result"
+{
+  # The kernel's clock leaves out time asleep, the lines above use uptime: on a boot (no sleep
+  # yet) they match. rtw88 logs nothing on a normal start; its SDIO card (mmc1) shows when Wi-Fi
+  # comes up. "hci" alone would also match the USB controllers (ehci / ohci).
+  echo; echo "== kernel log (kernel clock): Bluetooth, UART, Wi-Fi (rtw88 / mmc1 SDIO), first 90 s"
+  dmesg 2>/dev/null | grep -E "Bluetooth|hci0|hci_uart|H5|rtl_bt|ttyS1|serdev|rtw|mmc1|sdio|aldo3|vcc-wifi" \
+    | awk -F'[][]' '$2 + 0 <= 90' | head -60
+  [ -n "$FORCE" ] && { echo "-- latest"; dmesg 2>/dev/null | grep -E "Bluetooth|hci0|rtw|mmc1" | tail -12; }
+  echo; echo "== first-boot jobs, Bluetooth and Wi-Fi (journal, uptime clock)"
+  journalctl -b -o short-monotonic --no-pager 2>/dev/null \
+    | grep -i -E "resize-root|ssh-keygen|machine-id|hwinit|rfkill|bluetooth|wifi-import|NetworkManager.*wlan0.*state change" \
+    | cut -c1-170 | head -40
+  echo; echo "== boots in the journal: $(journalctl --list-boots --no-pager 2>/dev/null | tail -n +2 | wc -l)"
+} >> "$REC"
+
+# Copy to the boot partition (readable from Windows): logs/bt-NNNN.txt, last KEEP kept.
+for _ in 1 2 3 4 5 6 7 8 9 10; do mountpoint -q /boot/firmware && break; sleep 1; done
+if mountpoint -q /boot/firmware && mkdir -p "$LOGDIR" 2>/dev/null; then
+  mkdir -p "$(dirname "$COUNT")"
+  n=$(( $(cat "$COUNT" 2>/dev/null || echo 0) + 1 )); echo "$n" > "$COUNT"
+  cp "$REC" "$LOGDIR/bt-$(printf '%04d' "$n").txt"
+  # shellcheck disable=SC2012  # file names are our own bt-NNNN.txt
+  ls -1 "$LOGDIR"/bt-[0-9][0-9][0-9][0-9].txt 2>/dev/null | sort | head -n -"$KEEP" | while read -r f; do rm -f -- "$f"; done
+  sync
+fi
+exit 0

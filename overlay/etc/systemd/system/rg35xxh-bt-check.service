@@ -1,0 +1,18 @@
+[Unit]
+Description=Bluetooth start-up check (records the chip's start-up; rebinds the driver once if the chip stays mute)
+Documentation=file:/usr/local/sbin/rg35xxh-bt-check
+# From early boot on, so the record starts before the Bluetooth driver loads (~5 s) and a mute
+# chip is rebound before the desktop. Type=simple: nothing waits for it.
+DefaultDependencies=no
+After=systemd-remount-fs.service sys-kernel-debug.mount
+Wants=sys-kernel-debug.mount
+Conflicts=shutdown.target
+Before=shutdown.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/sbin/rg35xxh-bt-check
+TimeoutStopSec=5
+
+[Install]
+WantedBy=sysinit.target

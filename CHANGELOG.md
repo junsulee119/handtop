@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **Fixed (should be): Bluetooth missing on the first boot after flashing.** On those boots the Bluetooth chip stayed silent until the driver started it again; a new boot service notices that within a few seconds and restarts the driver once, so Bluetooth is up before the desktop appears. It also writes a short record of every boot's Bluetooth start to `logs/bt-NNNN.txt` on the boot partition: if Bluetooth is ever missing, please attach the newest one to an issue. Not yet seen on a real failing boot, so the known-issue note stays for now.
 ## v0.3.8
 
 - ⚠️ **Known issue (still open):** Bluetooth is sometimes missing on the first boot after flashing. Restart once (Power → Restart); it works from then on.
