@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+## v0.3.8
+
+- ⚠️ **Known issue (still open):** Bluetooth is sometimes missing on the first boot after flashing. Restart once (Power → Restart); it works from then on.
 - **New: low-battery warning and shutdown.** At 10 % a warning stays on screen until tapped and the handheld buzzes three times; at 5 % it shuts down cleanly after a 3-minute countdown, which plugging in the charger cancels. Before, only Screen off did this; in normal use the battery could run flat, which can damage the SD card's filesystem. Levels in `/etc/rg35xxh/power.conf` (`LOW_BATTERY_WARN_PCT`, `LOW_BATTERY_SHUTDOWN_PCT`, 0 = off).
 - **New: Battery saver.** One switch caps the CPU at 1.0 GHz (from 1.4 GHz) and halves the screen brightness; turning it off puts both back. Switch it with the new **Battery saver** button in the power menu (works over fullscreen apps too) or by tapping the battery on the taskbar, which gets a green outline while it is on. It stays on across reboots. Wi-Fi power save stays off on purpose (it could stall the Wi-Fi). How much it saves is not measured yet; most of it should come from the dimmer screen. The power menu is now a 3 + 2 grid: Sleep, Restart, Shut down / Battery saver, Log out.
 - **Fixed: 10-bit VP9 and HEVC are now exact at every width.** 10-bit VP9 at some widths (for example 352, 416, 480, 544, 1282) was close to the software result but not identical, and 10-bit HEVC at 1282 pixels wide was visibly wrong. The decoder now uses Jernej Skrabec's buffer layout fix from LibreELEC (`0438`), which replaces two of our own patches (`0900`, `0902`); every clip in a 25-clip test (VP9 8/10-bit, HEVC 8/10-bit, H.264, VP8, MPEG-2) matches the software decode bit for bit. Limit, unchanged: 10-bit VP9 at 4K doesn't fit in the decoder's memory. Closes #8.
