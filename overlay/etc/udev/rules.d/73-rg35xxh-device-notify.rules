@@ -1,0 +1,8 @@
+# Toasts for USB devices (keyboard, mouse, controller, hub, Wi-Fi / Bluetooth / network adapter,
+# audio, ...) plugged in or pulled out, and for the charger plugged in or out. The work is done in
+# rg35xxh-device-notify@<what>.service (/usr/local/sbin/rg35xxh-device-notify): udev only starts it.
+# USB drives and SD cards have their own toasts (72-rg35xxh-udisks.rules).
+ACTION=="add", SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", RUN+="/usr/bin/systemctl --no-block start rg35xxh-device-notify@usb-add:%k.service"
+ACTION=="remove", SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", RUN+="/usr/bin/systemctl --no-block start rg35xxh-device-notify@usb-remove:%k.service"
+# The charger (USB-C power input on the AXP717). "add" at boot records the first state.
+ACTION=="add|change", SUBSYSTEM=="power_supply", KERNEL=="axp20x-usb", RUN+="/usr/bin/systemctl --no-block start rg35xxh-device-notify@charger.service"

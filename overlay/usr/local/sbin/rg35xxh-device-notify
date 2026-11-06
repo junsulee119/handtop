@@ -1,0 +1,156 @@
+#!/bin/sh
+# Toasts for USB devices plugged in or pulled out, and for the charger.
+#   rg35xxh-device-notify usb-add:<kernel name>       e.g. usb-add:1-1, usb-add:1-1.2 (behind a hub)
+#   rg35xxh-device-notify usb-remove:<kernel name>
+#   rg35xxh-device-notify charger
+# Started by rg35xxh-device-notify@<argument>.service, which udev starts
+# (/etc/udev/rules.d/73-rg35xxh-device-notify.rules). USB drives and SD cards have their own
+# toasts (rg35xxh-drive-notify); a device that is only storage gets none here.
+# usb-add: names the device by what it is (keyboard, controller, Wi-Fi adapter, ...) and by the
+#          name it reports, notes when no driver took it, and records both in
+#          /run/rg35xxh-usb/<kernel name> for the removal toast. Devices present at boot are
+#          recorded too (nobody is logged in yet, so no toast).
+# usb-remove: says which device went. A device back within 1 s (a cable that bounces) counts as
+#             not removed.
+# charger: "Charging" / "Charger unplugged" with the battery level, on a change of
+#          /sys/class/power_supply/axp20x-usb/online (last state in /run/rg35xxh-charger). The
+#          first reading after boot is only recorded. Each toast replaces the previous one.
+# Reads sysfs only; never writes to the power chip.
+# Nobody logged in: no toast.
+set -u
+arg="${1:-}"
+cmd="${arg%%:*}"
+name="${arg#*:}"
+
+# The desktop user: the active session on seat0. Sets user/uid, or fails.
+desktop_user() {
+  sess=$(loginctl show-seat seat0 -p ActiveSession --value 2>/dev/null)
+  [ -n "$sess" ] || return 1
+  user=$(loginctl show-session "$sess" -p Name --value 2>/dev/null)
+  uid=$(loginctl show-session "$sess" -p User --value 2>/dev/null)
+  [ -n "$user" ] && [ -n "$uid" ]
+}
+as_user() {
+  run="/run/user/$uid"
+  runuser -u "$user" -- env XDG_RUNTIME_DIR="$run" DBUS_SESSION_BUS_ADDRESS="unix:path=$run/bus" \
+    WAYLAND_DISPLAY="${WAYLAND_DISPLAY:-wayland-0}" "$@"
+}
+
+# ------------------------------------------------------------------------------------ charger
+if [ "$cmd" = charger ]; then
+  PS=/sys/class/power_supply
+  state=/run/rg35xxh-charger
+  # Plugging in can bounce online 0/1 for a moment; read it twice, 0.5 s apart.
+  a=$(cat "$PS/axp20x-usb/online" 2>/dev/null) || exit 0
+  sleep 0.5
+  b=$(cat "$PS/axp20x-usb/online" 2>/dev/null) || exit 0
+  [ "$a" = "$b" ] || exit 0                    # still changing: the next change event decides
+  case "$b" in 0|1) ;; *) exit 0 ;; esac
+  last=$(sed -n 1p "$state" 2>/dev/null)
+  id=$(sed -n 2p "$state" 2>/dev/null)
+  case "$id" in *[!0-9]*) id= ;; esac
+  printf '%s\n%s\n' "$b" "$id" > "$state"
+  [ -n "$last" ] || exit 0                     # first reading since boot: nothing to compare
+  [ "$last" = "$b" ] && exit 0
+  cap=$(cat "$PS/battery/capacity" 2>/dev/null)
+  case "$cap" in ''|*[!0-9]*) lvl= ;; *) lvl="Battery $cap%" ;; esac
+  if [ "$b" = 1 ]; then title="Charging"; else title="Charger unplugged"; fi
+  desktop_user || exit 0
+  new=$(as_user notify-send -a Battery -p ${id:+-r "$id"} -t 4000 "$title" "$lvl" 2>/dev/null)
+  case "$new" in ''|*[!0-9]*) new= ;; esac
+  printf '%s\n%s\n' "$b" "$new" > "$state"
+  exit 0
+fi
+
+# ---------------------------------------------------------------------------------------- USB
+case "$name" in ''|*/*|.*) exit 0 ;; esac
+state=/run/rg35xxh-usb
+rec="$state/$name"
+sys="/sys/bus/usb/devices/$name"
+
+if [ "$cmd" = usb-remove ]; then
+  [ -r "$rec" ] || exit 0                      # not one we recorded (storage only, a root hub)
+  sleep 1
+  [ -e "$sys" ] && exit 0                      # back again: a bounce
+  what=$(sed -n 1p "$rec")
+  body=$(sed -n 2p "$rec")
+  rm -f "$rec"
+  desktop_user || exit 0
+  as_user notify-send -a USB -t 4000 "$what disconnected" "$body"
+  exit 0
+fi
+
+[ "$cmd" = usb-add ] || exit 0
+[ -d "$sys" ] || exit 0
+# Interfaces get their drivers, input devices and network interfaces after the device itself.
+udevadm settle -t 5 2>/dev/null
+[ -d "$sys" ] || exit 0
+
+attr() { cat "$sys/$1" 2>/dev/null | head -1 | tr -d '\r' | sed 's/^ *//; s/ *$//'; }
+vid=$(attr idVendor)
+pid=$(attr idProduct)
+[ "$vid" = 1d6b ] && exit 0                    # a root hub (the controllers themselves)
+
+# What the interfaces are (class codes from usb.org) and what they made: input and network
+# devices. Only this device's own interfaces ("1-1:1.0"); devices behind a hub get their own run.
+classes=
+input=
+net=
+nodriver=1
+for i in "$sys"/"$name":*; do
+  [ -d "$i" ] || continue
+  c=$(cat "$i/bInterfaceClass" 2>/dev/null)
+  classes="$classes $c"
+  [ -e "$i/driver" ] && nodriver=0
+  # sysfs names have no spaces or newlines.
+  input="$input $(find "$i" -maxdepth 5 -name 'event*' -path '*/input/*' 2>/dev/null |
+    while read -r e; do udevadm info -q property -p "$(readlink -f "$e")" 2>/dev/null; done | sed -n \
+      -e 's/^ID_INPUT_JOYSTICK=1$/joystick/p' -e 's/^ID_INPUT_KEYBOARD=1$/keyboard/p' \
+      -e 's/^ID_INPUT_MOUSE=1$/mouse/p' -e 's/^ID_INPUT_TOUCHPAD=1$/touchpad/p' | tr '\n' ' ')"
+  for n in "$i"/net/*; do
+    [ -d "$n" ] || continue
+    if [ -d "$n/wireless" ] || [ -e "$n/phy80211" ]; then net="$net wifi"; else net="$net wired"; fi
+  done
+done
+has() { case " $1 " in *" $2 "*) return 0 ;; esac; return 1; }
+
+if has "$input" joystick; then what="Controller"
+elif has "$classes" 0e; then what="Camera"     # before audio: a webcam has a microphone
+elif has "$classes" 01; then what="Audio device"
+elif has "$input" keyboard && { has "$input" mouse || has "$input" touchpad; }; then what="Keyboard and mouse"
+elif has "$input" keyboard; then what="Keyboard"
+elif has "$input" touchpad; then what="Touchpad"
+elif has "$input" mouse; then what="Mouse"
+elif has "$net" wifi; then what="Wi-Fi adapter"
+elif has "$net" wired; then what="Network adapter"
+elif has "$classes" e0; then what="Bluetooth adapter"
+elif has "$classes" 06; then what="Phone or camera"
+elif has "$classes" 07; then what="Printer"
+elif has "$classes" 09; then what="USB hub"
+elif has "$classes" 08; then exit 0            # only storage: the drive toast covers it
+elif has "$classes" 03; then what="Input device"
+else what="USB device"
+fi
+
+# The name it reports; else the USB ID database's; else the IDs.
+prod=$(attr product)
+manu=$(attr manufacturer)
+if [ -z "$prod" ]; then
+  props=$(udevadm info -q property -p "$(readlink -f "$sys")" 2>/dev/null)
+  prod=$(printf '%s\n' "$props" | sed -n 's/^ID_MODEL_FROM_DATABASE=//p' | head -1)
+  manu=$(printf '%s\n' "$props" | sed -n 's/^ID_VENDOR_FROM_DATABASE=//p' | head -1)
+fi
+case "$prod" in
+  "") body="USB ID $vid:$pid" ;;
+  "$manu"*) body="$prod" ;;                    # also when there is no manufacturer
+  *) body="${manu:+$manu }$prod" ;;
+esac
+body=$(printf '%s' "$body" | tr -d '\n' | cut -c1-60)
+mkdir -p "$state"
+printf '%s\n%s\n' "$what" "$body" > "$rec"
+[ "$nodriver" = 1 ] && body="$body
+No driver for it in Handtop."
+
+desktop_user || exit 0
+as_user notify-send -a USB -t 5000 "$what connected" "$body"
+exit 0

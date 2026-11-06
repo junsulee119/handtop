@@ -116,10 +116,10 @@ def _pids(name):
 
 def _restart(name):
     """Stop the running component and start it again through rg35xxh-themed (new theme).
-    Waybar under rg35xxh-panel (the session's restart loop) is only stopped: the loop starts
+    Waybar under rg35xxh-waybar (the session's restart loop) is only stopped: the loop starts
     the new one, so there are never two taskbars."""
     pids = _pids(name)
-    looped = name == "waybar" and _pids("rg35xxh-panel")
+    looped = name == "waybar" and _pids("rg35xxh-waybar")
     for p in pids:
         try:
             os.kill(p, signal.SIGTERM)

@@ -1,0 +1,8 @@
+[Unit]
+Description=Toast for a USB device or the charger (%i)
+# Started by udev (73-rg35xxh-device-notify.rules): usb-add:<name>, usb-remove:<name>, charger.
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/rg35xxh-device-notify %i
+TimeoutStartSec=30

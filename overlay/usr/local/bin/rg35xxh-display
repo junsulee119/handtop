@@ -6,7 +6,8 @@
   rg35xxh-display connected                   kanshi, on HDMI connect: open the picker with a 5 s
                                               countdown (restarted by any input); then the saved mode
   rg35xxh-display set monitor|extend|mirror   choose and apply a mode (remembered)
-  rg35xxh-display apply                       re-apply the saved mode
+  rg35xxh-display apply                       re-apply the saved mode (kanshi, handheld only: after a
+                                              monitor was unplugged, also a "Monitor disconnected" toast)
   rg35xxh-display osk on|off                  monitor mode: wake the handheld screen for the keyboard
   rg35xxh-display status                      print mode, docked yes/no
   rg35xxh-display --preview FILE [--light] [--undocked] [--mode M] [--confirm]   picker as PNG
@@ -51,6 +52,7 @@ STATE = os.path.join(CONF, "display-mode")
 RUN = os.environ.get("XDG_RUNTIME_DIR", "/tmp")
 OSK_FLAG = os.path.join(RUN, "rg35xxh-osk-panel")
 PICKER_FLAG = os.path.join(RUN, "rg35xxh-display-picker")
+DOCKED_FLAG = os.path.join(RUN, "rg35xxh-docked")   # a monitor was connected in this session
 PICKER_PID = os.path.join(RUN, "rg35xxh-display-picker.pid")
 POINTER_LAYOUT = os.path.join(RUN, "rg35xxh-pointer-layout")   # for the input daemon's pointer speed
 MODES_FILE = os.path.join(CONF, "display-modes.json")          # resolution/refresh per monitor
@@ -265,6 +267,27 @@ def notify_later(text, delay=2.5, ms=5000):
                          start_new_session=True)
     except OSError:
         pass
+
+
+def set_docked():
+    """Marks that a monitor is connected, for the "Monitor disconnected" toast. Holds labwc's PID,
+    so a flag left from an earlier session (logged out while docked) does not count."""
+    try:
+        with open(DOCKED_FLAG, "w") as f:
+            f.write(os.environ.get("LABWC_PID", ""))
+    except OSError:
+        pass
+
+
+def was_docked():
+    """A monitor was connected earlier in this session; clears the mark."""
+    try:
+        with open(DOCKED_FLAG) as f:
+            pid = f.read().strip()
+        os.unlink(DOCKED_FLAG)
+    except OSError:
+        return False
+    return pid == os.environ.get("LABWC_PID", "")
 
 
 def apply(osk=None, why="apply"):
@@ -1018,9 +1041,13 @@ def main(argv):
         else:
             notify(NAMES[argv[2]] + " (applies when a display is connected)")
     elif cmd == "apply":
-        apply(why="kanshi: handheld only" if external(outputs()) is None else "apply")
+        handheld = external(outputs()) is None
+        apply(why="kanshi: handheld only" if handheld else "apply")
+        if handheld and was_docked():
+            notify_later("Monitor disconnected  ·  back to the handheld screen", delay=0.5, ms=4000)
     elif cmd == "connected":                      # kanshi: HDMI connected
         log(f"kanshi: monitor connected | {summary(outputs())}")
+        set_docked()
         if not picker_running():
             subprocess.Popen([sys.argv[0], "pick", "--auto"], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
                              stderr=subprocess.DEVNULL, start_new_session=True)

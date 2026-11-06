@@ -23,6 +23,6 @@ while :; do
   else
     wait_s=1
   fi
-  echo "rg35xxh-panel: $(date '+%F %T') waybar exited (status $rc after ${ran} s), restarting in ${wait_s} s"
+  echo "rg35xxh-waybar: $(date '+%F %T') waybar exited (status $rc after ${ran} s), restarting in ${wait_s} s"
   sleep "$wait_s"
 done
