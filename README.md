@@ -20,7 +20,7 @@ an external monitor over mini HDMI, and everything else Debian's arm64 archive o
 - **Desktop:** labwc (Wayland) + Waybar + nwg-drawer + wlogout, 640×480 on the built-in screen
 - **Controls:** a custom input daemon turns the gamepad into mouse + keyboard, with an on-screen keyboard
 
-Status: **v0.3.8**, developed and tested on the RG35XX H.
+Status: **v0.3.9**, developed and tested on the RG35XX H.
 
 <p align="center">
   <img src="media/handtop-v0.3.8.png" width="800" alt="Handtop v0.3.5 to v0.3.8: the power menu with the new Battery saver button, the low-battery shutdown countdown and the green-outlined battery icon, and YouTube playing in Chromium on the video engine, all on the RG35XX H">
@@ -35,6 +35,7 @@ Status: **v0.3.8**, developed and tested on the RG35XX H.
 - **Moonlight** with **hardware video decoding** (H.264/HEVC up to 1080p60) via the Cedrus decoder
 - **Tailscale** with tray icon and a QR-code login launcher
 - **HDMI**: hot-plug, monitor-only / extend / mirror modes, keyboard panel on the handheld when the monitor is the only screen
+- Notifications when USB or Bluetooth devices connect or disconnect, the charger is plugged in or out, the battery is full, or the monitor is unplugged
 - Sleep (s2idle) from the power menu or after 10 min idle; Power tap wakes
 - **Battery saver** (power menu, or tap the battery on the taskbar): CPU capped at 1.0 GHz, screen dimmed; low-battery warning at 10 % and a clean shutdown at 5 %
 - Charges while switched off (power button boots)
@@ -48,7 +49,7 @@ Full control map: [docs/services/input-daemon.md](docs/services/input-daemon.md)
 
 You need a microSD card (16 GB or larger) and balenaEtcher or Rufus.
 
-1. Download `handtop-<date>-v0.3.8.img.xz` and its `.sha256` from the Releases page. If that image does nothing at all on power-on (no LED), your unit has DDR3 RAM: use the `-DDR3` image instead.
+1. Download `handtop-<date>-v0.3.9.img.xz` and its `.sha256` from the Releases page. If that image does nothing at all on power-on (no LED), your unit has DDR3 RAM: use the `-DDR3` image instead.
 2. Flash the `.img.xz` directly (no need to unpack). If Windows offers to format the card afterwards, choose **Cancel**.
 3. Optional: on the `RG35XXHBOOT` drive, fill in `wifi.txt` (SSID, password, country).
 4. Put the card in the **TF1** (left) slot and power on. The first boot takes longer (the system grows to fill the card).
