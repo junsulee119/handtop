@@ -5,7 +5,8 @@
 #                                blocked), on, on + a device connected (green dot)
 #   rg35xxh-bluetooth --watch    started by the labwc autostart: follows BlueZ's signals
 #                                (adapter powered, device connected / disconnected, bluetoothd
-#                                restarted) and tells Waybar to redraw the icon at once. Also
+#                                restarted) and tells Waybar to redraw the icon at once; a
+#                                toast when a device connects or disconnects (see bt_toast). Also
 #                                remembers whether you turned Bluetooth off (bluetoothd alone
 #                                switches it on at every start) and turns it off again at log-in
 #   rg35xxh-bluetooth --manager  taskbar click: the Bluetooth Manager window. blueman's applet
@@ -24,6 +25,31 @@ refresh() {
     age=$(ps -o etimes= -p "$pid" 2>/dev/null | tr -d ' ')
     [ "${age:-0}" -ge 3 ] && env kill -RTMIN+$SIG "$pid" 2>/dev/null
   done
+  return 0
+}
+
+# Toast for a device that connected or disconnected (a line of `gdbus monitor`). Checked again
+# 1.5 s later, in the background: a device that drops and comes straight back (some BLE mice and
+# keyboards) shows nothing. Skipped while Bluetooth Manager is open (blueman's applet shows its
+# own) and during an External Controller Bluetooth mode (its status screen shows the host).
+bt_toast() {
+  path=${1%%:*}
+  case "$path" in /org/bluez/hci*/dev_*) ;; *) return 0 ;; esac
+  case "$1" in
+    *"'Connected': <true>"*) want=true; what=connected ;;
+    *"'Connected': <false>"*) want=false; what=disconnected ;;
+    *) return 0 ;;
+  esac
+  (
+    sleep 1.5
+    [ -e "$XDG_RUNTIME_DIR/rg35xxh-bt-mode" ] && exit 0
+    pgrep -x -f "/usr/bin/python3 /usr/bin/blueman-applet" >/dev/null && exit 0
+    [ "$(busctl get-property org.bluez "$path" org.bluez.Device1 Connected 2>/dev/null)" = "b $want" ] \
+      || { [ "$want" = false ] && [ -z "$(busctl get-property org.bluez "$path" org.bluez.Device1 Connected 2>/dev/null)" ]; } \
+      || exit 0                            # changed back (or, disconnected: device removed is fine)
+    name=$(busctl get-property org.bluez "$path" org.bluez.Device1 Alias 2>/dev/null | sed 's/^s "//; s/"$//')
+    notify-send -a Bluetooth -t 4000 "${name:-Bluetooth device} $what" 2>/dev/null
+  ) &
   return 0
 }
 
@@ -61,6 +87,7 @@ case "${1:-}" in
             # remember on / off, but not the off / on of External Controller mode's set-up
             [ -e "$XDG_RUNTIME_DIR/rg35xxh-bt-mode" ] || [ -e "$XDG_RUNTIME_DIR/rg35xxh-wired-mode" ] \
               || { [ "$(state)" = off ] && echo off || echo on; } > "$SAVED" ;;
+          *org.bluez.Device1*\'Connected\'*) refresh; bt_toast "$line" ;;
           *\'Connected\'*|*InterfacesAdded*|*InterfacesRemoved*) refresh ;;
         esac
       done

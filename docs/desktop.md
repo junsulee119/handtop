@@ -103,7 +103,7 @@ Selection rule: light apps for 1 GB RAM; Qt apps preferred where equal, since mo
 | SSH | `openssh-client`, `openssh-server`, `tmux`, `mosh` | SSH server off by default; Apps → **Enable SSH** ([apps/enable-ssh.md](apps/enable-ssh.md)) sets your own password and turns it on. tmux/mosh survive dropped connections |
 | Networking | `network-manager`, `network-manager-gnome` (nm-applet) | Wi-Fi from tray; `nmtui` fallback |
 | VPN | `tailscale` (official repo pkgs.tailscale.com, debian/trixie) | Reach the device / PC from anywhere; see [apps/tailscale-login.md](apps/tailscale-login.md) |
-| Bluetooth | `bluez`, `blueman` | Taskbar icon: `rg35xxh-bluetooth` (Waybar `image#bluetooth`, Handtop pixel icons: off / on / connected; `--watch` follows BlueZ over D-Bus, ~1 MB). Click: Bluetooth Manager (blueman), with blueman's applet (pairing agent) running only while it is open. Replaced blueman's always-running applet + tray (~55 MB) on 2026-10-26; trade-offs below |
+| Bluetooth | `bluez`, `blueman` | Taskbar icon: `rg35xxh-bluetooth` (Waybar `image#bluetooth`, Handtop pixel icons: off / on / connected; `--watch` follows BlueZ over D-Bus, ~1 MB, and shows a toast when a device connects or disconnects). Click: Bluetooth Manager (blueman), with blueman's applet (pairing agent) running only while it is open. Replaced blueman's always-running applet + tray (~55 MB) on 2026-10-26; trade-offs below |
 | Audio | `pipewire`, `wireplumber`, `pipewire-pulse`, `pavucontrol` | |
 | Clipboard | `wl-clipboard` | Required by L3/R3 copy/paste |
 | Brightness / volume | `brightnessctl`, `wireplumber` (`wpctl`) | Used by F + Vol and Vol keys; the pop-up bar is Handtop's own `rg35xxh-osd`, see [services/osd.md](services/osd.md) |

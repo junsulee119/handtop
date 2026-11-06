@@ -39,13 +39,14 @@ Power-off permission: polkit rule `/etc/polkit-1/rules.d/50-rg35xxh-power.rules`
 - **Dims first:** `AUTOSLEEP_DIM_SECONDS=10` (0 = off) before auto-sleep the screen dims to 30 % of its brightness (not below the 5 % floor of the brightness keys) as a warning; any input restores it, and so does waking from the sleep (`rg35xxh-dim`, swayidle `resume` / `after-resume`). It dims only when `rg35xxh-autosleep --check` says a sleep would follow, so never while charging, in gamepad or controller modes, with HDMI or in Screen off. A brightness change made while dimmed is kept (restore only if the value is still the dimmed one). The state is in `~/.local/state/session/dim`, so a log-out or crash while dimmed is undone by the next session's autostart. Known edge: if the charger or HDMI is connected during those 10 s without any input, the sleep is skipped and the screen stays dimmed until the next input. Idea from 2026-10-26, added in v0.3.7.
 - Log: `~/.local/state/session/autosleep.log` (also the dim / restore lines).
 
-**Low battery** (`rg35xxh-lowbattery --watch` in the labwc autostart, checks every 30 s, only when not charging), settings in `/etc/rg35xxh/power.conf`:
+**Low battery** (`rg35xxh-lowbattery --watch` in the labwc autostart, checks every 30 s; the warnings and the shutdown only when not charging), settings in `/etc/rg35xxh/power.conf`:
 
 - `LOW_BATTERY_WARN_PCT=10`: a notification that stays until tapped, plus three of the input daemon's standard buzzes (the shutdown countdown and the Screen off warnings buzz three times too). Once per discharge; charging, or the level rising above it, re-arms it.
 - `LOW_BATTERY_SHUTDOWN_PCT=5`: a notification and three buzzes, then a clean shutdown after a 3-minute countdown shown live in the notification (long enough to save work or find the charger; awake with the screen on it costs under 1 % of battery). Plugging in the charger during the countdown cancels it ("Charging: shutdown cancelled"). 0 turns either level off.
 - Why: running flat cuts the power mid-write, which can leave the SD card's filesystem damaged. Why 5 % and not lower: the battery gauge near empty is unverified (it reads in coarse steps and `current_now` is a fixed value), so a lower level risks hitting the hardware cut-off before the shutdown finishes. Same level as Screen off's shutdown.
 - Screen off keeps its own levels (below). While asleep nothing checks; the next check runs on wake. In a controller mode with Battery saver on, the screen is off, so only the buzz and the shutdown show.
 - A typo in one of the levels falls back to that level's default (logged), so the watcher keeps running.
+- While charging: "Fully charged" once per charge when the battery is full ([../services/device-notify.md](../services/device-notify.md#fully-charged)).
 - Log: `~/.local/state/session/lowbattery.log`.
 
 ## Battery saver

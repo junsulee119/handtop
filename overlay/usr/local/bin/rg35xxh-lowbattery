@@ -13,6 +13,8 @@
 #                                    screen straight back on).
 #     <= SCREEN_OFF_SHUTDOWN_PCT %   still in Screen off: a notification, then a clean shutdown.
 # 0 turns a level off. While asleep nothing runs; the check happens again on wake.
+# Charging: "Fully charged" once when the battery reports Full (or 100 %); unplugging re-arms it.
+# Already full when the watcher starts (log-in on the charger): no toast.
 # Every warning buzzes three times. Vibration goes through the input daemon, which owns the motor (docs/hardware-safety.md): this
 # script only leaves a request file for it.
 #   rg35xxh-lowbattery --watch     loop (labwc autostart; a log-out stops it)
@@ -27,6 +29,8 @@ R="${XDG_RUNTIME_DIR:-/tmp}"
 SCREEN_OFF="$R/rg35xxh-screen-off"
 WARNED="$R/rg35xxh-lowbattery-warned"      # Screen off warning given (this discharge)
 LOW_WARNED="$R/rg35xxh-lowbattery-low-warned"  # normal-use warning given (this discharge)
+FULL_SHOWN="$R/rg35xxh-lowbattery-full"     # "Fully charged" shown (this charge)
+FIRST=1                                    # first check since the watcher started
 HAPTIC="$R/rg35xxh-haptic-request"         # read and removed by rg35xxh-inputd
 WARN_PCT=20
 OFF_PCT=5
@@ -92,8 +96,18 @@ check() {
   case "$cap" in ''|*[!0-9]*) return 0 ;; esac
   if charging; then
     rm -f "$WARNED" "$LOW_WARNED"            # charging: warn again next time
+    if [ ! -e "$FULL_SHOWN" ] && { [ "$(cat "$BAT/status" 2>/dev/null)" = Full ] || [ "$cap" -ge 100 ]; }; then
+      : > "$FULL_SHOWN"
+      if [ "$FIRST" = 1 ]; then
+        log "battery full at start: no toast"
+      else
+        log "battery full (${cap}%)"
+        notify-send -a Battery -t 6000 "Fully charged" "Battery ${cap}%. You can unplug the charger." 2>/dev/null
+      fi
+    fi
     return 0
   fi
+  rm -f "$FULL_SHOWN"
   [ "$cap" -gt "$WARN_PCT" ] && rm -f "$WARNED"
   [ "$cap" -gt "$LOW_WARN_PCT" ] && rm -f "$LOW_WARNED"
   if [ -e "$SCREEN_OFF" ]; then
@@ -130,7 +144,7 @@ check() {
 }
 
 case "${1:-}" in
-  --watch) while :; do check; sleep "$INTERVAL"; done ;;
+  --watch) while :; do check; FIRST=0; sleep "$INTERVAL"; done ;;
   --check) check ;;
   *) echo "usage: rg35xxh-lowbattery --watch|--check" >&2; exit 2 ;;
 esac
