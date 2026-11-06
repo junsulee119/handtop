@@ -21,7 +21,17 @@ pointer cannot end up on the monitor (flag file rg35xxh-display-picker in $XDG_R
 chosen or saved mode's layout follows when it closes.
 
 Resolution & refresh rate: per monitor (make + model + serial) in ~/.config/rg35xxh/display-modes.json,
-otherwise the monitor's preferred mode. The picker's Resolution / Refresh steppers and Test try a mode
+otherwise the monitor's preferred mode if the handheld can drive it, else the largest listed mode at
+the rate closest to 60 Hz (a 1920x1200 monitor offers 1920x1200 as preferred, but the H700's HDMI
+lists only lower modes; asking for it left the monitor in an unlisted mode with no taskbar, 2026-11-06).
+Every mode is set explicitly from the monitor's list, never with --preferred.
+
+After each layout change the result is checked: the monitor must be on in a listed mode. If not, the
+default mode is tried once; if that fails too, the handheld screen is turned on (so there is always a
+usable screen) and a notification says so. Then mako re-reads its outputs (makoctl reload: a toast
+open while its screen went away stayed frozen there and later ones never showed, 2026-11-06) and the
+pointer layout for the input daemon is written. Each change is logged to
+~/.local/state/session/display.log (kept across sessions, trimmed at 256 KB). The picker's Resolution / Refresh steppers and Test try a mode
 on the monitor (placed apart from the handheld, so the pointer stays on it) and switch back after
 15 s unless kept (a real-time deadline; every wlr-randr and notify-send call has a time limit, so a
 slow or stuck one cannot hold the switch-back up for good). Refresh rates are passed exactly as the monitor lists them (e.g. 239.998 Hz): a
@@ -44,6 +54,8 @@ PICKER_FLAG = os.path.join(RUN, "rg35xxh-display-picker")
 PICKER_PID = os.path.join(RUN, "rg35xxh-display-picker.pid")
 POINTER_LAYOUT = os.path.join(RUN, "rg35xxh-pointer-layout")   # for the input daemon's pointer speed
 MODES_FILE = os.path.join(CONF, "display-modes.json")          # resolution/refresh per monitor
+LOG = os.path.join(os.path.expanduser("~/.local/state/session"), "display.log")
+LOG_MAX = 256 * 1024
 CONFIRM = 15.0                                                 # s before a tested mode switches back
 FAR = "4000,0"   # not adjacent to the monitor, so the pointer cannot wander onto it
 COUNTDOWN = 5.0
@@ -67,6 +79,38 @@ def save_mode(m):
     os.makedirs(CONF, exist_ok=True)
     with open(STATE, "w") as f:
         f.write(m + "\n")
+
+
+def log(msg):
+    """Append a line to display.log (best effort; trimmed to its newer half past LOG_MAX)."""
+    try:
+        os.makedirs(os.path.dirname(LOG), exist_ok=True)
+        if os.path.exists(LOG) and os.path.getsize(LOG) > LOG_MAX:
+            with open(LOG, "rb") as f:
+                f.seek(-LOG_MAX // 2, os.SEEK_END)
+                tail = f.read()
+            with open(LOG, "wb") as f:
+                f.write(tail[tail.find(b"\n") + 1:])
+        with open(LOG, "a") as f:
+            f.write(time.strftime("%Y-%m-%d %H:%M:%S ") + msg + "\n")
+    except OSError:
+        pass
+
+
+def current_mode(o):
+    return next((md for md in o.get("modes", []) if md.get("current")), None)
+
+
+def summary(outs):
+    """One line per output: name on/off, current mode, number of modes, preferred mode."""
+    parts = []
+    for n, o in outs.items():
+        cur = current_mode(o)
+        pref = next((md for md in o.get("modes", []) if md.get("preferred")), None)
+        parts.append(f"{n} {'on' if o.get('enabled') else 'off'} "
+                     f"cur={mode_spec(cur) if cur else '-'} modes={len(o.get('modes', []))} "
+                     f"pref={mode_spec(pref) if pref else '-'}")
+    return "; ".join(parts) or "no outputs (wlr-randr failed?)"
 
 
 def outputs(timeout=5):
@@ -135,17 +179,36 @@ def save_spec(ext, spec):
 
 
 def preferred_spec(ext):
-    md = next((md for md in ext.get("modes", []) if md.get("preferred")), None) or \
-        next(iter(ext.get("modes", [])), None)
+    """The mode the monitor marks as preferred, if the handheld lists it (None otherwise)."""
+    md = next((md for md in ext.get("modes", []) if md.get("preferred")), None)
     return mode_spec(md) if md else None
 
 
+def default_spec(ext):
+    """Preferred if listed, else the largest listed mode at the rate closest to 60 Hz, among the
+    modes with the screen's own shape when its physical size is known (a 16:10 monitor gets
+    1680x1050, not a stretched 1600x1200)."""
+    pref = preferred_spec(ext)
+    if pref:
+        return pref
+    mds = ext.get("modes", [])
+    if not mds:
+        return None
+    ps = ext.get("physical_size") or {}
+    if ps.get("width") and ps.get("height"):
+        shape = ps["width"] / ps["height"]
+        same = [m for m in mds if abs(m["width"] / m["height"] / shape - 1) < 0.05]
+        mds = same or mds
+    md = max(mds, key=lambda m: (m["width"] * m["height"], m["width"], -abs(m["refresh"] - 60)))
+    return mode_spec(md)
+
+
 def wanted_spec(ext):
-    return saved_spec(ext) or preferred_spec(ext)
+    return saved_spec(ext) or default_spec(ext)
 
 
-def mode_args(ext):
-    spec = saved_spec(ext)
+def mode_args(ext, spec=None):
+    spec = spec or wanted_spec(ext)
     return ["--mode", spec + "Hz"] if spec else ["--preferred"]
 
 
@@ -192,16 +255,94 @@ def notify(text):
         pass
 
 
-def apply(osk=None):
+def notify_later(text, delay=2.5, ms=5000):
+    """A toast after a layout change: a monitor that was just switched on or to a new mode stays
+    black for 1-2 s while it syncs, and a toast sent at once was gone before it showed anything
+    (2026-11-06). Sent from a detached shell, so the caller does not wait."""
+    try:
+        subprocess.Popen(["sh", "-c", f'sleep {delay}; exec notify-send -t {ms} Display "$0"', text],
+                         stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                         start_new_session=True)
+    except OSError:
+        pass
+
+
+def apply(osk=None, why="apply"):
     _apply(osk)
+    check(why)
+    mako_reload()
     write_pointer_layout()
+
+
+def ext_ok(outs, name):
+    """The external output is on, in a mode from its own list."""
+    o = outs.get(name)
+    return bool(o and o.get("enabled") and current_mode(o))
+
+
+def check(why):
+    """After a layout change: the monitor, if it should be on, must be on in a listed mode. Try the
+    default mode once; failing that, keep the handheld screen on so a screen is always usable."""
+    outs = outputs()
+    ext = external(outs)
+    log(f"{why}: mode={mode()} picker={'yes' if os.path.exists(PICKER_FLAG) else 'no'} | {summary(outs)}")
+    if ext is None or os.path.exists(PICKER_FLAG):
+        if not (outs.get(INTERNAL) or {}).get("enabled") and outs:
+            randr("--output", INTERNAL, "--on", "--mode", "640x480", "--pos", "0,0")
+            log("  handheld screen was off with no monitor: turned on")
+        return
+    name = ext["name"]
+    if ext_ok(outs, name):
+        return
+    spec = "640x480@60.000" if mode() == "mirror" else default_spec(ext)
+    log(f"  {name} not on in a listed mode; trying {spec}")
+    if spec:
+        randr("--output", name, "--on", *mode_args(ext, spec))
+        outs = outputs()
+        if ext_ok(outs, name):
+            log(f"  ok: {summary(outs)}")
+            return
+    randr("--output", INTERNAL, "--on", "--mode", "640x480", "--pos", "0,0")
+    log(f"  still not: handheld screen kept on | {summary(outputs())}")
+    notify_later("The monitor did not accept a mode. Handheld screen stays on; pick another "
+                 "resolution in the Display app.", delay=1, ms=8000)
+
+
+def mako_reload():
+    """A toast open while its screen went away stays frozen there and new ones never show
+    (mako 1.10): have mako pick its outputs again."""
+    try:
+        subprocess.run(["makoctl", "reload"], check=False, timeout=3,
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except (OSError, subprocess.SubprocessError):
+        pass
 
 
 def write_pointer_layout():
     """The enabled outputs and a pointer speed factor for each (its diagonal vs. the handheld's
     640x480), so the input daemon moves the pointer across a big screen in about the same time."""
+    for attempt in range(10):
+        rects = _rects(outputs())
+        if rects:
+            break
+        time.sleep(0.3)
+    else:
+        # Never hand the input daemon an empty layout (it would drop to speed x1 on a big
+        # monitor, 2026-11-06): keep the last one and note it.
+        log(f"  pointer layout: no output on with a known mode, kept the previous one | {summary(outputs())}")
+        return
+    tmp = POINTER_LAYOUT + ".tmp"
+    try:
+        with open(tmp, "w") as f:
+            json.dump(rects, f)
+        os.replace(tmp, POINTER_LAYOUT)
+    except OSError:
+        pass
+
+
+def _rects(outs):
     rects = []
-    for name, o in outputs().items():
+    for name, o in outs.items():
         if not o.get("enabled"):
             continue
         cur = next((md for md in o.get("modes", []) if md.get("current")), None)
@@ -212,13 +353,7 @@ def write_pointer_layout():
         pos = o.get("position") or {}
         rects.append({"name": name, "x": pos.get("x", 0), "y": pos.get("y", 0), "w": w, "h": h,
                       "scale": round(factor, 3)})
-    tmp = POINTER_LAYOUT + ".tmp"
-    try:
-        with open(tmp, "w") as f:
-            json.dump(rects, f)
-        os.replace(tmp, POINTER_LAYOUT)
-    except OSError:
-        pass
+    return rects
 
 
 def _apply(osk=None):
@@ -597,7 +732,7 @@ def picker(auto):
     docked = external(outputs()) is not None
     if docked:
         open(PICKER_FLAG, "w").close()
-        apply()
+        apply(why="picker open")
     P = palette(light_theme())
     st = {"current": mode(), "selected": None, "hover": None, "ext": external(outputs()),
           "info": describe(external(outputs())), "remaining": COUNTDOWN if (auto and docked) else None,
@@ -646,9 +781,18 @@ def picker(auto):
             except FileNotFoundError:
                 pass
         if reapply and external(outputs()):
-            apply()
-        if choice:
-            notify(NAMES[choice] + ("" if external(outputs()) else " (applies when a display is connected)"))
+            apply(why="picker closed" + (f", chose {choice}" if choice else ""))
+        # One toast for what changed, after the final layout, so it shows on the screen in use (a
+        # toast while the picker is open shows on the handheld for 2.5 s while you look at the
+        # monitor, 2026-11-06).
+        ext = external(outputs())
+        if choice or st.get("kept"):
+            m = choice or st["current"]
+            if ext:
+                spec = wanted_spec(ext) if m != "mirror" else "640x480@60.000"
+                notify_later(NAMES[m] + "  ·  " + spec_text(spec))
+            else:
+                notify(NAMES[m] + " (applies when a display is connected)")
         Gtk.main_quit()
 
     def on_draw(_w, cr):
@@ -719,7 +863,7 @@ def picker(auto):
         if keep:
             save_spec(st["ext"], c["spec"])
             st["info"] = describe(st["ext"])
-            notify("Resolution: " + spec_text(c["spec"]))
+            st["kept"] = True                     # the toast follows when the picker closes
         else:
             sync_sel()
 
@@ -868,11 +1012,15 @@ def main(argv):
     cmd = argv[1] if len(argv) > 1 else "pick"
     if cmd == "set" and len(argv) > 2 and argv[2] in MODES:
         save_mode(argv[2])
-        apply()
-        notify(NAMES[argv[2]] + ("" if external(outputs()) else " (applies when a display is connected)"))
+        apply(why=f"set {argv[2]}")
+        if external(outputs()):
+            notify_later(NAMES[argv[2]])
+        else:
+            notify(NAMES[argv[2]] + " (applies when a display is connected)")
     elif cmd == "apply":
-        apply()
+        apply(why="kanshi: handheld only" if external(outputs()) is None else "apply")
     elif cmd == "connected":                      # kanshi: HDMI connected
+        log(f"kanshi: monitor connected | {summary(outputs())}")
         if not picker_running():
             subprocess.Popen([sys.argv[0], "pick", "--auto"], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
                              stderr=subprocess.DEVNULL, start_new_session=True)
@@ -884,7 +1032,7 @@ def main(argv):
         elif os.path.exists(OSK_FLAG):
             os.unlink(OSK_FLAG)
         if mode() == "monitor" and external(outputs()) and not os.path.exists(PICKER_FLAG):
-            apply(osk=argv[2] == "on")
+            apply(osk=argv[2] == "on", why=f"keyboard panel {argv[2]}")
     elif cmd == "status":
         print(mode(), "docked" if external(outputs()) else "handheld")
     elif cmd == "--preview" and len(argv) > 2:

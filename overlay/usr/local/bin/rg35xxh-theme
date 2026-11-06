@@ -115,8 +115,11 @@ def _pids(name):
 
 
 def _restart(name):
-    """Stop the running component and start it again through rg35xxh-themed (new theme)."""
+    """Stop the running component and start it again through rg35xxh-themed (new theme).
+    Waybar under rg35xxh-panel (the session's restart loop) is only stopped: the loop starts
+    the new one, so there are never two taskbars."""
     pids = _pids(name)
+    looped = name == "waybar" and _pids("rg35xxh-panel")
     for p in pids:
         try:
             os.kill(p, signal.SIGTERM)
@@ -126,6 +129,8 @@ def _restart(name):
         if not any(os.path.exists(f"/proc/{p}") for p in pids):   # release the tray first)
             break
         time.sleep(0.1)
+    if looped:
+        return
     os.makedirs(LOG, exist_ok=True)
     with open(os.path.join(LOG, f"{name}.log"), "a") as log:
         subprocess.Popen(["rg35xxh-themed", name], stdin=subprocess.DEVNULL, stdout=log, stderr=log,

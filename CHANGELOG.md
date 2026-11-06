@@ -3,6 +3,9 @@
 ## Unreleased
 
 - **Fixed (should be): Bluetooth missing on the first boot after flashing.** On those boots the Bluetooth chip stayed silent until the driver started it again; a new boot service notices that within a few seconds and restarts the driver once, so Bluetooth is up before the desktop appears. It also writes a short record of every boot's Bluetooth start to `logs/bt-NNNN.txt` on the boot partition: if Bluetooth is ever missing, please attach the newest one to an issue. Not yet seen on a real failing boot, so the known-issue note stays for now.
+- **Fixed: no taskbar and a slow pointer on some HDMI monitors.** On a 1920×1200 monitor, Monitor only left the screen without a taskbar and with the pointer at handheld speed, and unplugging didn't bring the taskbar back. The monitor's own best mode is beyond what the handheld's HDMI can drive, and the Display app still asked for it. Now it always picks a mode from the monitor's list (the largest one with the screen's shape at about 60 Hz when the best one isn't offered), checks after every change that the monitor really is on, and otherwise keeps the handheld screen on and says so. The taskbar now restarts by itself if it ever stops, and the pointer keeps its monitor speed instead of dropping back. Each display change is logged to `~/.local/state/session/display.log`; please attach it if a monitor misbehaves.
+- **Fixed: a notification stuck on the monitor.** After keeping a new resolution, its notification could stay frozen in the upper part of the monitor, at the left, and later notifications didn't show at all until a reboot.
+
 ## v0.3.8
 
 - ⚠️ **Known issue (still open):** Bluetooth is sometimes missing on the first boot after flashing. Restart once (Power → Restart); it works from then on.

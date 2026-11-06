@@ -293,3 +293,40 @@ def test_busy_gamepad_released_in_time_is_used(monkeypatch):
     d = _open_with(monkeypatch, [pad, vol, pwr])
     d._open_devices(wait=1.0)
     assert d.gamepad is pad and not pad.closed and calls["n"] == 3
+
+
+# ---- 2026-11-06: an empty pointer layout (wlr-randr glitch) must not drop the speed to x1
+
+def _layout_daemon(monkeypatch, tmp_path):
+    path = tmp_path / "rg35xxh-pointer-layout"
+    monkeypatch.setattr(daemon, "runtime_flag", lambda name: str(path))
+    d = daemon.Daemon.__new__(daemon.Daemon)
+    d.layout = daemon.PointerLayout()
+    d.layout_mtime = None
+    d.core = types.SimpleNamespace(s={"display_speed_scale": True}, pointer_scale=1.0)
+    return d, path
+
+
+def _write(path, text, mtime):
+    path.write_text(text)
+    os.utime(path, (mtime, mtime))
+
+
+def test_empty_layout_keeps_the_monitor_speed(monkeypatch, tmp_path):
+    d, path = _layout_daemon(monkeypatch, tmp_path)
+    _write(path, '[{"name": "HDMI-A-1", "x": 0, "y": 0, "w": 1920, "h": 1080, "scale": 2.754}]', 1000)
+    d._layout_reload()
+    big = d.core.pointer_scale
+    assert big > 2
+    _write(path, "[]", 1001)
+    d._layout_reload()
+    assert d.core.pointer_scale == big
+
+
+def test_missing_layout_file_means_handheld_speed(monkeypatch, tmp_path):
+    d, path = _layout_daemon(monkeypatch, tmp_path)
+    _write(path, '[{"name": "HDMI-A-1", "x": 0, "y": 0, "w": 1920, "h": 1080, "scale": 2.754}]', 1000)
+    d._layout_reload()
+    path.unlink()
+    d._layout_reload()
+    assert d.core.pointer_scale == 1.0

@@ -673,6 +673,13 @@ class Daemon:
                     rects = json.load(f)
             except (OSError, ValueError):
                 rects = []
+            if not rects and self.layout.rects:
+                # A layout file with no screens is a glitch (rg35xxh-display no longer writes one;
+                # v0.3.8 did when wlr-randr returned nothing, and the pointer crawled on a big
+                # monitor at x1, 2026-11-06): keep the current speed.
+                log.info("screen layout for pointer speed: empty layout ignored, keeping x%.2f",
+                         self.core.pointer_scale)
+                return
         self.layout.set_rects(rects)
         if len(self.layout.rects) > 1 and getattr(self, "mouse", None):
             # Two screens: start from a known point. A long move up-left ends in the layout's

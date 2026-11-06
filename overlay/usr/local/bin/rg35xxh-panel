@@ -1,0 +1,28 @@
+#!/bin/sh
+# Keep the taskbar (Waybar) running: started by the labwc autostart, restarts Waybar when it
+# exits. Waybar 0.12 can crash when the screen its bar is on goes away (an HDMI layout change);
+# the taskbar then stayed gone on every screen until a reboot.
+#   - in the current theme (rg35xxh-themed reads it at each start), so rg35xxh-theme only stops
+#     Waybar and this loop starts the new one
+#   - 1 s before a restart; if Waybar ran less than 10 s, the wait doubles (up to 60 s), so a
+#     Waybar that cannot start does not spin; not after a SIGTERM (a theme switch stopped it)
+#   - ends with the session (no Wayland socket left)
+# Each exit is logged with its status to waybar.log (the autostart's redirection).
+R="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
+wait_s=1
+while :; do
+  start=$(date +%s)
+  rg35xxh-themed waybar
+  rc=$?
+  [ -S "$R/${WAYLAND_DISPLAY:-wayland-0}" ] || exit 0
+  ran=$(( $(date +%s) - start ))
+  if [ "$rc" -eq 143 ]; then          # stopped on purpose (SIGTERM: theme switch): no backoff
+    wait_s=1
+  elif [ "$ran" -lt 10 ]; then
+    wait_s=$((wait_s * 2)); [ "$wait_s" -gt 60 ] && wait_s=60
+  else
+    wait_s=1
+  fi
+  echo "rg35xxh-panel: $(date '+%F %T') waybar exited (status $rc after ${ran} s), restarting in ${wait_s} s"
+  sleep "$wait_s"
+done
