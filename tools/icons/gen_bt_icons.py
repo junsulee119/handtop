@@ -1,4 +1,8 @@
-"""Bluetooth icons (pixel art, no frame): the taskbar tray states of the blueman applet and the
+"""Since v0.4.0 the output goes to src/theme/art/icons (not installed as such): the built-in
+themes take these images (src/theme/handtop_theme/builtin.py) and the current theme's icon
+theme Handtop-Current serves them; the paths below are inside that folder.
+
+Bluetooth icons (pixel art, no frame): the taskbar tray states of the blueman applet and the
 Bluetooth Manager's drawer icon. They replace blueman's own icons by name from
 /usr/local/share/icons/hicolor (searched before /usr/share for the same subdirectory), so the
 package's files are untouched. They must sit in the subdirectory GTK picks for the requested size:
@@ -15,7 +19,7 @@ and scalable/status comes before scalable/apps (blueman ships its icon in both).
 The tray icons are 23 px like the input-mode icon (Waybar tray "icon-size": 23). One set for both
 themes: the blue reads on the dark and the light taskbar.
 
-Usage: python3 gen_bt_icons.py <hicolor folder>    (e.g. overlay/usr/local/share/icons/hicolor)
+Usage: python3 gen_bt_icons.py <hicolor folder>    (src/theme/art/icons/hicolor)
 """
 import os
 import sys

@@ -1,4 +1,8 @@
-"""Pixel-art icons for the default (Debian) apps, under the apps' own icon names, so the packages'
+"""Since v0.4.0 the output goes to src/theme/art/icons (not installed as such): the built-in
+themes take these images (src/theme/handtop_theme/builtin.py) and the current theme's icon
+theme Handtop-Current serves them; the paths below are inside that folder.
+
+Pixel-art icons for the default (Debian) apps, under the apps' own icon names, so the packages'
 files and .desktop entries stay untouched:
 
   dark set   hicolor/scalable/apps/<name>.png          (/usr/local/share/icons is searched before
@@ -22,7 +26,7 @@ Window title bars: labwc looks the icon up at exactly 22 px, where the package's
 would win over our scalable one, so a 22x22 copy (smoothly scaled down from the 56 px icon, dark set
 only: labwc reads hicolor) goes to hicolor/22x22/apps/<name>.png too.
 
-Usage: python3 gen_default_app_icons.py <icons folder>    (e.g. overlay/usr/local/share/icons)
+Usage: python3 gen_default_app_icons.py <icons folder>    (src/theme/art/icons)
 """
 import os
 import sys

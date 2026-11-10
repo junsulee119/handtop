@@ -32,6 +32,17 @@ def test_render_custom_theme(tmp_path, builtins, ops):
     assert len([k for k in env if k.startswith("COLOR_")]) == len(S.COLORS)
 
 
+def test_borders_and_scale(tmp_path, builtins, ops):
+    t = theme.load(os.path.join(builtins, "handtop-high-contrast"), builtins)
+    out = render.render(t, str(tmp_path / "theme"), ops)
+    waybar = open(os.path.join(out, "waybar.css")).read()
+    assert "border-top: 2px solid #000000" in waybar and "font-size: 15px" in waybar
+    assert "border-size=2" in open(os.path.join(out, "mako.conf")).read()
+    wl = open(os.path.join(out, "wlogout.css")).read()
+    assert "border: 4px solid #ffffff" in wl and "outline: 4px solid #ffff00" in wl and "font-size: 20px" in wl
+    assert current.read_env(os.path.join(out, "theme.env"))["BORDERS"] == "2"
+
+
 def test_rerender_replaces_whole_folder(tmp_path, builtins, ops):
     t = theme.load(os.path.join(builtins, "handtop-dark"), builtins)
     target = str(tmp_path / "theme")

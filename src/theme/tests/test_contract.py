@@ -70,6 +70,7 @@ def test_minimal_is_valid():
     ("id", "My Theme"), ("id", "-x"), ("id", "a" * 41), ("id", "../x"), ("id", ""),
     ("name", ""), ("name", "x" * 33), ("name", "two\nlines"), ("name", 3),
     ("base", "grey"), ("base", None),
+    ("borders", 0), ("borders", 4), ("borders", "2"), ("borders", True),
 ])
 def test_bad_top_fields(field, value):
     assert field in errors(minimal(**{field: value}))

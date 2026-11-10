@@ -171,6 +171,8 @@ STATUS_STYLES = ("solid", "hologram")
 GTK_SCHEMES = ("prefer-dark", "default", "prefer-light")
 CURSOR_SIZES = (16, 64)          # inclusive range
 FONT_SCALES = (0.75, 1.5)
+BORDERS = (1, 3)                 # line width multiplier (taskbar line, notification and
+                                 # power-menu borders, on-screen keyboard keys); 1 = Handtop's
 
 # ---- image slots -------------------------------------------------------------------------------
 # Slot names are also their file names: slot "taskbar/battery-3" is icons/taskbar/battery-3.png.

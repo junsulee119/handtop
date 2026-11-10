@@ -227,7 +227,9 @@ def test_list_find_delete(tmp_path, builtins):
     (user / "Bad Name").mkdir()
     (user / ".import-x").mkdir()
     got = package.list_themes(builtins, str(user))
-    assert [(i, b) for i, _p, b in got] == [("handtop-dark", True), ("handtop-light", True), ("zeta", False)]
+    assert [(i, b) for i, _p, b in got] == [("handtop-dark", True), ("handtop-debian", True),
+                                            ("handtop-grayscale", True), ("handtop-high-contrast", True),
+                                            ("handtop-light", True), ("zeta", False)]
     assert package.find("zeta", builtins, str(user)).endswith("zeta")
     assert package.find("handtop-fake", builtins, str(user)) is None
     with pytest.raises(ValueError):

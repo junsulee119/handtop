@@ -54,3 +54,15 @@ def test_import_decodes(tmp_path, builtins):
     package.delete("copy", str(tmp_path / "u"))
     t = package.import_theme(out, str(tmp_path / "u"), builtins, decode=True)
     assert t.errors == []
+
+
+def test_grayscale_images_are_grey(builtins):
+    from handtop_theme import schema as S
+    t = theme.load(os.path.join(builtins, "handtop-grayscale"), builtins, decode=True)
+    assert t.problems == []
+    for slot in ("taskbar/inputmode-bt", "taskbar/battery-charging-low-1", "apps/chromium", "power-menu/shutdown"):
+        pb = imgops.load(t.images[slot][1])
+        px, n = pb.get_pixels(), pb.get_n_channels()
+        for i in range(0, len(px) - n, n):
+            assert px[i] == px[i + 1] == px[i + 2], slot
+        assert S.IMAGE_SLOTS[slot][:2] == (pb.get_width(), pb.get_height())

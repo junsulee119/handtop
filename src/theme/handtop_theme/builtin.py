@@ -1,17 +1,24 @@
-"""The built-in Handtop themes (handtop-dark, handtop-light) assembled from the repo.
+"""The built-in themes, assembled from the repo for the image build (build/07d-theme.sh) and the
+tests.
 
-Their theme.json files are in src/theme/themes/<id>/; their images are the generated pixel art
-already in overlay/ (tools/icons/), copied into the theme slots here. Used by the image build
-(build/07d-theme.sh) and the tests."""
+  handtop-dark, handtop-light   theme.json in src/theme/themes/<id>/; images: the generated pixel
+                                art in overlay/ and src/theme/art/ (tools/icons/), mapped to the
+                                theme slots here (sources())
+  every other folder in          a complete theme folder, copied as it is (theme.json plus its own
+  src/theme/themes/              images, e.g. handtop-grayscale from tools/icons/gen_grayscale.py);
+                                 what it leaves out comes from its base like any theme"""
 import os
 import shutil
 
 from . import schema as S
 
-IDS = ("handtop-dark", "handtop-light")
+MAPPED = ("handtop-dark", "handtop-light")
+IDS = MAPPED + ("handtop-debian", "handtop-high-contrast", "handtop-grayscale")
 _I = "overlay/usr/local/share/rg35xxh/icons"
-_HI = "overlay/usr/local/share/icons/hicolor"
-_HL = "overlay/usr/local/share/icons/Handtop-Light"
+# Default-app, Wi-Fi and Bluetooth icons: generated into src/theme/art/icons (not installed as such;
+# until v0.3.9 they sat in overlay/usr/local/share/icons and overrode the packages' own icons)
+_HI = "src/theme/art/icons/hicolor"
+_HL = "src/theme/art/icons/Handtop-Light"
 _APP_FILES = {"theme": "app-theme", "external-controller": "app-external-controller",
               "display": "app-display", "enable-ssh": "app-ssh", "recenter-sticks": "app-recenter"}
 
@@ -57,11 +64,21 @@ def sources(repo, light):
 
 
 def assemble(repo, dest):
-    """Write handtop-dark and handtop-light, unpacked, into dest/<id>/."""
+    """Write every built-in theme, unpacked, into dest/<id>/. Returns their paths (bases first)."""
     for tid in IDS:
         out = os.path.join(dest, tid)
         if os.path.exists(out):
             shutil.rmtree(out)
+        src = os.path.join(repo, "src", "theme", "themes", tid)
+        if tid not in MAPPED:
+            allowed = set(S.allowed_files())
+            for root, _dirs, files in os.walk(src):
+                for n in files:
+                    rel = os.path.relpath(os.path.join(root, n), src).replace(os.sep, "/")
+                    if rel in allowed:
+                        os.makedirs(os.path.dirname(os.path.join(out, rel)), exist_ok=True)
+                        shutil.copyfile(os.path.join(root, n), os.path.join(out, rel))
+            continue
         os.makedirs(out)
         shutil.copyfile(os.path.join(repo, "src", "theme", "themes", tid, S.THEME_FILE),
                         os.path.join(out, S.THEME_FILE))

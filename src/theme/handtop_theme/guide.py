@@ -37,7 +37,8 @@ def generate():
     a(f"| `status_screen` | `style`: {' or '.join(S.STATUS_STYLES)} (External Controller's drawn handheld) |")
     a(f"| `gtk` | `color_scheme` ({', '.join(S.GTK_SCHEMES)}), `theme`, `icon_theme`: installed names |")
     a(f"| `cursor` | `theme` (installed), `size` {S.CURSOR_SIZES[0]}-{S.CURSOR_SIZES[1]} (applies at the next log-in) |")
-    a(f"| `fonts` | `ui`, `mono` (installed font names), `scale` {S.FONT_SCALES[0]}-{S.FONT_SCALES[1]} |")
+    a(f"| `fonts` | `ui`, `mono` (installed font names), `scale` {S.FONT_SCALES[0]}-{S.FONT_SCALES[1]} (GTK apps, taskbar, notifications, app drawer; the power menu's large labels and window titles stay as they are) |")
+    a(f"| `borders` | line width {S.BORDERS[0]}-{S.BORDERS[1]} (taskbar line, notification and power-menu borders, keyboard keys; 1 = Handtop's) |")
     a("| `icons` | `\"<slot>\": \"system\"` to use the package's own icon (only slots marked *system ok*) |")
     a(f"| `names` | `\"<app>\": \"Name\"` for default apps, 1-{S.APP_NAME_MAX} characters, or `\"system\"` |\n")
     a("Colours are `#rrggbb`, or `#rrggbbaa` with opacity. Anything left out is filled in: palette "

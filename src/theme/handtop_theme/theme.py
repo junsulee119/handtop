@@ -21,7 +21,7 @@ BUILTIN_DIR = "/usr/share/rg35xxh/themes"
 _NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9 ._+-]{0,63}\Z")    # font / GTK / cursor theme names
 _CTRL = re.compile(r"[\x00-\x1f\x7f]")
 TOP_KEYS = ("schema", "id", "name", "base", "author", "description", "palette", "colors",
-            "wallpaper", "status_screen", "gtk", "cursor", "fonts", "icons", "names")
+            "wallpaper", "status_screen", "gtk", "cursor", "fonts", "borders", "icons", "names")
 
 
 class Problem:
@@ -50,6 +50,7 @@ class Theme:
         self.palette, self.colors, self.images, self.names = {}, {}, {}, {}
         self.wallpaper = {"color": None, "image": None, "mode": "center"}
         self.status_style = "solid"
+        self.borders = 1
         self.gtk, self.cursor, self.fonts = {}, {}, {}
         self.own = set()            # slots this theme supplies itself
         self.problems = []
@@ -166,6 +167,11 @@ def validate(data):
         v = cur["size"]
         if not isinstance(v, int) or isinstance(v, bool) or not S.CURSOR_SIZES[0] <= v <= S.CURSOR_SIZES[1]:
             err("cursor.size", f"a whole number {S.CURSOR_SIZES[0]}-{S.CURSOR_SIZES[1]}")
+
+    if "borders" in data:
+        v = data["borders"]
+        if not isinstance(v, int) or isinstance(v, bool) or not S.BORDERS[0] <= v <= S.BORDERS[1]:
+            err("borders", f"a whole number {S.BORDERS[0]}-{S.BORDERS[1]}")
 
     fonts = section("fonts")
     for k in ("ui", "mono"):
@@ -292,6 +298,7 @@ def load(path, builtin_dir=BUILTIN_DIR, decode=False, _stack=()):
             P.extend(check_image(f, S.WALLPAPER_FILE, None, S.MAX_WALLPAPER_BYTES, decode))
             t.wallpaper["image"] = f
     t.status_style = data.get("status_screen", {}).get("style", base.status_style if base else "solid")
+    t.borders = data.get("borders", base.borders if base else 1)
     for attr, defaults in (("gtk", {"color_scheme": "prefer-dark" if t.base == "dark" else "default",
                                     "theme": "Adwaita", "icon_theme": "Adwaita"}),
                            ("cursor", {"theme": "Adwaita", "size": 24}),

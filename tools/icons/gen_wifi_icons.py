@@ -1,4 +1,8 @@
-"""Wi-Fi / network tray icons (pixel art, no frame) for the NetworkManager applet (nm-applet).
+"""Since v0.4.0 the output goes to src/theme/art/icons (not installed as such): the built-in
+themes take these images (src/theme/handtop_theme/builtin.py) and the current theme's icon
+theme Handtop-Current serves them; the paths below are inside that folder.
+
+Wi-Fi / network tray icons (pixel art, no frame) for the NetworkManager applet (nm-applet).
 They replace the applet's own icons by name, so the package's files are untouched:
   dark set   hicolor/{22x22,24x24}/apps         (/usr/local/share/icons/hicolor is searched before
                                                 /usr/share for the same subdirectory; see gen_bt_icons.py)
@@ -17,7 +21,7 @@ They replace the applet's own icons by name, so the package's files are untouche
 Colours like the battery icon: white on the dark taskbar, dark ink on the light one; unlit arcs
 are a faint version of the same colour. No connection: a grey fan and a red X.
 
-Usage: python3 gen_wifi_icons.py <icons folder>    (e.g. overlay/usr/local/share/icons)
+Usage: python3 gen_wifi_icons.py <icons folder>    (src/theme/art/icons)
 """
 import math
 import os

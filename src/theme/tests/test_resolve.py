@@ -13,11 +13,46 @@ def load(tmp_path, builtins, data, files=None):
 
 
 def test_builtins_are_complete(builtins):
-    for tid in ("handtop-dark", "handtop-light"):
+    for tid in ("handtop-dark", "handtop-light", "handtop-grayscale"):
         t = theme.load(os.path.join(builtins, tid), builtins)
         assert t.problems == []
         assert set(t.own) >= {s for s, v in S.IMAGE_SLOTS.items() if v[2] != "generated"}
         assert t.wallpaper["image"]
+
+
+def test_builtins_load_cleanly(builtins):
+    from handtop_theme import builtin
+    assert sorted(os.listdir(builtins)) == sorted(builtin.IDS)
+    for tid in builtin.IDS:
+        t = theme.load(os.path.join(builtins, tid), builtins)
+        assert t.problems == [], tid
+        assert t.name and t.description
+
+
+def test_debian_theme(builtins):
+    t = theme.load(os.path.join(builtins, "handtop-debian"), builtins)
+    for a in S.DEFAULT_APPS:
+        assert t.images[f"apps/{a}"] == ("system",) and t.images[f"apps/{a}@22"] == ("system",)
+    assert all(t.images[f"tray/{w}"] == ("system",) for w in S.WIFI)
+    assert t.images["apps/theme"][1].endswith("handtop-light/icons/apps/theme.png")   # Handtop's own app
+    assert t.cursor == {"theme": "Adwaita", "size": 24} and t.wallpaper["image"] is None
+    assert t.colors["osk.sel"] == t.palette["accent"]                                   # derived
+
+
+def test_high_contrast_theme(builtins):
+    t = theme.load(os.path.join(builtins, "handtop-high-contrast"), builtins)
+    assert t.borders == 2 and t.fonts["scale"] == 1.25 and t.cursor["size"] == 48
+    assert t.gtk["theme"] == "HighContrastInverse"
+    assert t.images["taskbar/battery-3"][1].endswith("handtop-dark/icons/taskbar/battery-3.png")
+
+
+def test_grayscale_theme(builtins):
+    from handtop_theme import colors as C
+    t = theme.load(os.path.join(builtins, "handtop-grayscale"), builtins)
+    for v in list(t.palette.values()) + [v for v in t.colors.values() if v] + [t.wallpaper["color"]]:
+        r, g, b, _a = C.parse(v)
+        assert r == g == b, v
+    assert t.colors["status.label"] is None
 
 
 def test_palette_only_theme(tmp_path, builtins):

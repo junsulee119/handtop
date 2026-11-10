@@ -104,9 +104,42 @@ def _load(tid):
     raise SystemExit("rg35xxh-theme: even the built-in Handtop theme cannot be loaded")
 
 
+GTK_BUILTIN = ("Adwaita", "Adwaita-dark", "HighContrast", "HighContrastInverse")   # inside GTK 3
+FALLBACK = {("gtk", "theme"): "Adwaita", ("gtk", "icon_theme"): "Adwaita",
+            ("cursor", "theme"): "Handtop", ("fonts", "ui"): "Noto Sans", ("fonts", "mono"): "Noto Sans Mono"}
+
+
+def _dirs(sub):
+    return [os.path.join(DATA, sub), os.path.expanduser(f"~/.{sub}"), f"/usr/local/share/{sub}",
+            f"/usr/share/{sub}"]
+
+
+def _installed(kind, name):
+    if kind == ("gtk", "theme"):
+        return name in GTK_BUILTIN or any(os.path.isdir(os.path.join(d, name, "gtk-3.0")) for d in _dirs("themes"))
+    if kind == ("gtk", "icon_theme"):
+        return any(os.path.isfile(os.path.join(d, name, "index.theme")) for d in _dirs("icons"))
+    if kind == ("cursor", "theme"):
+        return any(os.path.isdir(os.path.join(d, name, "cursors")) for d in _dirs("icons"))
+    r = subprocess.run(["fc-list", ":", "family"], capture_output=True, text=True)
+    families = {f.strip() for line in r.stdout.splitlines() for f in line.split(",")}
+    return r.returncode != 0 or name in families        # no fc-list: do not second-guess
+
+
+def _check_installed(t):
+    """A theme names fonts, cursor, GTK and icon themes by name: any that is not installed is
+    replaced by Handtop's (logged), so nothing falls back to a toolkit's odd default."""
+    for (section, key), fallback in FALLBACK.items():
+        name = getattr(t, section)[key]
+        if not _installed((section, key), name):
+            log(f"{t.id}: {section}.{key} {name!r} is not installed; using {fallback!r}")
+            getattr(t, section)[key] = fallback
+
+
 def prepare(tid):
     """Render theme tid (or the fallback) into STATE. Returns the Theme."""
     t = _load(tid)
+    _check_installed(t)
     render.render(t, STATE)
     with open(STAMP, "w") as f:
         f.write(_stamp(t.path) + "\n")

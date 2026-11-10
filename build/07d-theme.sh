@@ -40,4 +40,9 @@ for a in theme:app-theme external-controller:app-external-controller display:app
          enable-ssh:app-ssh recenter-sticks:app-recenter; do
   install -m644 "$TOP/overlay/usr/local/share/rg35xxh/icons/${a#*:}.png" "$H/rg35xxh-${a%%:*}.png"
 done
+# micro's package names its icon by path (/usr/share/micro/micro-logo-mark.svg); Handtop's
+# micro.desktop names it "micro" (overlay), so a theme asking for micro's own icon ("system")
+# finds it under that name.
+M="$ROOTFS/usr/share/micro/micro-logo-mark.svg"
+[ -f "$M" ] && install -m644 "$M" "$H/micro.svg"
 echo "Theme system installed."

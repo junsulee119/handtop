@@ -1,8 +1,9 @@
 #!/bin/sh
 # Bluetooth on the taskbar without blueman's always-running applet + tray (~55 MB of memory).
 #   rg35xxh-bluetooth            Waybar image module "image#bluetooth": prints the icon for the
-#                                current state (Handtop pixel art, gen_bt_icons.py): off (or
-#                                blocked), on, on + a device connected (green dot)
+#                                current state in the current theme (blueman's icon names, from
+#                                the theme's rendered icon theme; the package's own when the
+#                                theme asks for them): off (or blocked), on, on + a device connected
 #   rg35xxh-bluetooth --watch    started by the labwc autostart: follows BlueZ's signals
 #                                (adapter powered, device connected / disconnected, bluetoothd
 #                                restarted) and tells Waybar to redraw the icon at once; a
@@ -13,7 +14,8 @@
 #                                runs only while it is open (pairing agent, notifications) and
 #                                without its own tray icon (its StatusIcon plugin is switched off
 #                                in the gsettings defaults, 90_rg35xxh.gschema.override)
-ICONS=/usr/local/share/icons/hicolor/22x22/status
+ICONS="${XDG_STATE_HOME:-$HOME/.local/state}/rg35xxh/theme/icon-theme/22x22/status"   # rg35xxh-theme
+STOCK=/usr/share/icons/hicolor/22x22/status                                             # blueman's own
 SIG=10                          # Waybar "signal" of image#bluetooth
 SAVED="$HOME/.local/state/rg35xxh-bluetooth-power"   # "off" after you switched it off
 
@@ -67,10 +69,11 @@ state() {
 case "${1:-}" in
   "")
     case "$(state)" in
-      off) echo "$ICONS/blueman-disabled.png" ;;
-      connected) echo "$ICONS/blueman-active.png" ;;
-      *) echo "$ICONS/blueman-tray.png" ;;
-    esac ;;
+      off) n=blueman-disabled ;;
+      connected) n=blueman-active ;;
+      *) n=blueman-tray ;;
+    esac
+    if [ -r "$ICONS/$n.png" ]; then echo "$ICONS/$n.png"; else echo "$STOCK/$n.png"; fi ;;
   --watch)
     if [ "$(cat "$SAVED" 2>/dev/null)" = off ]; then      # your choice from the last session
       i=0

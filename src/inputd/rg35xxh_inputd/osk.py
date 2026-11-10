@@ -52,7 +52,7 @@ DARK = dict(bg="#141820", key="#2e3544", border="#3e4859", fg="#eef0f4",
             spec="#1f2a3d", spec_border="#2f4266", spec_fg="#a9c4f2",
             sel="#3d5a8a", sel_border="#8fb4ff", sel_fg="#ffffff",
             latch="#6a4d1f", latch_sel="#8a6a2f", latch_border="#ffd28f",
-            badge="#8fb4ff", hit="#0c1018", hit_border="#5b7bb0", hit_fg="#8fb4ff")
+            badge="#8fb4ff", hit="#0c1018", hit_border="#5b7bb0", hit_fg="#8fb4ff", bw=1)   # bw: border px
 # Character keys (letters, digits, symbols, Space) are brighter; special keys (Tab, Shift, Ctrl,
 # Alt, Backspace, arrows, Hide) are darker and bluer. A small corner badge names the shoulder
 # button that does the same thing (from the bindings; L2 = Shift while the keyboard is open).
@@ -62,7 +62,7 @@ DARK = dict(bg="#141820", key="#2e3544", border="#3e4859", fg="#eef0f4",
 CSS = """
 #rg-osk {{ background: {bg}; padding: 3px; }}
 #rg-osk button {{ min-height: 30px; padding: 0; margin: 1px; border-radius: 5px;
-                 background: {key}; border: 1px solid {border}; box-shadow: none; text-shadow: none; }}
+                 background: {key}; border: {bw}px solid {border}; box-shadow: none; text-shadow: none; }}
 #rg-osk button label {{ color: {fg}; text-shadow: none; font: 17px "Noto Sans"; }}
 #rg-osk button.word label {{ font: 600 12px "Noto Sans"; }}
 #rg-osk button.special {{ background: {spec}; border-color: {spec_border}; }}
@@ -98,10 +98,13 @@ def _palette():
         from handtop_theme import current
     except ImportError:
         return DARK
-    c = current.colors("osk")
-    if any(not c.get(k) for k in DARK):
+    env = current.read_env()
+    c = current.colors("osk", env)
+    if any(not c.get(k) for k in DARK if k != "bw"):
         return DARK
-    return {k: current.css(c[k]) for k in DARK}
+    pal = {k: current.css(c[k]) for k in DARK if k != "bw"}
+    pal["bw"] = int(env.get("BORDERS") or 1) if (env.get("BORDERS") or "1").isdigit() else 1
+    return pal
 
 
 class OnScreenKeyboard:
