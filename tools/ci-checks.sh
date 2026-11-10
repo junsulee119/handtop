@@ -55,6 +55,17 @@ done
 step "input daemon tests"
 (cd src/inputd && python3 -m pytest -q tests) || bad "pytest (input daemon)"
 python3 -m pytest -q tests || bad "pytest (tests/: External Controller services)"
+
+# ---- theme system: contract, import / export, renderer (src/theme). Image work needs GdkPixbuf:
+# test_gdk.py runs with the system Python where python3-gi + gir1.2-gdkpixbuf-2.0 are installed
+# (CI installs them), and is skipped otherwise.
+step "theme tests"
+python3 -m pytest -q -p no:cacheprovider src/theme/tests || bad "pytest (src/theme)"
+if /usr/bin/python3 -c 'import gi; gi.require_version("GdkPixbuf", "2.0"); import pytest' 2>/dev/null; then
+  /usr/bin/python3 -m pytest -q -p no:cacheprovider src/theme/tests/test_gdk.py || bad "pytest (src/theme, GdkPixbuf)"
+else
+  echo "GdkPixbuf or pytest missing for /usr/bin/python3: image tests skipped"
+fi
 direct="$(PYTHONDONTWRITEBYTECODE=1 python3 src/inputd/tests/test_core.py)" || bad "direct test run"
 echo "$direct" | tail -n1
 n_direct="$(echo "$direct" | tail -n1 | sed -n 's#^[0-9]*/\([0-9]*\) passed$#\1#p')"

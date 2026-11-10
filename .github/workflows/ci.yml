@@ -17,7 +17,7 @@ jobs:
       - name: Install tools
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y -qq dash shellcheck
+          sudo apt-get install -y -qq dash shellcheck python3-gi gir1.2-gdkpixbuf-2.0 python3-pytest
           python3 -m pip install -q pytest
       - name: Run checks
         run: bash tools/ci-checks.sh
