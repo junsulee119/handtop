@@ -256,7 +256,11 @@ def load(path, builtin_dir=BUILTIN_DIR, decode=False, _stack=()):
     if data is None:
         return t
     P += validate(data)
-    if t.errors:
+    if t.errors:                                  # list the image problems too, in one go
+        for slot, (w, h, _kind) in S.IMAGE_SLOTS.items():
+            f = os.path.join(path, S.slot_file(slot))
+            if os.path.lexists(f):
+                P.extend(check_image(f, S.slot_file(slot), (w, h), S.MAX_ICON_BYTES))
         return t
     t.id, t.name, t.base = data["id"], data["name"], data["base"]
     t.author, t.description = data.get("author", ""), data.get("description", "")

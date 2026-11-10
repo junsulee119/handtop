@@ -1,7 +1,8 @@
 #!/usr/bin/python3
 """Handtop's Theme app: picks a theme and applies it (docs/apps/theme.md).
 
-  rg35xxh-theme                 open the Theme app (pick with the D-pad / pointer, A to choose)
+  rg35xxh-theme                 open the Theme app: pick, apply, duplicate (new colours, icon set,
+                                pointer and text size), import, export, delete (handtop_theme/app.py)
   rg35xxh-theme ID              apply a theme (dark / light = handtop-dark / handtop-light)
   rg35xxh-theme --get           print the current theme's id
   rg35xxh-theme --list          installed themes: id, built-in or user, name
@@ -20,8 +21,10 @@ Only this program reads them. Applying one renders every component's own files i
   - app drawer, power menu, OSK, External Controller, Display: read the rendered files when
     they open; taskbar icons: Waybar's icon scripts are signalled;
   - GTK: colour scheme, GTK theme, the generated icon theme "Handtop-Current" (linked into
-    ~/.local/share/icons), cursor, font scale (gsettings + ~/.config/gtk-3.0/settings.ini; open
-    apps may need a restart; the desktop cursor changes at the next log-in).
+    ~/.local/share/icons), font scale (gsettings + ~/.config/gtk-3.0/settings.ini; open apps
+    may need a restart);
+  - the pointer (theme and size) changes at the next log-in, for labwc and GTK apps together
+    (--ensure gives GTK the pointer labwc started with).
 The choice (a theme id) is ~/.config/rg35xxh/theme; v0.3.x's "dark" / "light" are read as the
 built-in themes.
 """
@@ -166,8 +169,6 @@ def _gtk(t):
     own_icons = _gget("icon-theme") in OUR_ICON_THEMES
     if own_icons:
         _gsettings("icon-theme", render.ICON_THEME)
-    _gsettings("cursor-theme", t.cursor["theme"])
-    _gsettings("cursor-size", t.cursor["size"])
     _gsettings("text-scaling-factor", float(t.fonts["scale"]))
     cp = configparser.ConfigParser(interpolation=None)
     cp.optionxform = str
@@ -182,11 +183,39 @@ def _gtk(t):
     s["gtk-theme-name"] = t.gtk["theme"]
     if own_icons and s.get("gtk-icon-theme-name", "Adwaita") in OUR_ICON_THEMES:
         s["gtk-icon-theme-name"] = render.ICON_THEME
-    s["gtk-cursor-theme-name"] = t.cursor["theme"]
-    s["gtk-cursor-theme-size"] = str(t.cursor["size"])
     os.makedirs(os.path.dirname(GTK_INI), exist_ok=True)
     with open(GTK_INI, "w") as f:
         cp.write(f, space_around_delimiters=False)
+
+
+def _session_cursor():
+    """Give GTK apps the pointer labwc runs with. labwc reads XCURSOR_* only when it starts (the
+    session script sets them from the theme), so a new theme's pointer waits for the next log-in;
+    GTK would switch at once, and then the hand / text pointers over apps had another size than
+    the arrow (found 2026-11-10). Run at every log-in (--ensure), never by apply."""
+    env = render_env()
+    name = os.environ.get("XCURSOR_THEME") or env.get("CURSOR_THEME") or "Handtop"
+    size = os.environ.get("XCURSOR_SIZE") or env.get("CURSOR_SIZE") or "24"
+    _gsettings("cursor-theme", name)
+    _gsettings("cursor-size", size)
+    cp = configparser.ConfigParser(interpolation=None)
+    cp.optionxform = str
+    try:
+        cp.read(GTK_INI)
+    except configparser.Error:
+        pass
+    if not cp.has_section("Settings"):
+        cp.add_section("Settings")
+    cp["Settings"]["gtk-cursor-theme-name"] = name
+    cp["Settings"]["gtk-cursor-theme-size"] = size
+    os.makedirs(os.path.dirname(GTK_INI), exist_ok=True)
+    with open(GTK_INI, "w") as f:
+        cp.write(f, space_around_delimiters=False)
+
+
+def render_env():
+    from handtop_theme.current import read_env
+    return read_env()
 
 
 def _link(link, target, ours):
@@ -309,107 +338,19 @@ def ensure():
     except OSError:
         ok = False
     if ok and os.path.exists(os.path.join(STATE, "theme.env")):
+        _session_cursor()
         return
     t = prepare(tid)
     if t.id != tid or not os.path.exists(CHOICE) or open(CHOICE).read().strip() != t.id:
         _save_choice(t.id)                         # migrates "dark" / "light"
     _session(t)
+    _session_cursor()
 
 
 # ---- the app -----------------------------------------------------------------------------------------
 def gui():
-    import cairo
-    import gi
-    gi.require_version("Gdk", "3.0")
-    gi.require_version("Gtk", "3.0")
-    from gi.repository import Gdk, GLib, Gtk
-
-    themes = []
-    for tid, path, _builtin in package.list_themes():
-        t = T.load(path)
-        if not t.errors:
-            themes.append(t)
-
-    def preview(t):
-        """A strip of taskbar icons at 2x on the theme's taskbar colour (fits half of 640 px)."""
-        slots = ["taskbar/inputmode-desktop", "taskbar/inputmode-gamepad", "taskbar/inputmode-bt",
-                 "taskbar/battery-4"]
-        PW, PH, Z = 236, 64, 2
-        surf = cairo.ImageSurface(cairo.FORMAT_ARGB32, PW, PH)
-        cr = cairo.Context(surf)
-        bg = t.colors["taskbar.bg"]
-        cr.set_source_rgb(*(int(bg[i:i + 2], 16) / 255 for i in (1, 3, 5)))
-        cr.paint()
-        imgs = []
-        for s in slots:
-            how = t.images.get(s, ("system",))
-            if how[0] == "file":
-                try:
-                    imgs.append(cairo.ImageSurface.create_from_png(how[1]))
-                except (OSError, cairo.Error):
-                    pass
-        gap = 8
-        x = (PW - sum(Z * i.get_width() for i in imgs) - gap * (len(imgs) - 1)) // 2
-        for img in imgs:
-            cr.save()
-            cr.translate(x, (PH - Z * img.get_height()) // 2)
-            cr.scale(Z, Z)
-            cr.set_source_surface(img, 0, 0)
-            cr.get_source().set_filter(cairo.FILTER_NEAREST)
-            cr.paint()
-            cr.restore()
-            x += Z * img.get_width() + gap
-        return Gtk.Image.new_from_pixbuf(Gdk.pixbuf_get_from_surface(surf, 0, 0, PW, PH))
-
-    loop = GLib.MainLoop()
-    win = Gtk.Window(title="Theme")
-    win.set_default_size(640, 440)
-    win.connect("destroy", lambda *a: loop.quit())
-    box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12, margin=14)
-    win.add(box)
-    head = Gtk.Label(xalign=0)
-    head.set_markup("<span size='x-large' weight='bold'>Theme</span>")
-    box.pack_start(head, False, False, 0)
-    grid = Gtk.FlowBox(homogeneous=True, min_children_per_line=2, max_children_per_line=2,
-                       selection_mode=Gtk.SelectionMode.NONE, row_spacing=12, column_spacing=12)
-    scroll = Gtk.ScrolledWindow()
-    scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
-    scroll.add(grid)
-    box.pack_start(scroll, True, True, 0)
-    note = Gtk.Label(xalign=0, wrap=True, max_width_chars=60)
-    note.set_markup("<small>Changes the taskbar, app drawer, power menu, notifications, window title bars "
-                    "and apps (open apps may need a restart), and the on-screen keyboard. The terminal "
-                    "and the volume bars stay dark.</small>")
-    box.pack_start(note, False, False, 0)
-
-    buttons = {}
-
-    def refresh():
-        cur = current()
-        for tid, (b, lab, name) in buttons.items():
-            lab.set_markup(f"<span size='large' weight='bold'>{GLib.markup_escape_text(name)}</span>"
-                           + ("   <span foreground='#8bd99e'>✓ current</span>" if tid == cur else ""))
-
-    def choose(_b, tid):
-        apply(tid)
-        refresh()
-
-    for t in themes:
-        b = Gtk.Button()
-        v = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10, margin=10)
-        v.pack_start(preview(t), True, True, 0)
-        lab = Gtk.Label()
-        v.pack_start(lab, False, False, 0)
-        b.add(v)
-        b.connect("clicked", choose, t.id)
-        grid.add(b)
-        buttons[t.id] = (b, lab, t.name)
-    refresh()
-    win.connect("focus-in-event", lambda *a: refresh())
-    win.show_all()
-    if current() in buttons:
-        buttons[current()][0].grab_focus()
-    loop.run()
+    from handtop_theme import app
+    app.run(apply, current)
 
 
 def main(argv):

@@ -226,8 +226,12 @@ def duplicate(path, new_id, new_name, user_dir=USER_DIR, builtin_dir=BUILTIN_DIR
         f = os.path.join(tmp, S.THEME_FILE)
         with open(f, encoding="utf-8") as fh:
             data = json.load(fh)
+        orig = data.get("name", "")
         data["id"], data["name"] = new_id, new_name
         data.pop("author", None)
+        data["description"] = f"Based on {orig}."[:200] if orig else ""
+        if not data["description"]:
+            data.pop("description")
         with open(f, "w", encoding="utf-8") as fh:
             json.dump(data, fh, indent=2, ensure_ascii=False)
             fh.write("\n")

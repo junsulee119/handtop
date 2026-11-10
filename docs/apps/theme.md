@@ -4,7 +4,15 @@ The **Theme** app (`rg35xxh-theme`) picks a theme and applies it at once. Built 
 
 ## Usage
 
-**Apps → Theme**, or from a terminal:
+**Apps → Theme** (`handtop_theme/app.py`):
+
+- **Main screen:** the installed themes on the left (built-in first, then **Yours**), each with its background and accent colours; the selected theme's preview (drawn from its colours and images, or its own `preview.png`), name and description on the right. **Apply** switches to it; **Duplicate** makes an editable copy; **Delete** removes one of yours (deleting the current one switches to Handtop dark first). The icon buttons above the list are **Import** (a tray with an arrow coming in) and **Export** (a box with an arrow going out); their names show on hover. When a theme's pointer differs from the session's, the app says it changes at the next log-in and offers **Log out now**.
+- **Duplicate:** name, accent (the theme's own plus 7 presets), background (its own plus 7), icon set (dark / light, follows the background), pointer size (24 / 32 / 48), text size (100 / 125 %), with a live preview. A new accent or background re-derives the copy from its palette (every part follows; decision 2026-11-10), and a new background drops a wallpaper image (its colour is baked in). Everything else is copied; the copy says "Based on …".
+- **Import:** lists `.handtop-theme` files in your home folder, `~/Themes`, `~/Downloads` and drives opened in Files (`/media/<user>/<label>` and a `Themes` folder on them). A refused file shows every problem (theme.json and images together); nothing changes. A theme with the same id asks before replacing.
+- **Export:** to `~/Themes` or an opened drive, as `<id>.handtop-theme` with `GUIDE.md` inside; asks before replacing a file.
+- Escape (B) goes back from a sub-screen.
+
+From a terminal:
 
 | Command | Does |
 |---|---|
@@ -33,8 +41,8 @@ Applying renders the theme into **`~/.local/state/rg35xxh/theme/`** (replaced as
 | On-screen keyboard | `COLOR_OSK_*` in `theme.env` | each time it is shown |
 | External Controller (app and status screen) | `icons/`, `COLOR_STATUS_*` | when it opens |
 | Display app | `COLOR_DISPLAY_*` | when it opens |
-| Pointer | `CURSOR_*` in `theme.env`: the session script (`/etc/profile.d/zz-rg35xxh-session.sh`) exports `XCURSOR_THEME` / `XCURSOR_SIZE` before starting labwc (Handtop 24 until a theme is rendered) | at the next log-in (labwc reads them only at start) |
-| GTK apps | gsettings `color-scheme`, `gtk-theme`, `icon-theme` (only when it was Handtop's or Adwaita: a theme you chose yourself is left alone), `cursor-theme`, `cursor-size`, `text-scaling-factor`; the same in `~/.config/gtk-3.0/settings.ini` | open apps may need a restart; the desktop cursor changes at the next log-in |
+| Pointer | `CURSOR_*` in `theme.env`: the session script (`/etc/profile.d/zz-rg35xxh-session.sh`) exports `XCURSOR_THEME` / `XCURSOR_SIZE` before starting labwc (Handtop 24 until a theme is rendered); `--ensure` then gives GTK the same (gsettings `cursor-theme` / `cursor-size`, `settings.ini`) | at the next log-in, labwc and GTK apps together (labwc reads XCURSOR only at start; GTK switching at once made the hand / text pointers over apps a different size from the arrow until then) |
+| GTK apps | gsettings `color-scheme`, `gtk-theme`, `icon-theme` (only when it was Handtop's or Adwaita: a theme you chose yourself is left alone), `text-scaling-factor`; the same in `~/.config/gtk-3.0/settings.ini` | open apps may need a restart; the desktop cursor changes at the next log-in |
 
 `theme.env` holds everything as `KEY='value'` lines (`THEME_ID`, `THEME_BASE`, `ICONS`, `WALLPAPER*`, every palette colour as `PALETTE_*`, every part colour as `COLOR_<PART>_<KEY>`); read it as data, never source it. Python apps use `handtop_theme.current` (`/usr/local/lib/rg35xxh-theme`).
 
@@ -64,6 +72,8 @@ The next Theme app reads themes as `.handtop-theme` files (a zip: `theme.json` +
 | `pngcheck.py` | PNG check without a decoder (chunk CRCs, IHDR, image data inflated with a hard limit), then a full decode with GdkPixbuf |
 | `imgops.py` | GdkPixbuf: smooth downscale (HYPER) for small app icons, the sideways shift for shake frames. No Pillow on the device |
 | `package.py` | Import (only the contract's paths are unpacked; no `..`, absolute paths, links or encrypted entries; sizes checked on the bytes read; the theme is checked in a temporary folder and only then moved into place), export (adds `GUIDE.md`), duplicate, list, delete |
+| `customize.py` | The Duplicate screen's choices (accent / background presets, icon set, pointer, text size; re-deriving from the palette), live preview data, theme ids from names, where theme files are looked for |
+| `preview.py`, `app.py` | The preview picture (cairo) and the Theme app's window (GTK); not used by tests without a display |
 | `current.py` | For apps: the rendered `theme.env`, colours per part, the icon folder (no other imports) |
 | `render.py` | Writes `theme.env`, Waybar / mako / labwc / wlogout / nwg-drawer / foot configs, the flat `icons/` folder and the `Handtop-Current` GTK icon theme into one folder, swapped in whole |
 | `guide.py` | `GUIDE.md`, generated from the schema |

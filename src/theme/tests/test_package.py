@@ -236,3 +236,11 @@ def test_list_find_delete(tmp_path, builtins):
         package.delete("handtop-dark", str(user))
     package.delete("zeta", str(user))
     assert not (user / "zeta").exists()
+
+
+def test_refusal_lists_json_and_image_problems(tmp_path, builtins):
+    e = {"theme.json": json.dumps(minimal(colors={"osk.bg": "green"})).encode(),
+         "icons/taskbar/battery-3.png": png(22, 11)}
+    with pytest.raises(ThemeError) as err:
+        do_import(tmp_path, builtins, e)
+    assert {p.where for p in err.value.problems} == {"colors.osk.bg", "icons/taskbar/battery-3.png"}
