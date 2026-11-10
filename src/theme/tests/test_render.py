@@ -88,3 +88,24 @@ def test_current_helpers(tmp_path, builtins, ops):
         render.render(theme.load(os.path.join(builtins, "handtop-dark"), builtins), str(tmp_path / "d"), ops),
         "theme.env")))
     assert dark["label"] is None                     # a null colour comes back as None
+
+
+def test_app_names(tmp_path, builtins, ops):
+    local, pkg = tmp_path / "local", tmp_path / "pkg"
+    local.mkdir()
+    pkg.mkdir()
+    (pkg / "thunar.desktop").write_text("[Desktop Entry]\nName=Thunar File Manager\nName[de]=Dateimanager\n"
+                                        "Exec=thunar\n\n[Desktop Action home]\nName=Home\nExec=thunar ~\n")
+    (local / "thunar.desktop").write_text("[Desktop Entry]\nName=File Manager\nName[de]=Dateimanager\nExec=thunar\n"
+                                          "\n[Desktop Action home]\nName=Home\nExec=thunar ~\n")
+    (pkg / "foot.desktop").write_text("[Desktop Entry]\nName=Foot\nExec=foot\n")
+    d = write_theme(str(tmp_path / "t"), minimal(names={"thunar": "Files", "foot": "system", "htop": "Top"}))
+    t = theme.load(d, builtins)
+    out = render.render(t, str(tmp_path / "state" / "theme"), ops, (str(local), str(pkg)))
+    apps = sorted(os.listdir(os.path.join(out, "applications")))
+    assert apps == ["foot.desktop", "thunar.desktop"]                  # htop: not installed here
+    th = open(os.path.join(out, "applications", "thunar.desktop")).read()
+    assert "Name=Files\n" in th and "Name[de]" not in th and "Name=Home" in th
+    assert th.index(render.NAME_MARK) < th.index("[Desktop Action home]")
+    assert "Name=Foot\n" in open(os.path.join(out, "applications", "foot.desktop")).read()
+    assert render.app_names(theme.load(os.path.join(builtins, "handtop-dark"), builtins)) == {}

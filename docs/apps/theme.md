@@ -53,7 +53,11 @@ The packages' own icons are what a theme gets for `"system"`: since v0.4.0 Handt
 
 Your own `~/.config/waybar/style.css` or `~/.config/mako/config` still wins over every theme.
 
-Not themed yet: the terminal (foot; one dark terminal) and the volume / brightness bar (`rg35xxh-osd`): step 6 of v0.4.0.
+**Terminal:** `~/.config/foot/foot.ini` links to the rendered `foot.ini` (a file of your own there wins); new terminal windows use the theme's colours, open ones keep theirs. Handtop dark and light keep the one dark terminal (decision 2026-10-25); other themes set or derive their own (the 16 ANSI colours keep their meaning: blue stays blue whatever the accent).
+
+**Volume / brightness bar:** `rg35xxh-osd` (C) reads `COLOR_OSD_*` from `theme.env` when the bar shows and the file has changed since (one `stat` per pop-up); Handtop's own colours until a theme is rendered.
+
+**App names:** a theme's `names` (default apps only) are rendered as `.desktop` copies with only the `[Desktop Entry]` `Name=` changed (its translations dropped, so the new name shows in every language) and the marker `X-Handtop-Theme-Name=true`; applying copies them into `~/.local/share/applications` after removing the previous theme's marked copies. A file of your own with the same name is left alone. `"system"` is the package's own name. The built-in themes rename nothing (Handtop's own names, "Terminal", "File Manager", ..., are the system-wide baseline in `/usr/local/share/applications`).
 
 ## History
 

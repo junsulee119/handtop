@@ -18,6 +18,9 @@ Only this program reads them. Applying one renders every component's own files i
     restart loop is only stopped);
   - window title bars: the user labwc theme "Handtop" links to the rendered themerc;
     labwc --reconfigure;
+  - default-app names: the rendered .desktop copies go into ~/.local/share/applications;
+  - terminal: ~/.config/foot/foot.ini links to the rendered foot.ini (new windows);
+  - volume / brightness bar: rg35xxh-osd re-reads the theme's colours when theme.env changes;
   - app drawer, power menu, OSK, External Controller, Display: read the rendered files when
     they open; taskbar icons: Waybar's icon scripts are signalled;
   - GTK: colour scheme, GTK theme, the generated icon theme "Handtop-Current" (linked into
@@ -30,6 +33,7 @@ built-in themes.
 """
 import configparser
 import os
+import shutil
 import signal
 import subprocess
 import sys
@@ -255,6 +259,33 @@ def _old_desktop_copies():
             pass
 
 
+def _app_names():
+    """The theme's names for default apps: its rendered .desktop copies go into
+    ~/.local/share/applications (they win over the system's); the previous theme's copies, marked,
+    are removed first. A file of your own with the same name is left alone."""
+    d = os.path.join(DATA, "applications")
+    try:
+        for n in os.listdir(d):
+            p = os.path.join(d, n)
+            try:
+                with open(p) as f:
+                    if render.NAME_MARK in f.read():
+                        os.remove(p)
+            except OSError:
+                pass
+    except OSError:
+        pass
+    src = os.path.join(STATE, "applications")
+    try:
+        names = os.listdir(src)
+    except OSError:
+        return
+    os.makedirs(d, exist_ok=True)
+    for n in names:
+        if not os.path.exists(os.path.join(d, n)):
+            shutil.copyfile(os.path.join(src, n), os.path.join(d, n))
+
+
 def _pids(name):
     out = []
     for d in os.listdir("/proc"):
@@ -312,6 +343,10 @@ def _session(t):
     _gtk(t)
     _link(ICON_LINK, os.path.join(STATE, "icon-theme"), ())
     _old_desktop_copies()
+    _app_names()
+    # the terminal: foot reads ~/.config/foot/foot.ini first (a file of your own there wins);
+    # running terminals keep their colours, new ones follow
+    _link(os.path.join(CONFIG, "foot", "foot.ini"), os.path.join(STATE, "foot.ini"), ())
     _link(LABWC_USER_THEME, LABWC_RENDERED, (OLD_LABWC_LIGHT,))
     # labwc re-reads the theme file only on reconfigure (also when only its content changed)
     subprocess.run(["labwc", "--reconfigure"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)

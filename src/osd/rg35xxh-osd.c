@@ -3,6 +3,8 @@
  *
  * A vertical bar at the left edge of the screen, vertically centred: the level as a number on
  * top (pixel font) and a bar filling from the bottom. Blue for volume, amber for brightness.
+ * Colours: the current theme's (COLOR_OSD_* in the theme.env rg35xxh-theme renders into
+ * ~/.local/state/rg35xxh/theme/), re-read whenever that file changes; Handtop's own until then.
  *
  * Input: the input daemon writes a level (0-100) and a newline to
  * $XDG_RUNTIME_DIR/wob-volume.sock or wob-brightness.sock (FIFOs; the names are kept from wob,
@@ -39,7 +41,7 @@
 #define TEXT_GAP 4          /* between the number and the bar */
 #define TIMEOUT_MS 1200
 
-#define BG 0xE61a1e26u      /* ARGB, not premultiplied */
+#define BG 0xE61a1e26u      /* ARGB, not premultiplied: Handtop's colours, used until a theme is rendered */
 static const struct { const char *name; uint32_t border, level; } KINDS[] = {
     {"volume",     0xFF3D5A8Au, 0xFF8FB4FFu},
     {"brightness", 0xFF8A6A2Fu, 0xFFFFD28Fu},
@@ -65,6 +67,88 @@ static int configured;
 static struct buffer buffers[2];
 static int kind, level;
 
+/* ---- theme colours ------------------------------------------------------------------------ */
+static uint32_t bg = BG, text = TEXT, border_col[NKINDS], level_col[NKINDS];
+static char theme_env[512];
+static struct timespec theme_mtime;
+static int theme_loaded;
+
+/* "#rrggbb" or "#rrggbbaa" -> ARGB. Returns 0 on success. */
+static int parse_colour(const char *s, uint32_t *out)
+{
+    size_t n = strlen(s);
+    if (s[0] != '#' || (n != 7 && n != 9))
+        return -1;
+    for (size_t i = 1; i < n; i++)
+        if (!strchr("0123456789abcdefABCDEF", s[i]))
+            return -1;
+    unsigned long v = strtoul(s + 1, NULL, 16);
+    *out = n == 7 ? 0xFF000000u | (uint32_t)v : (uint32_t)((v & 0xFF) << 24 | v >> 8);
+    return 0;
+}
+
+/* Read the theme's bar colours when theme.env is new or changed (a stat per pop-up). */
+static void load_theme(void)
+{
+    struct stat st;
+    if (stat(theme_env, &st) != 0) {
+        if (theme_loaded) {                        /* gone: back to Handtop's own */
+            bg = BG, text = TEXT, theme_loaded = 0;
+            for (int k = 0; k < NKINDS; k++)
+                border_col[k] = KINDS[k].border, level_col[k] = KINDS[k].level;
+        }
+        return;
+    }
+    if (theme_loaded && st.st_mtim.tv_sec == theme_mtime.tv_sec && st.st_mtim.tv_nsec == theme_mtime.tv_nsec)
+        return;
+    theme_mtime = st.st_mtim;
+    theme_loaded = 1;
+    bg = BG, text = TEXT;
+    for (int k = 0; k < NKINDS; k++)
+        border_col[k] = KINDS[k].border, level_col[k] = KINDS[k].level;
+    FILE *f = fopen(theme_env, "r");
+    if (!f)
+        return;
+    char line[256];
+    while (fgets(line, sizeof line, f)) {
+        char key[64], val[16];
+        if (sscanf(line, "COLOR_OSD_%63[A-Z_]='%15[#0-9a-fA-F]'", key, val) != 2)
+            continue;
+        uint32_t c;
+        if (parse_colour(val, &c))
+            continue;
+        if (!strcmp(key, "BG"))
+            bg = c;
+        else if (!strcmp(key, "TEXT"))
+            text = c;
+        for (int k = 0; k < NKINDS; k++) {
+            char want[48];
+            snprintf(want, sizeof want, "%s_BORDER", KINDS[k].name);
+            for (char *p = want; *p; p++)
+                *p = *p >= 'a' && *p <= 'z' ? *p - 32 : *p;
+            if (!strcmp(key, want))
+                border_col[k] = c;
+            snprintf(want, sizeof want, "%s_LEVEL", KINDS[k].name);
+            for (char *p = want; *p; p++)
+                *p = *p >= 'a' && *p <= 'z' ? *p - 32 : *p;
+            if (!strcmp(key, want))
+                level_col[k] = c;
+        }
+    }
+    fclose(f);
+}
+
+static void theme_init(void)
+{
+    const char *state = getenv("XDG_STATE_HOME"), *home = getenv("HOME");
+    if (state && *state)
+        snprintf(theme_env, sizeof theme_env, "%s/rg35xxh/theme/theme.env", state);
+    else
+        snprintf(theme_env, sizeof theme_env, "%s/.local/state/rg35xxh/theme/theme.env", home ? home : "");
+    for (int k = 0; k < NKINDS; k++)
+        border_col[k] = KINDS[k].border, level_col[k] = KINDS[k].level;
+}
+
 static uint32_t premul(uint32_t c)
 {
     uint32_t a = c >> 24;
@@ -82,8 +166,8 @@ static void fill(uint32_t *px, int x, int y, int w, int h, uint32_t c)
 
 static void draw(uint32_t *px)
 {
-    uint32_t border = KINDS[kind].border, lv = KINDS[kind].level;
-    fill(px, 0, 0, W, H, premul(BG));
+    uint32_t border = premul(border_col[kind]), lv = premul(level_col[kind]);
+    fill(px, 0, 0, W, H, premul(bg));
     fill(px, OFFSET, OFFSET, W - 2 * OFFSET, BORDER, border);                    /* border */
     fill(px, OFFSET, H - OFFSET - BORDER, W - 2 * OFFSET, BORDER, border);
     fill(px, OFFSET, OFFSET, BORDER, H - 2 * OFFSET, border);
@@ -99,7 +183,7 @@ static void draw(uint32_t *px)
             for (int c = 0; c < 3; c++)
                 if (FONT[num[d] - '0'][r * 3 + c] == '1')
                     fill(px, tx + d * (dw + gap) + c * DIGIT_SCALE, ty + r * DIGIT_SCALE,
-                         DIGIT_SCALE, DIGIT_SCALE, TEXT);
+                         DIGIT_SCALE, DIGIT_SCALE, premul(text));
 
     int top = ty + 5 * DIGIT_SCALE + TEXT_GAP;                                  /* the bar */
     fill(px, OFFSET + BORDER, top - TEXT_GAP / 2, W - 2 * (OFFSET + BORDER), 1, border);   /* divider */
@@ -170,6 +254,7 @@ static const struct zwlr_layer_surface_v1_listener ls_listener = { ls_configure,
 
 static void show(void)
 {
+    load_theme();
     if (surface) {
         redraw();
         return;
@@ -220,6 +305,7 @@ static int open_fifo(const char *kind_name)
 
 int main(void)
 {
+    theme_init();
     display = wl_display_connect(NULL);
     if (!display) {
         fprintf(stderr, "rg35xxh-osd: no Wayland display\n");
