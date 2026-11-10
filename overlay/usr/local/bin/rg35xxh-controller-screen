@@ -67,23 +67,13 @@ PART, PART_EDGE = (0.09, 0.10, 0.12), (0.34, 0.36, 0.42)      # black buttons, l
 LABEL_COL = {"X": (0.36, 0.52, 1.0), "Y": (0.35, 0.82, 0.42), "A": (0.95, 0.30, 0.30), "B": (0.98, 0.85, 0.25)}
 LIT, LIT_EDGE = (0.62, 0.76, 1.0), (0.85, 0.91, 1.0)
 
-# Handheld palettes, one per Handtop theme. "dark" = solid, like the real black handheld.
-# "light" = hologram: translucent blue body, deep-blue outlines and contours, transparent controls
-# that fill in when pressed (reads on the light background). Colours may carry alpha (4th value).
-PALETTES = {
-    "dark": {"BODY": BODY, "BODY_EDGE": BODY_EDGE, "BODY_SHADE": BODY_SHADE, "PART": PART,
-             "PART_EDGE": PART_EDGE, "LIT": LIT, "LIT_EDGE": LIT_EDGE, "BEZEL": (0.05, 0.05, 0.06),
-             "BEZEL_EDGE": (0.24, 0.26, 0.30), "SCREEN": (0.03, 0.04, 0.05), "LED": (0.30, 0.85, 0.40),
-             "CAP": (0.12, 0.13, 0.15), "FACE": LABEL_COL, "LABEL": None, "LABEL_LIT": (0.071, 0.082, 0.110)},
-    "light": {"BODY": (0.24, 0.41, 0.69, 0.10), "BODY_EDGE": (0.18, 0.33, 0.60, 0.95),
-              "BODY_SHADE": (0.24, 0.41, 0.69, 0.05), "PART": (0.24, 0.41, 0.69, 0.08),
-              "PART_EDGE": (0.18, 0.33, 0.60, 0.85), "LIT": (0.24, 0.41, 0.69, 0.75),
-              "LIT_EDGE": (0.10, 0.20, 0.42, 1.0), "BEZEL": (0.24, 0.41, 0.69, 0.0),
-              "BEZEL_EDGE": (0.18, 0.33, 0.60, 0.45), "SCREEN": (0.03, 0.05, 0.09, 0.85),
-              "LED": (0.18, 0.33, 0.60, 0.95), "CAP": (0.24, 0.41, 0.69, 0.08),
-              "FACE": {k: (0.24, 0.41, 0.69, 0.75) for k in "XYAB"},
-              "LABEL": (0.18, 0.33, 0.60), "LABEL_LIT": (0.94, 0.96, 1.0)},
-}
+# Handtop dark's handheld ("solid", like the real black handheld): used until a theme has been
+# rendered. The current theme's colours (status.* in its theme.env) replace it at start; Handtop
+# light draws a "hologram" (translucent blue body, deep-blue outlines). Colours may carry alpha.
+DARK = {"BODY": BODY, "BODY_EDGE": BODY_EDGE, "BODY_SHADE": BODY_SHADE, "PART": PART,
+        "PART_EDGE": PART_EDGE, "LIT": LIT, "LIT_EDGE": LIT_EDGE, "BEZEL": (0.05, 0.05, 0.06),
+        "BEZEL_EDGE": (0.24, 0.26, 0.30), "SCREEN": (0.03, 0.04, 0.05), "LED": (0.30, 0.85, 0.40),
+        "CAP": (0.12, 0.13, 0.15), "FACE": LABEL_COL, "LABEL": None, "LABEL_LIT": (0.071, 0.082, 0.110)}
 
 
 def src(cr, c):
@@ -97,21 +87,32 @@ TEXT, DIM, OK, WARN = (0.91, 0.92, 0.93), (0.58, 0.62, 0.69), (0.55, 0.85, 0.62)
 SCREEN_TEXT, SCREEN_DIM, SCREEN_OK, SCREEN_WARN = TEXT, DIM, OK, WARN
 
 
-def _theme():
-    path = os.path.join(os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config"),
-                        "rg35xxh", "theme")
+def _current_theme():
+    """The current theme's colours and icon folder (rg35xxh-theme renders them), read once at
+    start. Returns (palette, page colours, screen colours, icon folder) or None if not rendered."""
+    sys.path.insert(0, "/usr/local/lib/rg35xxh-theme")
     try:
-        with open(path) as f:
-            return "light" if f.read().strip() == "light" else "dark"
-    except OSError:
-        return "dark"
+        from handtop_theme import current
+    except ImportError:
+        return None
+    c = current.colors("status")
+    try:
+        r = current.rgba
+        pal = {k.upper(): r(c[k]) for k in ("body", "body_edge", "body_shade", "part", "part_edge", "lit",
+                                            "lit_edge", "bezel", "bezel_edge", "screen", "led", "cap",
+                                            "label", "label_lit")}
+        pal["FACE"] = {b: r(c[f"face_{b.lower()}"]) for b in "XYAB"}
+        page = tuple(r(c[k]) for k in ("bg", "text", "dim", "ok", "warn"))
+        screen = tuple(r(c[f"screen_{k}"]) for k in ("text", "dim", "ok", "warn"))
+    except (KeyError, ValueError):
+        return None
+    return pal, page, screen, current.icons_dir()
 
 
-LIGHT = _theme() == "light"      # Handtop theme (rg35xxh-theme); read once at start
-if LIGHT:                        # light background, dark ink (the drawn handheld stays as it is)
-    BG = (0.875, 0.894, 0.925)                                   # #dfe4ec, the light wallpaper
-    TEXT, DIM, OK, WARN = (0.17, 0.19, 0.23), (0.40, 0.44, 0.51), (0.15, 0.52, 0.27), (0.72, 0.43, 0.05)
-SUFFIX = "-light" if LIGHT else ""   # light-theme icon files (inputmode-*-light.png, battery-*-light.png)
+PAL = DARK
+_cur = _current_theme()
+if _cur:
+    PAL, (BG, TEXT, DIM, OK, WARN), (SCREEN_TEXT, SCREEN_DIM, SCREEN_OK, SCREEN_WARN), ICONS = _cur
 ACCENT = {"bt": (0.37, 0.50, 0.74), "usb": (0.75, 0.54, 0.36), "switch": (0.80, 0.33, 0.33),
           "switch-bt": (0.80, 0.33, 0.33)}
 
@@ -164,7 +165,7 @@ def handheld_monitor():
 class Screen(Gtk.Window):
     def __init__(self):
         super().__init__()
-        self.pal = PALETTES["light" if LIGHT else "dark"]
+        self.pal = PAL
         GtkLayerShell.init_for_window(self)
         GtkLayerShell.set_layer(self, GtkLayerShell.Layer.OVERLAY)
         GtkLayerShell.set_namespace(self, "rg35xxh-controller-screen")
@@ -328,7 +329,7 @@ class Screen(Gtk.Window):
 
     # ------------------------------------------------------------ drawing
     def on_draw(self, widget, cr):
-        cr.set_source_rgb(*BG)
+        src(cr, BG)
         cr.paint()
         art = cairo.ImageSurface(cairo.FORMAT_ARGB32, PW, PH)
         self.draw_handheld(cairo.Context(art))
@@ -548,7 +549,7 @@ class Screen(Gtk.Window):
             seq = self.battery_frames(bars)
             bars = seq[self.bat_tick % len(seq)]
         name = ("battery" + ("-charging" if charging else "") + ("-low" if cap <= 20 else "")
-                + f"-{bars}{SUFFIX}.png")
+                + f"-{bars}.png")
         if name not in self.bat_icons:
             try:
                 self.bat_icons[name] = cairo.ImageSurface.create_from_png(f"{ICONS}/{name}")
@@ -574,12 +575,12 @@ class Screen(Gtk.Window):
         elif align == "right":
             x -= ext.x_advance
         cr.move_to(x, y)
-        cr.set_source_rgb(*color)
+        src(cr, color)
         cr.show_text(s)
 
     def draw_header(self, cr):
         transport = self.st.get("transport", "bt")
-        path = f"{ICONS}/inputmode-{'bt' if transport in ('bt', 'switch-bt') else 'wired'}{SUFFIX}.png"
+        path = f"{ICONS}/inputmode-{'bt' if transport in ('bt', 'switch-bt') else 'wired'}.png"
         if (self.icon is None or self.icon_path != path) and os.path.exists(path):
             self.icon = cairo.ImageSurface.create_from_png(path)
             self.icon_path = path

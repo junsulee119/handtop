@@ -1,3 +1,5 @@
+/* Taskbar in Handtop dark, used until the current theme has been rendered (rg35xxh-theme writes
+   ~/.local/state/rg35xxh/theme/waybar.css; rg35xxh-themed passes it to Waybar). */
 * { font-family: "Noto Sans", "Noto Sans Symbols 2"; font-size: 12px; min-height: 0; border: none; border-radius: 0; }
 window#waybar { background: #1a1e26; color: #e8eaee; border-top: 1px solid #333a48; }
 #custom-apps { background: #3d5a8a url("/usr/local/share/rg35xxh/icons/panel-apps.png") no-repeat 9px 50%;

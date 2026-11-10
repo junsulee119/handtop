@@ -1,0 +1,14 @@
+font=Noto Sans 10
+width=300
+height=120
+margin=8
+padding=8
+border-size=1
+border-radius=6
+background-color=#1a1e26e6
+text-color=#e8eaee
+border-color=#3d5a8a
+default-timeout=5000
+anchor=top-right
+# Above everything, including the power menu (wlogout) and fullscreen apps.
+layer=overlay

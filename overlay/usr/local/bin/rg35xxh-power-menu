@@ -4,8 +4,8 @@
 # The layout is written at each opening so the Battery saver button shows its state
 # ("Battery saver: On" / "Off"); /etc/wlogout/layout keeps the four fixed buttons.
 pgrep -x wlogout >/dev/null && exec pkill -x wlogout
-S=/etc/wlogout/style.css     # light theme: style-light.css (rg35xxh-theme)
-[ "$(cat "${XDG_CONFIG_HOME:-$HOME/.config}/rg35xxh/theme" 2>/dev/null)" = light ] && S=/etc/wlogout/style-light.css
+S="${XDG_STATE_HOME:-$HOME/.local/state}/rg35xxh/theme/wlogout.css"   # current theme (rg35xxh-theme)
+[ -r "$S" ] || S=/etc/wlogout/style.css                                # not rendered yet: Handtop dark
 st=Off
 [ "$(rg35xxh-battery-saver --get)" = on ] && st=On
 LAY="${XDG_RUNTIME_DIR:-/tmp}/rg35xxh-power-menu.layout"

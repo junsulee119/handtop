@@ -1,0 +1,6 @@
+# Handtop window decorations, dark (default). Light: ../../Handtop-Light; rg35xxh-theme light
+# links it over this one as ~/.local/share/themes/Handtop/labwc/themerc. Unset keys: labwc defaults.
+window.active.title.bg.color: #2b3a55
+window.inactive.title.bg.color: #2a2e36
+window.active.label.text.color: #ffffff
+window.inactive.label.text.color: #b8bcc4

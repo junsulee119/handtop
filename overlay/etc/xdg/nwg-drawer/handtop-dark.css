@@ -1,4 +1,5 @@
-/* App drawer, dark theme (nwg-drawer default). rg35xxh-drawer copies it to ~/.config/nwg-drawer. */
+/* App drawer in Handtop dark, used until the current theme has been rendered (rg35xxh-theme writes
+   ~/.local/state/rg35xxh/theme/nwg-drawer.css; rg35xxh-drawer copies one into ~/.config/nwg-drawer). */
 window {
     background-color: rgba(36, 47, 79, 0.95);
     color: #eeeeee

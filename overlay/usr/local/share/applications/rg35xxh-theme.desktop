@@ -3,6 +3,6 @@ Type=Application
 Name=Theme
 Comment=Choose the dark or light theme
 Exec=rg35xxh-theme
-Icon=/usr/local/share/rg35xxh/icons/app-theme.png
+Icon=rg35xxh-theme
 Terminal=false
 Categories=Settings;

@@ -9,7 +9,8 @@ apt-get install -y -qq --no-install-recommends \
   qemu-system-arm rsync xz-utils cpio lz4 zstd gzip file curl ca-certificates \
   debian-archive-keyring u-boot-tools \
   gcc-aarch64-linux-gnu pkg-config git libwayland-bin make \
-  bc bison flex libelf-dev libssl-dev kmod   # kernel module build (06b-cedrus.sh)
+  bc bison flex libelf-dev libssl-dev kmod \
+  python3 python3-pytest   # kernel module build (06b-cedrus.sh); theme tests (07d-theme.sh)
 
 # Register ARM64 emulation (needed to run package scripts inside the arm64 rootfs).
 mountpoint -q /proc/sys/fs/binfmt_misc || mount -t binfmt_misc binfmt_misc /proc/sys/fs/binfmt_misc

@@ -10,6 +10,7 @@ keyboard fills it as a full-screen keyboard panel; hiding it turns the screen of
 """
 import os
 import subprocess
+import sys
 
 import gi
 
@@ -44,20 +45,14 @@ ROWS = [
 assert all(sum(k[3] for k in row) == 60 for row in ROWS)
 MODIFIERS = {"SHIFT": "KEY_LEFTSHIFT", "CTRL": "KEY_LEFTCTRL", "ALT": "KEY_LEFTALT"}
 
-# Colours per Handtop theme (rg35xxh-theme writes ~/.config/rg35xxh/theme); the keyboard re-reads
-# the choice each time it is shown, so a theme switch needs no daemon restart.
-PALETTES = {
-    "dark":  dict(bg="#141820", key="#2e3544", border="#3e4859", fg="#eef0f4",
-                  spec="#1f2a3d", spec_border="#2f4266", spec_fg="#a9c4f2",
-                  sel="#3d5a8a", sel_border="#8fb4ff", sel_fg="#ffffff",
-                  latch="#6a4d1f", latch_sel="#8a6a2f", latch_border="#ffd28f",
-                  badge="#8fb4ff", hit="#0c1018", hit_border="#5b7bb0", hit_fg="#8fb4ff"),
-    "light": dict(bg="#d5dbe5", key="#ffffff", border="#b9c1ce", fg="#22262e",
-                  spec="#dbe4f3", spec_border="#a3b4d2", spec_fg="#2c4a7c",
-                  sel="#c9dbff", sel_border="#3d68b0", sel_fg="#1a2a4a",
-                  latch="#ffe2a8", latch_sel="#ffd28f", latch_border="#8a6a2f",
-                  badge="#3d68b0", hit="#9fadc4", hit_border="#3d68b0", hit_fg="#14233f"),
-}
+# Colours: the current theme's (osk.* in the theme.env that rg35xxh-theme renders), re-read each
+# time the keyboard is shown, so a theme switch needs no daemon restart. Handtop dark's until a
+# theme has been rendered:
+DARK = dict(bg="#141820", key="#2e3544", border="#3e4859", fg="#eef0f4",
+            spec="#1f2a3d", spec_border="#2f4266", spec_fg="#a9c4f2",
+            sel="#3d5a8a", sel_border="#8fb4ff", sel_fg="#ffffff",
+            latch="#6a4d1f", latch_sel="#8a6a2f", latch_border="#ffd28f",
+            badge="#8fb4ff", hit="#0c1018", hit_border="#5b7bb0", hit_fg="#8fb4ff")
 # Character keys (letters, digits, symbols, Space) are brighter; special keys (Tab, Shift, Ctrl,
 # Alt, Backspace, arrows, Hide) are darker and bluer. A small corner badge names the shoulder
 # button that does the same thing (from the bindings; L2 = Shift while the keyboard is open).
@@ -92,14 +87,21 @@ SPECIAL = {"KEY_ESC", "KEY_ENTER", "KEY_TAB", "KEY_BACKSPACE", "KEY_UP", "KEY_DO
 SHOULDERS = ("l1", "l2", "r1", "r2")
 
 
-def _theme():
-    path = os.path.join(os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config"),
-                        "rg35xxh", "theme")
+THEME_LIB = "/usr/local/lib/rg35xxh-theme"
+
+
+def _palette():
+    """The current theme's keyboard colours as CSS values (DARK when not rendered yet)."""
+    if THEME_LIB not in sys.path:
+        sys.path.insert(0, THEME_LIB)
     try:
-        with open(path) as f:
-            return "light" if f.read().strip() == "light" else "dark"
-    except OSError:
-        return "dark"
+        from handtop_theme import current
+    except ImportError:
+        return DARK
+    c = current.colors("osk")
+    if any(not c.get(k) for k in DARK):
+        return DARK
+    return {k: current.css(c[k]) for k in DARK}
 
 
 class OnScreenKeyboard:
@@ -173,10 +175,10 @@ class OnScreenKeyboard:
         self._highlight()
 
     def _apply_theme(self):
-        theme = _theme()
-        if theme != self.theme:
-            self.theme = theme
-            self.css.load_from_data(CSS.format(**PALETTES[theme]).encode())
+        pal = _palette()
+        if pal != self.theme:
+            self.theme = pal
+            self.css.load_from_data(CSS.format(**pal).encode())
 
     # ------------------------------------------------------------- visibility
     @property

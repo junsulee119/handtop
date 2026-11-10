@@ -155,16 +155,17 @@ def choose():
     gi.require_version("Gtk", "3.0")
     from gi.repository import Gdk, Gtk
 
-    try:            # Handtop theme: light icons on the light theme
-        with open(os.path.join(os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config"),
-                               "rg35xxh", "theme")) as f:
-            suffix = "-light" if f.read().strip() == "light" else ""
-    except OSError:
-        suffix = ""
+    icons = ICONS                     # the current theme's icons (rg35xxh-theme renders them)
+    sys.path.insert(0, "/usr/local/lib/rg35xxh-theme")
+    try:
+        from handtop_theme import current
+        icons = current.icons_dir()
+    except ImportError:
+        pass
 
     def icon(name, z=3):
         try:
-            img = cairo.ImageSurface.create_from_png(f"{ICONS}/{name}{suffix}.png")
+            img = cairo.ImageSurface.create_from_png(f"{icons}/{name}.png")
         except (OSError, cairo.Error):
             return Gtk.Label()
         surf = cairo.ImageSurface(cairo.FORMAT_ARGB32, img.get_width() * z, img.get_height() * z)

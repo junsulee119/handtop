@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Theme: dark and light are now theme files.** Groundwork for shareable themes in v0.4.0: the Theme app renders the chosen theme's colours and icons into `~/.local/state/rg35xxh/theme/`, and the taskbar, notifications, wallpaper, window title bars, app drawer, power menu, on-screen keyboard, External Controller and Display read them from there. Your dark / light choice is kept, and the look is the same apart from two small changes: window title bars now show the app's icon, and in the dark theme the title-bar buttons (minimise, maximise, close) are light instead of black.
+
 ## v0.3.9
 
 - ⚠️ **Known issue (fix included, not yet confirmed):** Bluetooth was sometimes missing on the first boot after flashing. This release should fix it (next entry). If it still happens, restart once (Power → Restart) and please attach the newest `logs/bt-NNNN.txt` from the boot partition to an issue.

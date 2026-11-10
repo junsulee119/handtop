@@ -67,9 +67,9 @@ Switching is done by `rg35xxh-display osk on|off` (see `desktop.md` → External
 | Shoulder badges | 8 px semi-bold, top-right | 12 px |
 | Corners / gaps | 5 px / 1 px | 8 px / 2 px |
 
-Colours follow the Handtop theme (`~/.config/rg35xxh/theme`, re-read every time the keyboard is shown, so a theme switch needs no restart; `PALETTES` in `osk.py`):
+Colours come from the current theme (`osk.*`, read from the rendered `theme.env` every time the keyboard is shown, so a theme switch needs no restart; Handtop dark's `DARK` in `osk.py` until a theme is rendered; [apps/theme.md](../apps/theme.md)). In the built-in themes:
 
-| | Dark | Light |
+| | Handtop (dark) | Handtop (light) |
 |---|---|---|
 | Background | `#141820` | `#d5dbe5` |
 | Character keys (letters, digits, symbols, Space): key / border / text | `#2e3544` / `#3e4859` / `#eef0f4` | `#ffffff` / `#b9c1ce` / `#22262e` |

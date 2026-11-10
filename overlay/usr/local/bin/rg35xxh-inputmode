@@ -3,12 +3,10 @@
 # writes) and a tooltip. rg35xxh-inputd signals Waybar (SIGRTMIN+8) on each change and drives the
 # shake: while $XDG_RUNTIME_DIR/rg35xxh-inputmode-frame exists it holds "<old mode> <dx>", and the
 # old icon is shown with its drawing shifted dx px (pre-drawn frames, one damped-spring swing each).
-# Light-taskbar icons: theme "light" (rg35xxh-theme, ~/.config/rg35xxh/theme).
+# Icons: the current theme's (rendered by rg35xxh-theme), Handtop dark's until then.
 d="${XDG_RUNTIME_DIR:-/tmp}"
-icons=/usr/local/share/rg35xxh/icons
-suffix=
-c="${XDG_CONFIG_HOME:-$HOME/.config}/rg35xxh"        # theme (rg35xxh-theme); old inputmode-icons too
-[ "$(cat "$c/theme" 2>/dev/null)" = light ] || [ "$(cat "$c/inputmode-icons" 2>/dev/null)" = light ] && suffix=-light
+icons="${XDG_STATE_HOME:-$HOME/.local/state}/rg35xxh/theme/icons"
+[ -d "$icons" ] || icons=/usr/local/share/rg35xxh/icons
 
 if [ -e "$d/rg35xxh-bt-mode" ]; then mode=bt
 elif [ -e "$d/rg35xxh-wired-mode" ]; then mode=wired
@@ -29,4 +27,4 @@ case $mode in
   gamepad) tip="Gamepad mode. Hold Start 1 s for desktop mode." ;;
   *) tip="Desktop mode (mouse and keyboard). Press Start for gamepad mode." ;;
 esac
-printf '%s\n%s\n' "$icons/inputmode-$mode$suffix${dx:+-shake$dx}.png" "$tip"
+printf '%s\n%s\n' "$icons/inputmode-$mode${dx:+-shake$dx}.png" "$tip"

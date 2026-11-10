@@ -1,3 +1,5 @@
+# Notifications in Handtop dark, used until the current theme has been rendered (rg35xxh-theme
+# writes ~/.local/state/rg35xxh/theme/mako.conf).
 font=Noto Sans 10
 width=300
 height=120

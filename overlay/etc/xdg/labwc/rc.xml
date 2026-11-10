@@ -8,6 +8,8 @@
 
   <theme>
     <name>Handtop</name>
+    <!-- window icons: the current theme's (rg35xxh-theme links ~/.local/share/icons/Handtop-Current) -->
+    <icon>Handtop-Current</icon>
     <cornerRadius>4</cornerRadius>
     <font place="ActiveWindow"><name>Noto Sans</name><size>9</size><weight>bold</weight></font>
     <font place="InactiveWindow"><name>Noto Sans</name><size>9</size></font>

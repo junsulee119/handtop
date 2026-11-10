@@ -5,12 +5,14 @@
 #                              step the charging animation (bars from the current level up to
 #                              full, ~0.45 s each); otherwise refresh Waybar when the level or the
 #                              charger state changes.
-# Icons: /usr/local/share/rg35xxh/icons/battery-*.png (tools/icons/gen_battery.py). Light set
-# with the light theme (rg35xxh-theme); -saver set (green shell) while Battery saver is on.
+# Icons: battery-*.png of the current theme (rendered by rg35xxh-theme into
+# ~/.local/state/rg35xxh/theme/icons; Handtop dark's in /usr/local/share/rg35xxh/icons until then,
+# tools/icons/gen_battery.py); the -saver set (green shell) while Battery saver is on.
 # Tapping the icon switches Battery saver (Waybar on-click).
 BAT=/sys/class/power_supply/battery
 USB=/sys/class/power_supply/axp20x-usb
-ICONS=/usr/local/share/rg35xxh/icons
+ICONS="${XDG_STATE_HOME:-$HOME/.local/state}/rg35xxh/theme/icons"
+[ -d "$ICONS" ] || ICONS=/usr/local/share/rg35xxh/icons
 FRAME="${XDG_RUNTIME_DIR:-/tmp}/rg35xxh-battery-frame"     # bar count shown while animating
 SIG=9                                                     # image#battery "signal" in Waybar
 
@@ -51,9 +53,7 @@ if [ "$1" = --animate ]; then
 fi
 
 read_state
-suffix=
-c="${XDG_CONFIG_HOME:-$HOME/.config}/rg35xxh"        # theme (rg35xxh-theme); old inputmode-icons too
-[ "$(cat "$c/theme" 2>/dev/null)" = light ] || [ "$(cat "$c/inputmode-icons" 2>/dev/null)" = light ] && suffix=-light
+c="${XDG_CONFIG_HOME:-$HOME/.config}/rg35xxh"        # battery-saver flag
 shown=$bars
 if [ "$plugged" = 1 ]; then
   f=$(cat "$FRAME" 2>/dev/null); case "$f" in [0-5]) shown=$f ;; esac
@@ -67,4 +67,4 @@ saver=
 if [ "$(cat "$c/battery-saver" 2>/dev/null)" = on ]; then    # rg35xxh-battery-saver: green shell
   saver=-saver; tip="$tip, Battery saver on"
 fi
-printf '%s\n%s\n' "$ICONS/$name-$shown$saver$suffix.png" "$tip"
+printf '%s\n%s\n' "$ICONS/$name-$shown$saver.png" "$tip"

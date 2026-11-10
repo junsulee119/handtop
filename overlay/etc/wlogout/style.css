@@ -1,4 +1,5 @@
-/* Power menu, dark theme. 3 + 2 grid: Sleep, Restart, Shut down / Battery saver, Log out (the layout
+/* Power menu in Handtop dark, used until the current theme has been rendered (rg35xxh-theme writes
+   ~/.local/state/rg35xxh/theme/wlogout.css). 3 + 2 grid: Sleep, Restart, Shut down / Battery saver, Log out (the layout
    is written by rg35xxh-power-menu; wlogout fills column by column). Pixel-art icons
    (tools/icons/gen_power_icons.py, 72 px, shown 1:1), one colour per action; white on the
    highlighted button. */

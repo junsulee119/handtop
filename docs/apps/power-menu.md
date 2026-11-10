@@ -54,7 +54,7 @@ Power-off permission: polkit rule `/etc/polkit-1/rules.d/50-rg35xxh-power.rules`
 One switch (`rg35xxh-battery-saver on|off|toggle|--get`), off by default, remembered across reboots (`~/.config/rg35xxh/battery-saver`). Two places to switch it:
 
 - **Power menu:** the "Battery saver: On / Off" button (green leaf). `rg35xxh-power-menu` writes the layout to `$XDG_RUNTIME_DIR/rg35xxh-power-menu.layout` at every opening so the label shows the state; the button toggles and the menu closes like after any other button. Works over fullscreen apps, where the taskbar is hidden.
-- **Taskbar:** tap the battery icon or the percentage (Waybar `on-click`). While the saver is on the battery's shell is green (`battery-…-saver[-light].png`, `tools/icons/gen_battery.py`) and the tooltip says so.
+- **Taskbar:** tap the battery icon or the percentage (Waybar `on-click`). While the saver is on the battery's shell is green (`battery-…-saver.png` of the current theme, `tools/icons/gen_battery.py`) and the tooltip says so.
 
 What it does:
 

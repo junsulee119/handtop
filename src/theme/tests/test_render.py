@@ -1,7 +1,7 @@
 """The renderer: generated images, theme.env, safety of what goes into configs."""
 import os
 
-from handtop_theme import render, theme
+from handtop_theme import current, render, theme
 from handtop_theme import schema as S
 
 from conftest import minimal, png, write_theme
@@ -25,7 +25,7 @@ def test_render_custom_theme(tmp_path, builtins, ops):
     css = open(os.path.join(out, "waybar.css")).read()
     assert "evil" not in css and "font-size: 15px" in css and "#102030" in css
     assert not os.path.exists(os.path.join(out, "wallpaper.png"))
-    env = render.read_env(os.path.join(out, "theme.env"))
+    env = current.read_env(os.path.join(out, "theme.env"))
     assert env["THEME_NAME"] == "It's */ { evil }"
     assert env["WALLPAPER"] == "" and env["COLOR_TASKBAR_BG"] == "#102030"
     assert env["ICONS"] == os.path.join(out, "icons")
@@ -58,5 +58,22 @@ def test_icon_theme_index(tmp_path, builtins, ops):
 def test_env_quoting(tmp_path):
     p = tmp_path / "e"
     p.write_text("# c\nA='it'\\''s'\nB='x=y'\nbad line\n")
-    assert render.read_env(str(p)) == {"A": "it's", "B": "x=y"}
-    assert render.read_env(str(tmp_path / "missing")) == {}
+    assert current.read_env(str(p)) == {"A": "it's", "B": "x=y"}
+    assert current.read_env(str(tmp_path / "missing")) == {}
+
+
+def test_current_helpers(tmp_path, builtins, ops):
+    t = theme.load(os.path.join(builtins, "handtop-light"), builtins)
+    out = render.render(t, str(tmp_path / "theme"), ops)
+    env = current.read_env(os.path.join(out, "theme.env"))
+    osk = current.colors("osk", env)
+    assert osk["bg"] == "#d5dbe5" and len(osk) == 17
+    st = current.colors("status", env)
+    assert st["label"] == "#2e5499" and st["screen_text"] == "#e8ebed"
+    assert current.colors("titlebar", current.read_env(os.path.join(builtins, "nothing")))  == {}
+    assert current.rgba("#ff000080") == (1.0, 0.0, 0.0, 128 / 255) and current.rgba(None) is None
+    assert current.rgba("#ff0000ff") == (1.0, 0.0, 0.0) == current.rgba("#ff0000")
+    dark = current.colors("status", current.read_env(os.path.join(
+        render.render(theme.load(os.path.join(builtins, "handtop-dark"), builtins), str(tmp_path / "d"), ops),
+        "theme.env")))
+    assert dark["label"] is None                     # a null colour comes back as None

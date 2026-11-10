@@ -10,7 +10,7 @@
                                               monitor was unplugged, also a "Monitor disconnected" toast)
   rg35xxh-display osk on|off                  monitor mode: wake the handheld screen for the keyboard
   rg35xxh-display status                      print mode, docked yes/no
-  rg35xxh-display --preview FILE [--light] [--undocked] [--mode M] [--confirm]   picker as PNG
+  rg35xxh-display --preview FILE [--undocked] [--mode M] [--confirm]   picker as PNG (current theme)
 
 Modes (only matter while an external display is connected):
   monitor  handheld screen off; it turns on as a keyboard panel when X shows the keyboard
@@ -47,6 +47,7 @@ import time
 
 INTERNAL = "DSI-1"
 MODES = ("monitor", "extend", "mirror")
+THEME_LIB = "/usr/local/lib/rg35xxh-theme"                     # rg35xxh-theme's code (colours)
 CONF = os.path.join(os.environ.get("XDG_CONFIG_HOME", os.path.expanduser("~/.config")), "rg35xxh")
 STATE = os.path.join(CONF, "display-mode")
 RUN = os.environ.get("XDG_RUNTIME_DIR", "/tmp")
@@ -448,16 +449,23 @@ PIX["screen"] = PIX["monitor"][:13]          # the monitor without its stand (st
 SCREEN = {"monitor": (1, 1, 19, 11), "screen": (1, 1, 19, 11), "handheld": (4, 1, 5, 4)}
 
 
-def palette(light):
-    if light:
-        return dict(bg=(0.925, 0.937, 0.957), card=(1, 1, 1), card_hi=(0.89, 0.92, 0.97), border=(0.79, 0.81, 0.85),
-                    accent=(0.24, 0.41, 0.69), text=(0.17, 0.19, 0.23), dim=(0.42, 0.45, 0.52), body=(0.17, 0.19, 0.23),
-                    off=(0.10, 0.11, 0.14), desk=(0.36, 0.50, 0.74), bar=(0.09, 0.10, 0.13), win=(0.93, 0.94, 0.96),
-                    sun=(0.94, 0.78, 0.24), track=(0.84, 0.86, 0.90), btn=(0.88, 0.90, 0.94))
-    return dict(bg=(0.10, 0.12, 0.15), card=(0.14, 0.17, 0.22), card_hi=(0.18, 0.22, 0.29), border=(0.23, 0.27, 0.34),
+def palette():
+    """The current theme's colours (display.* in the theme.env rg35xxh-theme renders), opaque, as
+    cairo floats; Handtop dark's until a theme has been rendered."""
+    dark = dict(bg=(0.10, 0.12, 0.15), card=(0.14, 0.17, 0.22), card_hi=(0.18, 0.22, 0.29), border=(0.23, 0.27, 0.34),
                 accent=(0.56, 0.71, 1.0), text=(0.91, 0.92, 0.93), dim=(0.55, 0.58, 0.64), body=(0.91, 0.92, 0.93),
                 off=(0.04, 0.05, 0.07), desk=(0.24, 0.35, 0.54), bar=(0.08, 0.09, 0.12), win=(0.91, 0.92, 0.93),
                 sun=(0.94, 0.78, 0.24), track=(0.20, 0.23, 0.29), btn=(0.20, 0.24, 0.31))
+    if THEME_LIB not in sys.path:
+        sys.path.insert(0, THEME_LIB)
+    try:
+        from handtop_theme import current
+    except ImportError:
+        return dark
+    c = current.colors("display")
+    if any(not c.get(k) for k in dark):
+        return dark
+    return {k: current.rgba(c[k])[:3] for k in dark}
 
 
 def screen_pixel(content, x, y, w, h, P):
@@ -728,14 +736,6 @@ def hit(st, px, py):
     return None
 
 
-def light_theme():
-    try:
-        with open(os.path.join(CONF, "theme")) as f:
-            return f.read().strip() == "light"
-    except OSError:
-        return False
-
-
 # ---------------------------------------------------------------------------------- picker
 def picker(auto):
     import gi
@@ -756,7 +756,7 @@ def picker(auto):
     if docked:
         open(PICKER_FLAG, "w").close()
         apply(why="picker open")
-    P = palette(light_theme())
+    P = palette()
     st = {"current": mode(), "selected": None, "hover": None, "ext": external(outputs()),
           "info": describe(external(outputs())), "remaining": COUNTDOWN if (auto and docked) else None,
           "deadline": time.monotonic() + COUNTDOWN, "res_sel": None, "rate_sel": None, "confirm": None, "_t": []}
@@ -1013,7 +1013,7 @@ def picker(auto):
     return 0
 
 
-def preview(path, light, docked, m, confirm=False):
+def preview(path, docked, m, confirm=False):
     import cairo
     rates = {(1920, 1080): [240, 165, 120, 119.88, 60, 59.94, 50], (1680, 1050): [119.99, 84.94, 74.89, 59.88],
              (1600, 900): [60], (1440, 900): [119.85, 59.9], (1366, 768): [59.79], (1280, 1024): [75.03, 60.02],
@@ -1026,7 +1026,7 @@ def preview(path, light, docked, m, confirm=False):
           "info": describe(ext), "remaining": 3.4 if docked and not confirm else None, "ext": ext,
           "res_sel": 0, "rate_sel": 120.0 if confirm else 60.0, "_t": [], "rate_scroll": 2,
           "confirm": {"spec": "1920x1080@120.000", "remaining": 11.2} if confirm else None}
-    render(cairo.Context(surf), st, palette(light))
+    render(cairo.Context(surf), st, palette())
     surf.write_to_png(path)
 
 
@@ -1064,7 +1064,7 @@ def main(argv):
         print(mode(), "docked" if external(outputs()) else "handheld")
     elif cmd == "--preview" and len(argv) > 2:
         m = argv[argv.index("--mode") + 1] if "--mode" in argv else "monitor"
-        preview(argv[2], "--light" in argv, "--undocked" not in argv, m, "--confirm" in argv)
+        preview(argv[2], "--undocked" not in argv, m, "--confirm" in argv)
     else:
         print(__doc__.strip())
         return 2

@@ -1,21 +1,26 @@
 #!/bin/sh
-# Start a desktop component in the current Handtop theme (dark | light, set by rg35xxh-theme).
+# Start a desktop component in the current Handtop theme, from the files rg35xxh-theme rendered
+# into ~/.local/state/rg35xxh/theme (Handtop dark's files in /etc until the first render).
 #   rg35xxh-themed waybar|mako|swaybg
-# Used by the labwc autostart, and by rg35xxh-theme to restart them after a switch.
-# Your own config (~/.config/waybar/style.css, ~/.config/mako/config) still takes precedence.
+# Used by the labwc autostart and rg35xxh-waybar, and by rg35xxh-theme to restart them after a
+# switch. Your own config (~/.config/waybar/style.css, ~/.config/mako/config) still takes precedence.
 C="${XDG_CONFIG_HOME:-$HOME/.config}"
-T=$(cat "$C/rg35xxh/theme" 2>/dev/null)
+S="${XDG_STATE_HOME:-$HOME/.local/state}/rg35xxh/theme"
+val() { sed -n "s/^$1='\(.*\)'\$/\1/p" "$S/theme.env" 2>/dev/null; }   # one theme.env value
 case "$1" in
   waybar)
-    [ "$T" = light ] && [ ! -e "$C/waybar/style.css" ] && exec waybar -s /etc/xdg/waybar/style-light.css
+    [ ! -e "$C/waybar/style.css" ] && [ -r "$S/waybar.css" ] && exec waybar -s "$S/waybar.css"
     exec waybar ;;
   mako)
     [ -e "$C/mako/config" ] && exec mako      # mako does not read /etc/xdg/mako/config by itself
-    [ "$T" = light ] && exec mako -c /etc/xdg/mako/config-light
+    [ -r "$S/mako.conf" ] && exec mako -c "$S/mako.conf"
     exec mako -c /etc/xdg/mako/config ;;
-  swaybg)      # the Handtop logo wallpaper, centred; the same colour fills bigger screens
-    W=/usr/local/share/rg35xxh
-    [ "$T" = light ] && exec swaybg -i "$W/wallpaper-light.png" -m center -c '#dfe4ec'
-    exec swaybg -i "$W/wallpaper-dark.png" -m center -c '#1e2430' ;;
+  swaybg)      # the wallpaper image (centred by default) on its colour, which fills bigger screens
+    col=$(val WALLPAPER_COLOR); img=$(val WALLPAPER); mode=$(val WALLPAPER_MODE)
+    if [ -z "$col" ]; then                   # not rendered yet: Handtop dark
+      col='#1e2430' img=/usr/local/share/rg35xxh/wallpaper-dark.png mode=center
+    fi
+    [ -n "$img" ] && [ -r "$img" ] && exec swaybg -i "$img" -m "${mode:-center}" -c "$col"
+    exec swaybg -m solid_color -c "$col" ;;
   *) echo "usage: rg35xxh-themed waybar|mako|swaybg" >&2; exit 2 ;;
 esac
