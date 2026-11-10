@@ -202,6 +202,7 @@ def export_theme(path, dest, builtin_dir=BUILTIN_DIR):
             for rel in _theme_files(path):
                 zf.write(os.path.join(path, *rel.split("/")), rel)
             zf.writestr(S.GUIDE_FILE, guide.generate())
+        os.chmod(tmp, 0o644)                     # mkstemp makes it private; it is meant to be shared
         os.replace(tmp, dest)
     except BaseException:
         os.unlink(tmp)

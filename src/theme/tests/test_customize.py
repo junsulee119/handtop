@@ -90,16 +90,6 @@ def test_id_from_name():
     assert len(Z.id_from_name("x" * 80, set())) <= 40
 
 
-def test_find_theme_files(tmp_path):
-    home, media = tmp_path / "home", tmp_path / "media"
-    (home / "Themes").mkdir(parents=True)
-    (media / "USB").mkdir(parents=True)
-    (home / "a.handtop-theme").write_bytes(b"x")
-    (home / "Themes" / "b.handtop-theme").write_bytes(b"xy")
-    (home / "notes.txt").write_text("x")
-    (media / "USB" / "c.handtop-theme").write_bytes(b"xyz")
-    places = Z.import_places(str(home), str(media))
-    got = [(os.path.basename(p), label, size) for p, label, size in Z.find_theme_files(places)]
-    assert got == [("a.handtop-theme", "Home", 1), ("b.handtop-theme", "Themes", 2), ("c.handtop-theme", "USB", 3)]
-    assert [l for l, _p in Z.export_places(str(home), str(media))] == ["Themes folder (~/Themes)", "USB (drive)"]
-    assert Z.drives(str(tmp_path / "nowhere")) == []
+def test_short():
+    assert Z.short("/home/x/Themes/a.handtop-theme", "/home/x") == "~/Themes/a.handtop-theme"
+    assert Z.short("/home/x", "/home/x") == "~" and Z.short("/home/xy/a", "/home/x") == "/home/xy/a"

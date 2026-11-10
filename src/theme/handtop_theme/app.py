@@ -5,9 +5,9 @@ with the D-pad / pointer and A; Escape (B) goes back from a sub-screen.
              Export icon buttons above them; the selected theme's preview, name and description
              on the right with Apply, Duplicate and Delete (your themes only)
   Duplicate  name, accent, background, icon set, pointer size, text size, live preview
-  Import     .handtop-theme files in ~, ~/Themes, ~/Downloads and mounted drives; refused files
-             list every problem (nothing changes)
-  Export     to ~/Themes or a mounted drive
+  Import /   GTK's file chooser (starts in ~/Themes; Themes and the boot partition in its
+  Export     sidebar, drives appear there by themselves); refused imports list every problem
+             and change nothing
 Applying is rg35xxh-theme's apply(); everything else is the handtop_theme package."""
 import os
 import subprocess
@@ -124,8 +124,6 @@ class App:
         self.win.add(self.stack)
         self.stack.add_named(self._main_page(), "main")
         self.stack.add_named(self._dup_page(), "duplicate")
-        self.stack.add_named(self._import_page(), "import")
-        self.stack.add_named(self._export_page(), "export")
         self._swatch_css()
         self.reload(self.current_fn())
 
@@ -134,7 +132,6 @@ class App:
         self.win.show_all()
         self._marks(self.current_fn())
         self.logout.hide()
-        self.import_error.hide()
         self.stack.set_visible_child_name("main")
         self.loop.run()
 
@@ -162,8 +159,8 @@ class App:
 
     def _icon_button(self, name, tip):
         b = Gtk.Button()
-        b.set_tooltip_text(tip)
-        b.get_style_context().add_class("flat")
+        b.set_tooltip_text(tip)                 # a framed button like the others (flat ones did
+                                                # not look clickable); the name shows on hover
         img = Gtk.Image()
         b.add(img)
 
@@ -460,141 +457,81 @@ class App:
         self.reload(tid)
         self.show_main(f"Created {name}. Apply it to use it.")
 
-    # ---- Import --------------------------------------------------------------------------------
-    def _import_page(self):
-        outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8, margin=10)
-        outer.pack_start(_title("Import a theme"), False, False, 0)
-        self.import_hint = _label(wrap=True, max_width_chars=70)
-        outer.pack_start(self.import_hint, False, False, 0)
-        self.import_list = Gtk.ListBox()
-        self.import_list.connect("row-activated", lambda *_a: self.on_import())
-        sc = Gtk.ScrolledWindow()
-        sc.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
-        sc.add(self.import_list)
-        outer.pack_start(sc, True, True, 0)
-        self.import_error = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-        self.import_error.get_style_context().add_class("rg-error")
-        self.import_error_label = _label(wrap=True, max_width_chars=70)
-        self.import_error.pack_start(self.import_error_label, False, False, 0)
-        outer.pack_start(self.import_error, False, False, 0)
-        buttons = Gtk.Box(spacing=8)
-        back = Gtk.Button(label="Back")
-        back.connect("clicked", lambda *_a: self.show_main())
-        self.import_btn = Gtk.Button(label="Import")
-        self.import_btn.get_style_context().add_class("suggested-action")
-        self.import_btn.connect("clicked", lambda *_a: self.on_import())
-        buttons.pack_end(self.import_btn, False, False, 0)
-        buttons.pack_end(back, False, False, 0)
-        outer.pack_start(buttons, False, False, 0)
-        return outer
+    # ---- Import / Export: GTK's file chooser (decision 2026-11-10) ------------------------------
+    def _chooser(self, title, action, ok):
+        d = Gtk.FileChooserDialog(title=title, transient_for=self.win, modal=True, action=action)
+        d.add_buttons("Cancel", Gtk.ResponseType.CANCEL, ok, Gtk.ResponseType.OK)
+        d.set_default_response(Gtk.ResponseType.OK)
+        d.set_default_size(640, 420)
+        themes = os.path.join(os.path.expanduser("~"), "Themes")
+        os.makedirs(themes, exist_ok=True)
+        for f in (themes, Z.BOOT):                     # sidebar shortcuts; drives show by themselves
+            if os.path.isdir(f):
+                try:
+                    d.add_shortcut_folder(f)
+                except GLib.Error:
+                    pass
+        d.set_current_folder(themes)
+        f = Gtk.FileFilter()
+        f.set_name("Handtop themes (.handtop-theme)")
+        f.add_pattern(f"*{Z.EXT}")
+        d.add_filter(f)
+        every = Gtk.FileFilter()
+        every.set_name("All files")
+        every.add_pattern("*")
+        d.add_filter(every)
+        return d
 
     def open_import(self):
-        for row in self.import_list.get_children():
-            self.import_list.remove(row)
-        files = Z.find_theme_files(Z.import_places())
-        for path, place, size in files:
-            row = Gtk.ListBoxRow()
-            row.path = path
-            v = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, margin=6)
-            v.pack_start(_label(markup=f"<b>{GLib.markup_escape_text(os.path.basename(path))}</b>"), False, False, 0)
-            kb = max(1, round(size / 1024))
-            v.pack_start(_label(markup=f"<small>{GLib.markup_escape_text(place)} · "
-                                       f"{kb} KB</small>" if kb < 1024 else
-                                       f"<small>{GLib.markup_escape_text(place)} · {kb / 1024:.1f} MB</small>"),
-                         False, False, 0)
-            row.add(v)
-            self.import_list.add(row)
-        self.import_list.show_all()
-        if files:
-            self.import_hint.set_text("Theme files (.handtop-theme) in your home folder, ~/Themes, ~/Downloads "
-                                      "and drives opened in Files:")
-            self.import_list.select_row(self.import_list.get_row_at_index(0))
-        else:
-            self.import_hint.set_text("No theme files found. Copy a .handtop-theme file to ~/Themes, or plug in "
-                                      "a USB drive or SD card with one and open it in Files first.")
-        self.import_btn.set_sensitive(bool(files))
-        self.import_error.hide()
-        self.stack.set_visible_child_name("import")
-        (self.import_list if files else self.import_btn).grab_focus()
+        d = self._chooser("Import a theme", Gtk.FileChooserAction.OPEN, "Import")
+        path = d.get_filename() if d.run() == Gtk.ResponseType.OK else None
+        d.destroy()
+        if path:
+            self.on_import(path)
 
-    def on_import(self, replace=False):
-        row = self.import_list.get_selected_row()
-        if row is None:
-            return
-        name = os.path.basename(row.path)
+    def open_export(self):
+        t = self.themes[self.selected]
+        d = self._chooser(f"Export “{t.name}”", Gtk.FileChooserAction.SAVE, "Save")
+        d.set_do_overwrite_confirmation(True)
+        d.set_current_name(f"{t.id}{Z.EXT}")
+        path = d.get_filename() if d.run() == Gtk.ResponseType.OK else None
+        d.destroy()
+        if path:
+            if not path.endswith(Z.EXT):
+                path += Z.EXT
+            self.on_export(path)
+
+    def on_import(self, path, replace=False):
+        name = os.path.basename(path)
         try:
-            t = package.import_theme(row.path, replace=replace)
+            t = package.import_theme(path, replace=replace)
         except package.ThemeExists as e:
             if self.confirm(f"Replace “{e.id}”?", "A theme with this id is already installed.", "Replace"):
-                self.on_import(replace=True)
+                self.on_import(path, replace=True)
             return
         except T.ThemeError as e:
             lines = [f"• {p.where}: {p.message}" for p in e.problems[:8]]
             if len(e.problems) > 8:
                 lines.append(f"• … and {len(e.problems) - 8} more")
-            self.import_error_label.set_markup(
-                f"<b>{GLib.markup_escape_text(name)}: not imported</b>\n"
-                + GLib.markup_escape_text("\n".join(lines + ["Nothing was changed. Fix these in the file "
-                                                             "and import again."])))
-            self.import_error.show()
+            d = Gtk.MessageDialog(transient_for=self.win, modal=True, message_type=Gtk.MessageType.ERROR,
+                                  buttons=Gtk.ButtonsType.OK, text=f"{name}: not imported")
+            d.format_secondary_text("\n".join(lines + ["", "Nothing was changed. Fix these in the file and "
+                                                          "import again."]))
+            d.run()
+            d.destroy()
             return
         warn = [p for p in t.problems if p.level == "warning"]
         self.reload(t.id)
         self.show_main(f"Imported {t.name}." + (f" {len(warn)} warning(s): parts were ignored." if warn else ""))
 
-    # ---- Export --------------------------------------------------------------------------------
-    def _export_page(self):
-        outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8, margin=10)
-        self.export_title = _title("Export")
-        outer.pack_start(self.export_title, False, False, 0)
-        self.export_hint = _label(wrap=True, max_width_chars=70)
-        outer.pack_start(self.export_hint, False, False, 0)
-        self.export_list = Gtk.ListBox()
-        self.export_list.connect("row-activated", lambda *_a: self.on_export())
-        outer.pack_start(self.export_list, True, True, 0)
-        buttons = Gtk.Box(spacing=8)
-        back = Gtk.Button(label="Back")
-        back.connect("clicked", lambda *_a: self.show_main())
-        ok = Gtk.Button(label="Export")
-        ok.get_style_context().add_class("suggested-action")
-        ok.connect("clicked", lambda *_a: self.on_export())
-        buttons.pack_end(ok, False, False, 0)
-        buttons.pack_end(back, False, False, 0)
-        outer.pack_start(buttons, False, False, 0)
-        return outer
-
-    def open_export(self):
+    def on_export(self, dest):
         t = self.themes[self.selected]
-        self.export_title.set_markup(f"<span size='large' weight='bold'>Export “{GLib.markup_escape_text(t.name)}”</span>")
-        self.export_hint.set_text(f"Saved as {t.id}.handtop-theme, with GUIDE.md inside (how to edit it). "
-                                  "To use a drive, open it in Files first.")
-        for row in self.export_list.get_children():
-            self.export_list.remove(row)
-        for label, folder in Z.export_places():
-            row = Gtk.ListBoxRow()
-            row.folder = folder
-            row.add(_label(label, margin=8))
-            self.export_list.add(row)
-        self.export_list.show_all()
-        self.export_list.select_row(self.export_list.get_row_at_index(0))
-        self.stack.set_visible_child_name("export")
-        self.export_list.grab_focus()
-
-    def on_export(self):
-        row = self.export_list.get_selected_row()
-        if row is None:
-            return
-        t = self.themes[self.selected]
-        dest = os.path.join(row.folder, f"{t.id}.handtop-theme")
-        if os.path.exists(dest) and not self.confirm(f"Replace {os.path.basename(dest)}?",
-                                                     f"It is already in {row.folder}.", "Replace"):
-            return
         try:
             package.export_theme(t.path, dest)
         except Exception as e:
             self.show_main(f"Could not export: {e}")
             return
-        self.show_main(f"Saved to {dest.replace(os.path.expanduser('~'), '~', 1)}.")
+        self.show_main(f"Saved to {Z.short(dest)}.")
 
 
 def run(apply_fn, current_fn):

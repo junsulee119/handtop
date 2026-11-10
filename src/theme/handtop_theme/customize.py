@@ -106,48 +106,15 @@ def id_from_name(name, taken):
 
 
 # ---- where theme files are -------------------------------------------------------------------------
-def drives(media=None):
-    """Mounted USB drives / SD cards: [(label, path)] (udisks mounts them at /media/<user>/<label>)."""
-    media = media or os.path.join("/media", os.environ.get("USER") or os.path.basename(os.path.expanduser("~")))
-    try:
-        names = sorted(os.listdir(media))
-    except OSError:
-        return []
-    return [(n, os.path.join(media, n)) for n in names if os.path.ismount(os.path.join(media, n))
-            or os.path.isdir(os.path.join(media, n))]
+BOOT = "/boot/firmware"          # the FAT boot partition (readable from Windows; root-only to write),
+                                 # a shortcut in the Import / Export file chooser
+EXT = ".handtop-theme"
 
 
-def import_places(home=None, media=None):
-    """[(label, folder)] searched for theme files: home, ~/Themes, ~/Downloads, each drive and its
-    Themes folder."""
+def short(path, home=None):
+    """path with the home folder written as ~."""
     home = home or os.path.expanduser("~")
-    places = [("Home", home), ("Themes", os.path.join(home, "Themes")), ("Downloads", os.path.join(home, "Downloads"))]
-    for label, p in drives(media):
-        places += [(label, p), (label, os.path.join(p, "Themes"))]
-    return places
-
-
-def find_theme_files(places):
-    """[(path, place label, size in bytes)] of *.handtop-theme files directly in each place."""
-    out, seen = [], set()
-    for label, folder in places:
-        try:
-            names = sorted(os.listdir(folder))
-        except OSError:
-            continue
-        for n in names:
-            p = os.path.join(folder, n)
-            if n.endswith(".handtop-theme") and os.path.isfile(p) and os.path.realpath(p) not in seen:
-                seen.add(os.path.realpath(p))
-                out.append((p, label, os.path.getsize(p)))
-    return out
-
-
-def export_places(home=None, media=None):
-    """[(label, folder)] a theme can be exported to: ~/Themes and each drive."""
-    home = home or os.path.expanduser("~")
-    return [("Themes folder (~/Themes)", os.path.join(home, "Themes"))] + \
-           [(f"{label} (drive)", p) for label, p in drives(media)]
+    return "~" + path[len(home):] if path == home or path.startswith(home + os.sep) else path
 
 
 # ---- live preview of the Duplicate screen's choices ----------------------------------------------------
