@@ -7,6 +7,10 @@ button:hover label, button:hover image { color: #ffffff; }
 button:active, button:checked { background-color: #e8321d; border-color: #e8321d; color: #ffffff; }
 button.flat { border-color: transparent; background-color: transparent; }
 button.flat:hover { background-color: #111111; }
+/* Adwaita paints these two with white text: the main action is a red block, delete a red frame. */
+button.suggested-action { background-image: none; box-shadow: none; background-color: #e8321d; border-color: #e8321d; color: #ffffff; }
+button.destructive-action { background-image: none; box-shadow: none; background-color: #ffffff; border-color: #e8321d; color: #e8321d; }
+button.suggested-action:hover, button.destructive-action:hover { background-color: #111111; border-color: #111111; color: #ffffff; }
 entry { background-image: none; border: 2px solid #111111; box-shadow: none; }
 treeview.view:selected, .view:selected, iconview:selected, row:selected, placessidebar row:selected,
 textview text selection, entry selection, menuitem:hover, modelbutton:hover {

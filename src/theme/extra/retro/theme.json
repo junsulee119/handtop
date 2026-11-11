@@ -104,8 +104,8 @@
   },
   "wallpaper": {
     "color": "#008080",
-    "image": null,
-    "mode": "center"
+    "image": "images/wallpaper.png",
+    "mode": "tile"
   },
   "status_screen": {
     "style": "solid"

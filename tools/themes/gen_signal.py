@@ -420,6 +420,10 @@ button:hover label, button:hover image {{ color: {W}; }}
 button:active, button:checked {{ background-color: {R}; border-color: {R}; color: {W}; }}
 button.flat {{ border-color: transparent; background-color: transparent; }}
 button.flat:hover {{ background-color: {I}; }}
+/* Adwaita paints these two with white text: the main action is a red block, delete a red frame. */
+button.suggested-action {{ background-image: none; box-shadow: none; background-color: {R}; border-color: {R}; color: {W}; }}
+button.destructive-action {{ background-image: none; box-shadow: none; background-color: {W}; border-color: {R}; color: {R}; }}
+button.suggested-action:hover, button.destructive-action:hover {{ background-color: {I}; border-color: {I}; color: {W}; }}
 entry {{ background-image: none; border: 2px solid {I}; box-shadow: none; }}
 treeview.view:selected, .view:selected, iconview:selected, row:selected, placessidebar row:selected,
 textview text selection, entry selection, menuitem:hover, modelbutton:hover {{

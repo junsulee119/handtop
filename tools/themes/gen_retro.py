@@ -723,7 +723,7 @@ THEME = {
         "osd.bg": HEX["S"] + "f2", "osd.volume_border": HEX["K"], "osd.volume_level": HEX["N"],
         "osd.brightness_border": HEX["K"], "osd.brightness_level": HEX["O"], "osd.text": HEX["K"],
     },
-    "wallpaper": {"color": HEX["T"], "image": None, "mode": "center"},
+    "wallpaper": {"color": HEX["T"], "image": "images/wallpaper.png", "mode": "tile"},
     "status_screen": {"style": "solid"},
     "gtk": {"color_scheme": "default", "theme": "Adwaita", "icon_theme": "Adwaita"},
     "cursor": {"size": 24, "hotspots": HOTSPOTS},
@@ -824,6 +824,21 @@ separator {{ background-color: #808080; min-height: 1px; min-width: 1px; }}
 }
 
 
+# ---- wallpaper: teal bricks, one 16 px tile drawn at 2x and tiled by the desktop --------------------
+def wallpaper_tile():
+    """Rows of 8x4 bricks, every other row shifted half a brick: a dark mortar line on top and on
+    the left, a light top edge, teal inside."""
+    shade = {"mortar": (0, 96, 96), "edge": (0, 160, 160), "face": PAL["T"]}
+    im = Image.new("RGB", (16, 16))
+    for y in range(16):
+        shift = 4 if (y // 4) % 2 else 0
+        for x in range(16):
+            bx = (x + shift) % 8
+            part = "mortar" if y % 4 == 0 or bx == 0 else "edge" if y % 4 == 1 else "face"
+            im.putpixel((x, y), shade[part])
+    return im.resize((32, 32), Image.NEAREST)
+
+
 def main(out):
     os.makedirs(out, exist_ok=True)
     data = dict(THEME)
@@ -836,6 +851,8 @@ def main(out):
         os.makedirs(os.path.dirname(p), exist_ok=True)
         (art.scaled(z) if z > 1 else art.im).save(p)
 
+    os.makedirs(os.path.join(out, "images"), exist_ok=True)
+    wallpaper_tile().save(os.path.join(out, "images", "wallpaper.png"))
     save(panel_apps(), "icons/taskbar/apps.png")
     save(panel_power(), "icons/taskbar/power.png")
     for m in ("desktop", "gamepad", "bt", "wired"):
