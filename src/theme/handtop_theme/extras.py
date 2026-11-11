@@ -1,9 +1,9 @@
 """Checks for a theme's own fonts and CSS (schema.FONT_ROLES, schema.CSS_PARTS).
 
 Fonts are read by every app once installed, so a theme's font file is checked before it is ever
-installed: TrueType / OpenType signature, size, and (where fontconfig's fc-scan is installed, as
-on the device) that fontconfig reads it as exactly one face whose family is the name theme.json
-gives. CSS is plain text added after Handtop's own rules: UTF-8, no @import, no url() (a theme
+installed: TrueType / OpenType signature (no collections), size, and (where fontconfig's fc-scan
+is installed, as on the device) that fontconfig reads it as one font family, the name theme.json
+gives (one face, or the named instances of one variable font). CSS is plain text added after Handtop's own rules: UTF-8, no @import, no url() (a theme
 must not pull in files from elsewhere), no backslash escapes (which could spell either)."""
 import os
 import re
@@ -39,9 +39,13 @@ def font_families(path, timeout=10):
     if r.returncode != 0:
         return []
     faces = [line for line in r.stdout.splitlines() if line.strip()]
-    if len(faces) != 1:
+    # one face, or the named instances of one variable font (all of the same family)
+    if not faces or len(faces) > 64:
         return []
-    return [n.strip() for n in faces[0].split(",") if n.strip()]
+    fams = [[n.strip() for n in f.split(",") if n.strip()] for f in faces]
+    if any(f != fams[0] for f in fams):
+        return []
+    return fams[0]
 
 
 def css_problem(path):

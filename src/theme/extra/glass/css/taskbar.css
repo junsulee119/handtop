@@ -1,0 +1,13 @@
+/* Glass: the bar itself is clear; its two ends float as glass capsules (a bright top edge,
+   a soft shadow), like a dock. No background-image here: it would replace the Apps button's
+   icon, which Handtop's own rule sets as a background image. */
+window#waybar { background: transparent; border: none; }
+.modules-left, .modules-right { border-radius: 14px; margin: 3px 4px; background-color: rgba(255, 255, 255, 0.55); border: 1px solid rgba(255, 255, 255, 0.75); box-shadow: inset 0 1px rgba(255, 255, 255, 0.95), inset 0 -1px rgba(255, 255, 255, 0.25), 0 2px 6px rgba(16, 20, 48, 0.18); }
+#custom-apps { border-radius: 9px; margin: 2px 1px 2px 2px; padding: 0 10px 0 29px; font-weight: 600; }
+#taskbar button { border-radius: 9px; margin: 2px 1px; }
+/* one look for every button under the pointer and for the active window: a brighter glass chip */
+#custom-apps:hover, #taskbar button:hover, #taskbar button.active {
+  background-color: rgba(255, 255, 255, 0.85);
+  box-shadow: inset 0 1px rgba(255, 255, 255, 1), 0 1px 2px rgba(16, 20, 48, 0.15);
+}
+#clock { font-weight: 600; }

@@ -194,3 +194,15 @@ def test_guide_lists_extras():
     for rel in [S.cursor_file(s) for s in S.CURSOR_SHAPES] + [S.css_file(p) for p in S.CSS_PARTS]:
         assert f"`{rel}`" in g
     assert S.FONT_LICENSE_FILE in g
+
+
+@needs_font
+def test_variable_font_accepted(tmp_path, builtins):
+    """A variable font: fontconfig lists its named instances, all one family (Glass's Inter)."""
+    from conftest import REPO
+    var = os.path.join(REPO, "src", "theme", "extra", "glass", "fonts", "ui.ttf")
+    from handtop_theme.extras import font_families
+    assert font_families(var) == ["Inter Variable"]
+    d = write_theme(str(tmp_path), minimal(fonts={"ui": "Inter Variable"}),
+                    {"fonts/ui.ttf": open(var, "rb").read(), "fonts/LICENSE.txt": b"x"})
+    assert T.load(d, builtins, decode=True).errors == []

@@ -84,7 +84,7 @@ def generate():
         a(f"| `{S.cursor_file(shape)}` | {', '.join(names)} | {list(hs)} |")
     a("\n## Fonts (optional)\n")
     a(f"`fonts/ui.ttf` (or `.otf`) for text and `fonts/mono.ttf` for the terminal, at most "
-      f"{S.MAX_FONT_BYTES >> 20} MB each, one font per file (no collections). Set `fonts.ui` / "
+      f"{S.MAX_FONT_BYTES >> 20} MB each, one font per file (no collections; a variable font is fine). Set `fonts.ui` / "
       "`fonts.mono` to the font's family name; the import checks it with fontconfig. Put the font "
       f"licence in `{S.FONT_LICENSE_FILE}`: only share fonts whose licence allows it (for example "
       "the SIL Open Font License). Applying the theme installs its fonts for your user; the next "

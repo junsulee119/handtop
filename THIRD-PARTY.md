@@ -28,14 +28,16 @@ Taken unmodified from the official image
 | nwg-drawer v0.7.5 | MIT | https://github.com/nwg-piotr/nwg-drawer, built by `build/04b-nwg-drawer.sh` |
 | FFmpeg 7.1.5 with the V4L2 request-API patchset, plus a local patch registering the decoders under the DRM device type | GPL-2.0-or-later | https://github.com/FFmpeg/FFmpeg tag `n7.1.5` (commit `3a0867c2bfda4a4d4309ca1a8cbdc6175e67f587`) + the patchset from https://github.com/Kwiboo/FFmpeg (`f46e514491172d15bd74b4abb1814cd2f05a763e..fad85d9c76611c09b561167ab405c667a0dcdeb7`, branch `v4l2-request-n7.1.3`) + `build/patches/ffmpeg-v4l2request-drm.patch`, built by `build/04c-v4l2-ffmpeg.sh` |
 
-## Fonts in the downloadable Retro theme
+## Fonts in the downloadable themes
 
 Not in the SD card image: they are in `src/theme/extra/retro/fonts/` and inside the release asset
-`handtop-retro.handtop-theme`, unmodified, with their licences in `fonts/LICENSE.txt`.
+`handtop-retro.handtop-theme` / `src/theme/extra/glass/fonts/` and `handtop-glass.handtop-theme`,
+unmodified, with their licences in each theme's `fonts/LICENSE.txt`.
 
 | Font | License | Source |
 |---|---|---|
-| W95FA (`fonts/ui.otf`), by Alina Sava | SIL Open Font License 1.1 | [FontsArena](https://fontsarena.com/w95fa-by-alina-sava/) |
+| W95FA (Retro, `fonts/ui.otf`), by Alina Sava | SIL Open Font License 1.1 | [FontsArena](https://fontsarena.com/w95fa-by-alina-sava/) |
+| Inter 4.1, variable (Glass, `fonts/ui.ttf`), by Rasmus Andersson and the Inter project | SIL Open Font License 1.1 | [rsms/inter](https://github.com/rsms/inter) |
 | PxPlus IBM VGA 8x16 (`fonts/mono.ttf`), from The Ultimate Oldschool PC Font Pack v2.2 by VileR | CC BY-SA 4.0 | [int10h.org](https://int10h.org/oldschool-pc-fonts/) |
 
 ## Data from other projects

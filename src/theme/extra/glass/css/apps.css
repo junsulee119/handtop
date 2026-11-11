@@ -1,0 +1,13 @@
+/* Glass: the accent for selections and main buttons in GTK 3 apps (Adwaita light). GTK also
+   reads this in the taskbar, app drawer and power menu: the selectors are kept to lists, views
+   and suggested buttons, which those three do not have. (@define-color does not reach
+   Adwaita's built-in colours, so the rules are written out.) */
+treeview.view:selected, .view:selected, iconview:selected, row:selected, list row:selected,
+placessidebar row:selected, textview text selection, entry selection {
+  background-color: #5b5bd6; color: #ffffff;
+}
+row:selected label, row:selected image { color: #ffffff; }
+button.suggested-action { background-image: none; background-color: #5b5bd6; border-color: #4a49c4; color: #ffffff; }
+button.suggested-action:hover { background-color: #6a6ae0; }
+check:checked, radio:checked, switch:checked { background-image: none; background-color: #5b5bd6; border-color: #4a49c4; }
+progressbar progress, scale highlight { background-image: none; background-color: #5b5bd6; border-color: #5b5bd6; }

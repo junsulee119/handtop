@@ -1,0 +1,107 @@
+{
+  "schema": 1,
+  "id": "glass",
+  "name": "Glass",
+  "base": "light",
+  "author": "Handtop",
+  "description": "Light, modern: milky glass panels over a blue-violet gradient, monotone line icons, Inter.",
+  "palette": {
+    "bg": "#f4f6fb",
+    "surface": "#ffffff",
+    "surface_hi": "#e3e7f6",
+    "border": "#cdd4e6",
+    "fg": "#1c2233",
+    "fg_dim": "#5b6478",
+    "accent": "#5b5bd6",
+    "accent_fg": "#4a49c4",
+    "on_accent": "#ffffff",
+    "warn": "#b86e00",
+    "error": "#d93a3a",
+    "brightness": "#e0a020",
+    "success": "#2f9e5b"
+  },
+  "colors": {
+    "taskbar.bg": "#00000000",
+    "taskbar.border": "#00000000",
+    "taskbar.apps_bg": "#00000000",
+    "taskbar.apps_fg": "#1c2233",
+    "taskbar.active_bg": "#ffffffe6",
+    "titlebar.active_bg": "#f4f6fb",
+    "titlebar.inactive_bg": "#e6e9f2",
+    "titlebar.active_fg": "#1c2233",
+    "titlebar.inactive_fg": "#6b7385",
+    "titlebar.active_button": "#1c2233",
+    "titlebar.inactive_button": "#8a92a6",
+    "drawer.bg": "#eef1fab8",
+    "drawer.entry_bg": "#ffffffb3",
+    "drawer.hover_bg": "#ffffffcc",
+    "powermenu.backdrop": "#e6eaf7b3",
+    "powermenu.button_bg": "#ffffff73",
+    "powermenu.button_border": "#ffffffd9",
+    "powermenu.hover_bg": "#ffffffd9",
+    "powermenu.hover_border": "#ffffff",
+    "powermenu.focus": "#5b5bd6",
+    "notify.bg": "#ffffffcc",
+    "notify.border": "#ffffffe6",
+    "osd.bg": "#ffffffcc",
+    "osd.volume_border": "#5b5bd6",
+    "osd.volume_level": "#5b5bd6",
+    "osd.brightness_border": "#e0a020",
+    "osd.brightness_level": "#e0a020",
+    "osd.text": "#1c2233",
+    "osk.bg": "#eef1f8",
+    "osk.key": "#ffffff",
+    "osk.border": "#d5dbea",
+    "status.bg": "#eef1f8",
+    "terminal.bg": "#fbfcfe",
+    "terminal.fg": "#1c2233",
+    "terminal.cursor": "#5b5bd6",
+    "terminal.cursor_text": "#ffffff",
+    "terminal.selection_bg": "#c9ccf5",
+    "terminal.selection_fg": "#1c2233"
+  },
+  "wallpaper": {
+    "color": "#5a5cd6",
+    "image": "images/wallpaper.png",
+    "mode": "fill"
+  },
+  "status_screen": {
+    "style": "solid"
+  },
+  "gtk": {
+    "color_scheme": "default",
+    "theme": "Adwaita",
+    "icon_theme": "Adwaita"
+  },
+  "cursor": {
+    "size": 24,
+    "hotspots": {
+      "arrow": [
+        3,
+        2
+      ],
+      "hand": [
+        17,
+        5
+      ],
+      "text": [
+        18,
+        20
+      ],
+      "busy": [
+        22,
+        22
+      ],
+      "progress": [
+        3,
+        2
+      ]
+    }
+  },
+  "fonts": {
+    "ui": "Inter Variable",
+    "mono": "Noto Sans Mono",
+    "scale": 1.0
+  },
+  "borders": 1
+}
