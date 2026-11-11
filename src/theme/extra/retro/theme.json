@@ -1,0 +1,149 @@
+{
+  "schema": 1,
+  "id": "retro",
+  "name": "Retro",
+  "base": "light",
+  "author": "Handtop",
+  "description": "A 90s desktop: grey bevelled buttons, navy title bars, a teal desktop.",
+  "palette": {
+    "bg": "#c0c0c0",
+    "surface": "#c0c0c0",
+    "surface_hi": "#000080",
+    "border": "#808080",
+    "fg": "#000000",
+    "fg_dim": "#808080",
+    "accent": "#000080",
+    "accent_fg": "#000080",
+    "on_accent": "#ffffff",
+    "warn": "#806000",
+    "error": "#c00000",
+    "brightness": "#808000",
+    "success": "#008000"
+  },
+  "colors": {
+    "taskbar.border": "#ffffff",
+    "taskbar.apps_bg": "#c0c0c0",
+    "taskbar.apps_fg": "#000000",
+    "taskbar.active_bg": "#dfdfdf",
+    "titlebar.active_bg": "#000080",
+    "titlebar.inactive_bg": "#808080",
+    "titlebar.active_fg": "#ffffff",
+    "titlebar.inactive_fg": "#c0c0c0",
+    "titlebar.active_button": "#ffffff",
+    "titlebar.inactive_button": "#c0c0c0",
+    "drawer.bg": "#c0c0c0f7",
+    "drawer.entry_bg": "#ffffff",
+    "drawer.hover_bg": "#00008040",
+    "powermenu.backdrop": "#008080e6",
+    "powermenu.button_bg": "#c0c0c0",
+    "powermenu.button_border": "#000000",
+    "powermenu.hover_bg": "#000080",
+    "powermenu.hover_border": "#000000",
+    "powermenu.focus": "#000000",
+    "notify.bg": "#ffffe1",
+    "notify.fg": "#000000",
+    "notify.border": "#000000",
+    "osk.bg": "#c0c0c0",
+    "osk.key": "#c0c0c0",
+    "osk.border": "#000000",
+    "osk.fg": "#000000",
+    "osk.spec": "#dfdfdf",
+    "osk.spec_border": "#000000",
+    "osk.spec_fg": "#000080",
+    "osk.sel": "#000080",
+    "osk.sel_border": "#000000",
+    "osk.sel_fg": "#ffffff",
+    "osk.latch": "#ffff00",
+    "osk.latch_sel": "#c0c000",
+    "osk.latch_border": "#000000",
+    "osk.hit": "#808080",
+    "status.bg": "#008080",
+    "status.body": "#c0c0c0",
+    "status.body_edge": "#000000",
+    "status.text": "#ffffff",
+    "status.dim": "#dfdfdf",
+    "status.ok": "#00ff00",
+    "status.warn": "#ffff00",
+    "status.lit": "#ffff00",
+    "status.label": "#000000",
+    "display.bg": "#c0c0c0",
+    "display.card": "#dfdfdf",
+    "display.card_hi": "#ffffff",
+    "display.border": "#000000",
+    "display.accent": "#000080",
+    "display.desk": "#008080",
+    "display.btn": "#dfdfdf",
+    "terminal.bg": "#000000",
+    "terminal.fg": "#aaaaaa",
+    "terminal.cursor": "#aaaaaa",
+    "terminal.cursor_text": "#000000",
+    "terminal.selection_bg": "#aaaaaa",
+    "terminal.selection_fg": "#000000",
+    "terminal.ansi0": "#000000",
+    "terminal.ansi1": "#aa0000",
+    "terminal.ansi2": "#00aa00",
+    "terminal.ansi3": "#aa5500",
+    "terminal.ansi4": "#0000aa",
+    "terminal.ansi5": "#aa00aa",
+    "terminal.ansi6": "#00aaaa",
+    "terminal.ansi7": "#aaaaaa",
+    "terminal.ansi8": "#555555",
+    "terminal.ansi9": "#ff5555",
+    "terminal.ansi10": "#55ff55",
+    "terminal.ansi11": "#ffff55",
+    "terminal.ansi12": "#5555ff",
+    "terminal.ansi13": "#ff55ff",
+    "terminal.ansi14": "#55ffff",
+    "terminal.ansi15": "#ffffff",
+    "osd.bg": "#c0c0c0f2",
+    "osd.volume_border": "#000000",
+    "osd.volume_level": "#000080",
+    "osd.brightness_border": "#000000",
+    "osd.brightness_level": "#808000",
+    "osd.text": "#000000"
+  },
+  "wallpaper": {
+    "color": "#008080",
+    "image": null,
+    "mode": "center"
+  },
+  "status_screen": {
+    "style": "solid"
+  },
+  "gtk": {
+    "color_scheme": "default",
+    "theme": "Adwaita",
+    "icon_theme": "Adwaita"
+  },
+  "cursor": {
+    "size": 24,
+    "hotspots": {
+      "arrow": [
+        0,
+        0
+      ],
+      "hand": [
+        9,
+        0
+      ],
+      "text": [
+        7,
+        14
+      ],
+      "busy": [
+        11,
+        14
+      ],
+      "progress": [
+        0,
+        0
+      ]
+    }
+  },
+  "fonts": {
+    "ui": "W95FA",
+    "mono": "PxPlus IBM VGA 8x16",
+    "scale": 1.0
+  },
+  "borders": 1
+}

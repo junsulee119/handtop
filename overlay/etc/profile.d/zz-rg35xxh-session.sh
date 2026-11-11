@@ -21,6 +21,9 @@ if [ "$(tty)" = "/dev/tty1" ] && [ -z "${WAYLAND_DISPLAY:-}" ] && [ -z "${RG_NO_
     XCURSOR_THEME=$(sed -n "s/^CURSOR_THEME='\([A-Za-z0-9 ._+-]*\)'\$/\1/p" "$_rg_env" 2>/dev/null)
     XCURSOR_SIZE=$(sed -n "s/^CURSOR_SIZE='\([0-9]*\)'\$/\1/p" "$_rg_env" 2>/dev/null)
     export XCURSOR_THEME="${XCURSOR_THEME:-Handtop}" XCURSOR_SIZE="${XCURSOR_SIZE:-24}"
+    # A theme's own pointer is installed in ~/.local/share/icons (Handtop-Theme-<id>): make sure
+    # labwc (wlroots) and GTK (libwayland-cursor) both look there first.
+    export XCURSOR_PATH="${XCURSOR_PATH:-${XDG_DATA_HOME:-$HOME/.local/share}/icons:$HOME/.icons:/usr/share/icons:/usr/share/pixmaps}"
     exec labwc > "$HOME/.local/state/labwc.log" 2>&1
   fi
   echo "labwc failed to start 3 times; see ~/.local/state/labwc.log (shell left on tty1)."

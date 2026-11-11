@@ -24,10 +24,14 @@ Only this program reads them. Applying one renders every component's own files i
   - app drawer, power menu, OSK, External Controller, Display: read the rendered files when
     they open; taskbar icons: Waybar's icon scripts are signalled;
   - GTK: colour scheme, GTK theme, the generated icon theme "Handtop-Current" (linked into
-    ~/.local/share/icons), font scale (gsettings + ~/.config/gtk-3.0/settings.ini; open apps
+    ~/.local/share/icons), fonts (ui / mono at Handtop's 9 pt) and font scale (gsettings + ~/.config/gtk-3.0/settings.ini; open apps
     may need a restart);
   - the pointer (theme and size) changes at the next log-in, for labwc and GTK apps together
-    (--ensure gives GTK the pointer labwc started with).
+    (--ensure gives GTK the pointer labwc started with). A theme's own pointer is installed as
+    ~/.local/share/icons/Handtop-Theme-<id>; sets no longer in use are removed at log-in;
+  - a theme's own fonts: ~/.local/share/fonts/handtop-theme/ holds the current theme's (fc-cache);
+  - a theme's CSS for apps: ~/.config/gtk-3.0/gtk.css links to the rendered gtk.css (a file of
+    your own there wins; open apps follow after a restart).
 The choice (a theme id) is ~/.config/rg35xxh/theme; v0.3.x's "dark" / "light" are read as the
 built-in themes.
 """
@@ -40,7 +44,8 @@ import sys
 import time
 
 sys.path.insert(0, "/usr/local/lib/rg35xxh-theme")
-from handtop_theme import package, render  # noqa: E402
+from handtop_theme import package, render, xcursor  # noqa: E402
+from handtop_theme import schema as S  # noqa: E402
 from handtop_theme import theme as T  # noqa: E402
 from handtop_theme.current import STATE  # noqa: E402
 
@@ -59,6 +64,10 @@ ICON_LINK = os.path.join(DATA, "icons", render.ICON_THEME)
 OUR_ICON_THEMES = ("Adwaita", "Handtop-Light", render.ICON_THEME)   # anything else: the user's choice
 OLD_MARK = "X-Handtop-Theme=light"     # v0.3.x per-user .desktop copies with -light icons
 LOG = os.path.expanduser("~/.local/state/session")
+ICONS_DIR = os.path.join(DATA, "icons")
+FONTS_DIR = os.path.join(DATA, "fonts", "handtop-theme")
+FONTS_MARK = ".handtop-theme-fonts"
+GTK_CSS = os.path.join(CONFIG, "gtk-3.0", "gtk.css")
 
 
 def log(*a):
@@ -111,6 +120,7 @@ def _load(tid):
     raise SystemExit("rg35xxh-theme: even the built-in Handtop theme cannot be loaded")
 
 
+GTK_FONT_SIZE = 9               # Handtop's GTK text size (gschema override); the theme scales it
 GTK_BUILTIN = ("Adwaita", "Adwaita-dark", "HighContrast", "HighContrastInverse")   # inside GTK 3
 FALLBACK = {("gtk", "theme"): "Adwaita", ("gtk", "icon_theme"): "Adwaita",
             ("cursor", "theme"): "Handtop", ("fonts", "ui"): "Noto Sans", ("fonts", "mono"): "Noto Sans Mono"}
@@ -137,17 +147,114 @@ def _check_installed(t):
     """A theme names fonts, cursor, GTK and icon themes by name: any that is not installed is
     replaced by Handtop's (logged), so nothing falls back to a toolkit's odd default."""
     for (section, key), fallback in FALLBACK.items():
+        if (section, key) == ("cursor", "theme") and t.cursor_images:
+            continue                                   # its own: installed after rendering
         name = getattr(t, section)[key]
         if not _installed((section, key), name):
             log(f"{t.id}: {section}.{key} {name!r} is not installed; using {fallback!r}")
             getattr(t, section)[key] = fallback
 
 
+def _replace_dir(dest, fill):
+    """Build a folder with fill(tmp) next to dest, then swap it in."""
+    parent = os.path.dirname(dest)
+    os.makedirs(parent, exist_ok=True)
+    tmp = dest + ".new"
+    shutil.rmtree(tmp, ignore_errors=True)
+    os.makedirs(tmp)
+    fill(tmp)
+    old = dest + ".old"
+    shutil.rmtree(old, ignore_errors=True)
+    if os.path.lexists(dest):
+        os.rename(dest, old)
+    os.rename(tmp, dest)
+    shutil.rmtree(old, ignore_errors=True)
+
+
+def _fonts(t):
+    """The theme's own fonts in FONTS_DIR (only ever a folder this program made), then fc-cache.
+    Before the installed-check, so fonts.ui / fonts.mono are found."""
+    ours = os.path.isdir(FONTS_DIR) and os.path.exists(os.path.join(FONTS_DIR, FONTS_MARK))
+    if os.path.lexists(FONTS_DIR) and not ours:
+        if t.font_files:
+            log(f"{FONTS_DIR} is not Handtop's; the theme's fonts are not installed")
+        return
+    want = {f"{t.id}-{role}{os.path.splitext(f)[1]}": f for role, f in t.font_files.items()}
+    if ours:
+        have = sorted(n for n in os.listdir(FONTS_DIR) if n != FONTS_MARK)
+        if have == sorted(want) and all(_same(os.path.join(FONTS_DIR, n), f) for n, f in want.items()):
+            return
+    if not want:
+        if ours:
+            shutil.rmtree(FONTS_DIR, ignore_errors=True)
+            subprocess.run(["fc-cache", os.path.dirname(FONTS_DIR)], stdout=subprocess.DEVNULL,
+                           stderr=subprocess.DEVNULL)
+        return
+
+    def fill(d):
+        open(os.path.join(d, FONTS_MARK), "w").close()
+        for n, f in want.items():
+            shutil.copyfile(f, os.path.join(d, n))
+    _replace_dir(FONTS_DIR, fill)
+    subprocess.run(["fc-cache", "-f", FONTS_DIR], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
+def _same(a, b):
+    try:
+        with open(a, "rb") as fa, open(b, "rb") as fb:
+            return fa.read() == fb.read()
+    except OSError:
+        return False
+
+
+def _running_pointer():
+    """The pointer set labwc runs with (its XCURSOR_THEME): kept until the next log-in, also when
+    this program runs outside the session (ssh)."""
+    names = {os.environ.get("XCURSOR_THEME", "")}
+    for pid in _pids("labwc"):
+        try:
+            with open(f"/proc/{pid}/environ", "rb") as f:
+                for kv in f.read().split(b"\0"):
+                    if kv.startswith(b"XCURSOR_THEME="):
+                        names.add(kv[14:].decode(errors="replace"))
+        except OSError:
+            pass
+    return names
+
+
+def _pointer_sets(keep):
+    """Remove pointer sets this program made (Handtop-Theme-*, with its mark) not in keep."""
+    try:
+        names = os.listdir(ICONS_DIR)
+    except OSError:
+        return
+    for n in names:
+        p = os.path.join(ICONS_DIR, n)
+        if (n.startswith(S.CURSOR_SET_PREFIX) and n not in keep and not os.path.islink(p)
+                and os.path.exists(os.path.join(p, xcursor.MARK))):
+            shutil.rmtree(p, ignore_errors=True)
+
+
+def _pointer(t):
+    """Install the rendered pointer set as ~/.local/share/icons/Handtop-Theme-<id>. The set labwc
+    runs with (XCURSOR_THEME) is kept until the next log-in."""
+    src = os.path.join(STATE, "pointer")
+    if t.cursor_images and os.path.isdir(src):
+        dest = os.path.join(ICONS_DIR, t.cursor["theme"])
+        if os.path.lexists(dest) and not os.path.exists(os.path.join(dest, xcursor.MARK)):
+            log(f"{dest} is not Handtop's; the theme's pointer is not installed")
+        else:
+            _replace_dir(dest, lambda d: shutil.copytree(src, d, dirs_exist_ok=True))
+    _pointer_sets({t.cursor["theme"]} | _running_pointer())
+
+
 def prepare(tid):
     """Render theme tid (or the fallback) into STATE. Returns the Theme."""
     t = _load(tid)
+    _fonts(t)
     _check_installed(t)
     render.render(t, STATE)
+    _pointer(t)
     with open(STAMP, "w") as f:
         f.write(_stamp(t.path) + "\n")
     return t
@@ -174,6 +281,9 @@ def _gtk(t):
     if own_icons:
         _gsettings("icon-theme", render.ICON_THEME)
     _gsettings("text-scaling-factor", float(t.fonts["scale"]))
+    _gsettings("font-name", f"{t.fonts['ui']} {GTK_FONT_SIZE}")          # GTK apps' text
+    _gsettings("document-font-name", f"{t.fonts['ui']} {GTK_FONT_SIZE}")
+    _gsettings("monospace-font-name", f"{t.fonts['mono']} {GTK_FONT_SIZE}")
     cp = configparser.ConfigParser(interpolation=None)
     cp.optionxform = str
     try:
@@ -185,6 +295,7 @@ def _gtk(t):
     s = cp["Settings"]
     s["gtk-application-prefer-dark-theme"] = "true" if t.gtk["color_scheme"] == "prefer-dark" else "false"
     s["gtk-theme-name"] = t.gtk["theme"]
+    s["gtk-font-name"] = f"{t.fonts['ui']} {GTK_FONT_SIZE}"
     if own_icons and s.get("gtk-icon-theme-name", "Adwaita") in OUR_ICON_THEMES:
         s["gtk-icon-theme-name"] = render.ICON_THEME
     os.makedirs(os.path.dirname(GTK_INI), exist_ok=True)
@@ -347,6 +458,8 @@ def _session(t):
     # the terminal: foot reads ~/.config/foot/foot.ini first (a file of your own there wins);
     # running terminals keep their colours, new ones follow
     _link(os.path.join(CONFIG, "foot", "foot.ini"), os.path.join(STATE, "foot.ini"), ())
+    # GTK 3 apps: the theme's CSS (a header only when it has none); a gtk.css of your own wins
+    _link(GTK_CSS, os.path.join(STATE, "gtk.css"), ())
     _link(LABWC_USER_THEME, LABWC_RENDERED, (OLD_LABWC_LIGHT,))
     # labwc re-reads the theme file only on reconfigure (also when only its content changed)
     subprocess.run(["labwc", "--reconfigure"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -374,6 +487,7 @@ def ensure():
         ok = False
     if ok and os.path.exists(os.path.join(STATE, "theme.env")):
         _session_cursor()
+        _pointer_sets({render_env().get("CURSOR_THEME", "")} | _running_pointer())
         return
     t = prepare(tid)
     if t.id != tid or not os.path.exists(CHOICE) or open(CHOICE).read().strip() != t.id:

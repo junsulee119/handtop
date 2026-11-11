@@ -50,3 +50,22 @@ def shift(src, dst, dx):
     if cw > 0:
         pb.copy_area(sx, 0, cw, h, out, tx, 0)
     out.savev(dst, "png", [], [])
+
+
+def argb(src, size):
+    """The image scaled to size x size (HYPER; exact for pixel art drawn at 2x) as premultiplied
+    ARGB ints, for an Xcursor image."""
+    G = _gdk()
+    pb = load(src)
+    if not pb.get_has_alpha():
+        pb = pb.add_alpha(False, 0, 0, 0)
+    if (pb.get_width(), pb.get_height()) != (size, size):
+        pb = pb.scale_simple(size, size, G.InterpType.HYPER)
+    data, stride = pb.get_pixels(), pb.get_rowstride()
+    out = []
+    for y in range(size):
+        row = data[y * stride:y * stride + size * 4]
+        for x in range(0, size * 4, 4):
+            r, g, b, a = row[x], row[x + 1], row[x + 2], row[x + 3]
+            out.append(a << 24 | (r * a // 255) << 16 | (g * a // 255) << 8 | (b * a // 255))
+    return out

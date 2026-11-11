@@ -14,6 +14,7 @@ import os
 import re
 
 from . import colors as C
+from . import extras as X
 from . import pngcheck
 from . import schema as S
 
@@ -52,6 +53,9 @@ class Theme:
         self.status_style = "solid"
         self.borders = 1
         self.gtk, self.cursor, self.fonts = {}, {}, {}
+        self.cursor_images = {}     # shape -> path (the theme's own pointer, 48 px art)
+        self.font_files = {}        # role -> path (the theme's own fonts)
+        self.css = {}               # part -> CSS text added after Handtop's rules
         self.own = set()            # slots this theme supplies itself
         self.problems = []
 
@@ -163,6 +167,19 @@ def validate(data):
     cur = section("cursor")
     if "theme" in cur and not (isinstance(cur["theme"], str) and _NAME.match(cur["theme"])):
         err("cursor.theme", "not a cursor theme name")
+    for k in cur:
+        if k not in ("theme", "size", "hotspots"):
+            warn(f"cursor.{k}", "unknown field, ignored")
+    hs = cur.get("hotspots", {})
+    if not isinstance(hs, dict):
+        err("cursor.hotspots", "must be an object")
+    else:
+        for k, v in hs.items():
+            if k not in S.CURSOR_SHAPES:
+                warn(f"cursor.hotspots.{k}", "unknown pointer shape, ignored")
+            elif not (isinstance(v, list) and len(v) == 2
+                      and all(isinstance(n, int) and not isinstance(n, bool) and 0 <= n < S.CURSOR_ART for n in v)):
+                err(f"cursor.hotspots.{k}", f"[x, y], whole numbers 0-{S.CURSOR_ART - 1}")
     if "size" in cur:
         v = cur["size"]
         if not isinstance(v, int) or isinstance(v, bool) or not S.CURSOR_SIZES[0] <= v <= S.CURSOR_SIZES[1]:
@@ -311,6 +328,7 @@ def load(path, builtin_dir=BUILTIN_DIR, decode=False, _stack=()):
         val.update({k: v for k, v in data.get(attr, {}).items() if k in defaults})
         setattr(t, attr, val)
     t.names = {k: v for k, v in data.get("names", {}).items() if k in S.NAMEABLE}
+    _extras(t, data, decode)
 
     system = {k for k, v in data.get("icons", {}).items() if v == "system" and k in S.SYSTEM_OK}
     for slot, (w, h, kind) in S.IMAGE_SLOTS.items():
@@ -344,6 +362,77 @@ def load(path, builtin_dir=BUILTIN_DIR, decode=False, _stack=()):
     for rel in stray_files(path):
         P.append(Problem("warning", rel, "not part of a theme, ignored"))
     return t
+
+
+def _extras(t, data, decode):
+    """The theme's own pointer, fonts and CSS (never inherited from the base theme)."""
+    P, path = t.problems, t.path
+    for shape in S.CURSOR_SHAPES:
+        rel = S.cursor_file(shape)
+        f = os.path.join(path, rel)
+        if os.path.lexists(f):
+            P.extend(check_image(f, rel, (S.CURSOR_ART, S.CURSOR_ART), S.MAX_ICON_BYTES, decode))
+            t.cursor_images[shape] = f
+    if t.cursor_images:
+        own = data.get("cursor", {}).get("hotspots", {})
+        t.cursor["hotspots"] = {s: tuple(own.get(s, S.CURSOR_SHAPES[s][1])) for s in t.cursor_images}
+        t.cursor["theme"] = S.CURSOR_SET_PREFIX + t.id
+        if "theme" in data.get("cursor", {}):
+            P.append(Problem("warning", "cursor.theme", "ignored: the theme has its own pointer images"))
+    for role in S.FONT_ROLES:
+        found = [rel for rel in S.font_files(role) if os.path.lexists(os.path.join(path, rel))]
+        if len(found) > 1:
+            P.append(Problem("error", found[1], f"only one {role} font (.ttf or .otf)"))
+            continue
+        if not found:
+            continue
+        rel, f = found[0], os.path.join(path, found[0])
+        if not X.plain_file(f):
+            P.append(Problem("error", rel, "not a plain file"))
+            continue
+        if os.path.getsize(f) > S.MAX_FONT_BYTES:
+            P.append(Problem("error", rel, f"larger than {S.MAX_FONT_BYTES >> 20} MB"))
+            continue
+        msg = X.font_problem(f)
+        if msg:
+            P.append(Problem("error", rel, msg))
+            continue
+        name = data.get("fonts", {}).get(role)
+        if not name:
+            P.append(Problem("error", f"fonts.{role}", f"must name the family of {rel}"))
+            continue
+        if decode:
+            fams = X.font_families(f)
+            if fams == []:
+                P.append(Problem("error", rel, "fontconfig cannot read it as one font"))
+                continue
+            if fams is not None and name not in fams:
+                P.append(Problem("error", f"fonts.{role}",
+                                 f"{name!r} is not the family of {rel} ({', '.join(fams)})"))
+                continue
+        t.font_files[role] = f
+    lic = os.path.join(path, S.FONT_LICENSE_FILE)
+    if os.path.lexists(lic):
+        msg = None if X.plain_file(lic) else "not a plain file"
+        msg = msg or X.text_problem(lic)
+        if msg:
+            P.append(Problem("error", S.FONT_LICENSE_FILE, msg))
+    elif t.font_files:
+        P.append(Problem("warning", S.FONT_LICENSE_FILE,
+                         "missing: say which licence lets the fonts be shared"))
+    for part in S.CSS_PARTS:
+        rel = S.css_file(part)
+        f = os.path.join(path, rel)
+        if not os.path.lexists(f):
+            continue
+        msg = None if X.plain_file(f) else "not a plain file"
+        if not msg and os.path.getsize(f) > S.MAX_CSS_BYTES:
+            msg = f"larger than {S.MAX_CSS_BYTES >> 10} KB"
+        msg = msg or X.css_problem(f)
+        if msg:
+            P.append(Problem("error", rel, msg))
+        else:
+            t.css[part] = X.read_css(f)
 
 
 def check(path, builtin_dir=BUILTIN_DIR, decode=False):

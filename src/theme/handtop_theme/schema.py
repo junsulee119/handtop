@@ -256,6 +256,49 @@ def slot_file(slot):
 
 
 WALLPAPER_FILE = "images/wallpaper.png"
+
+# ---- the theme's own pointer, fonts and CSS (all optional) ------------------------------------------
+# Pointer: drawn at 48x48 (2x); Handtop makes a 24 px size from it and writes an Xcursor set.
+# Shapes not drawn come from Handtop's pointer. Hotspots in theme.json cursor.hotspots, 48 px units.
+CURSOR_SHAPES = OrderedDict([      # shape -> (cursor names, default hotspot at 48 px)
+    ("arrow", (("left_ptr", "default", "arrow", "top_left_arrow"), (0, 0))),
+    ("hand", (("hand2", "hand1", "pointer"), (10, 2))),
+    ("text", (("xterm", "text", "ibeam"), (6, 14))),
+    ("busy", (("watch", "wait"), (10, 14))),
+    ("progress", (("left_ptr_watch", "progress"), (0, 0))),
+])
+CURSOR_ART = 48
+CURSOR_SET_PREFIX = "Handtop-Theme-"   # ~/.local/share/icons/<prefix><id>: the rendered pointer set
+
+
+def cursor_file(shape):
+    return f"cursors/{shape}.png"
+
+
+# Fonts: ui / mono, TrueType or OpenType, named in fonts.ui / fonts.mono by their family name.
+FONT_ROLES = ("ui", "mono")
+FONT_EXTS = (".ttf", ".otf")
+FONT_LICENSE_FILE = "fonts/LICENSE.txt"
+MAX_FONT_BYTES = 2 * 1024 * 1024
+MAX_LICENSE_BYTES = 64 * 1024
+
+
+def font_files(role):
+    return [f"fonts/{role}{e}" for e in FONT_EXTS]
+
+
+# CSS added after Handtop's own rules (GTK CSS): no @import, no url().
+CSS_PARTS = OrderedDict([
+    ("apps", "GTK 3 apps' windows (linked as ~/.config/gtk-3.0/gtk.css unless you have your own)"),
+    ("taskbar", "the taskbar (Waybar)"),
+    ("drawer", "the app drawer (nwg-drawer)"),
+    ("powermenu", "the power menu (wlogout)"),
+])
+MAX_CSS_BYTES = 64 * 1024
+
+
+def css_file(part):
+    return f"css/{part}.css"
 PREVIEW_FILE = "preview.png"
 PREVIEW_SIZE = (256, 192)
 GUIDE_FILE = "GUIDE.md"
@@ -286,4 +329,12 @@ def allowed_files():
              WALLPAPER_FILE: (MAX_WALLPAPER_BYTES, None)}
     for slot, (w, h, _kind) in IMAGE_SLOTS.items():
         files[slot_file(slot)] = (MAX_ICON_BYTES, (w, h))
+    for shape in CURSOR_SHAPES:
+        files[cursor_file(shape)] = (MAX_ICON_BYTES, (CURSOR_ART, CURSOR_ART))
+    for role in FONT_ROLES:
+        for f in font_files(role):
+            files[f] = (MAX_FONT_BYTES, None)
+    files[FONT_LICENSE_FILE] = (MAX_LICENSE_BYTES, None)
+    for part in CSS_PARTS:
+        files[css_file(part)] = (MAX_CSS_BYTES, None)
     return files

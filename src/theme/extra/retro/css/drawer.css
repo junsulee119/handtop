@@ -1,0 +1,4 @@
+/* Retro: a grey dialog with a white sunken search field. */
+entry { background-color: #ffffff; color: #000000; border-radius: 0; border: 1px solid; border-color: #808080 #ffffff #ffffff #808080; box-shadow: inset 1px 1px #000000, inset -1px -1px #dfdfdf; }
+/* hover: apps.css's lighter grey (it applies here too and wins), black text */
+#pinned-box { border-bottom: 1px solid #808080; }

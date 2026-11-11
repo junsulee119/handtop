@@ -66,3 +66,12 @@ def test_grayscale_images_are_grey(builtins):
         for i in range(0, len(px) - n, n):
             assert px[i] == px[i + 1] == px[i + 2], slot
         assert S.IMAGE_SLOTS[slot][:2] == (pb.get_width(), pb.get_height())
+
+
+def test_argb_for_pointer(tmp_path):
+    from conftest import png
+    f = tmp_path / "p.png"
+    f.write_bytes(png(48, 48, (255, 0, 0, 128)))
+    px = imgops.argb(str(f), 24)
+    assert len(px) == 24 * 24
+    assert px[0] >> 24 == 128 and (px[0] >> 16) & 0xff == 128   # premultiplied red at half alpha

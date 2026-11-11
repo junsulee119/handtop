@@ -36,6 +36,10 @@ class StubOps:
         with open(dst, "wb") as f:
             f.write(png(w, h))
 
+    def argb(self, src, size):
+        self.calls.append(("argb", src, size))
+        return [0xff000000] * (size * size)
+
     def shift(self, src, dst, dx):
         self.calls.append(("shift", src, dst, dx))
         shutil.copyfile(src, dst)

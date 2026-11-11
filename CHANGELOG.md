@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Theme files can bring their own pointer, fonts and CSS.** A theme may include pointer images (made into a pointer set when applied), a text and a terminal font (checked with fontconfig, installed for your user only while the theme is in use, with their licence), and extra CSS for app windows, the taskbar, the app drawer and the power menu. A theme's text font now also reaches app windows.
+- **Retro theme (download).** A 90s desktop: grey bevelled buttons, navy title bars, a teal desktop, 16-colour pixel-art icons, its own pointer, a pixel font and a DOS-style terminal. Download `handtop-retro.handtop-theme` from the release and import it in the Theme app.
 - **The terminal and the volume / brightness bar follow the theme.** New terminal windows take the theme's colours (Handtop dark and light keep the dark terminal), and the bar takes them as soon as a theme is applied. A theme can also rename the default apps (Terminal, File Manager, ...).
 - **New Theme app.** Pick a theme from a list with a preview; **Duplicate** one with your own name, accent and background colour, icon set, pointer size and text size; **Import** theme files (`.handtop-theme`) from your home folder, `~/Themes`, `~/Downloads` or a USB drive / SD card, and **Export** yours to share them. A theme file that is broken or unsafe is refused with a list of what is wrong, and nothing changes.
 - **New themes: Debian, High contrast and Grayscale.** Debian looks like a stock Debian desktop (GNOME's Adwaita colours and pointer, Debian red, the apps' own icons); High contrast is white and yellow on black with thicker lines, larger text and a larger pointer; Grayscale is Handtop dark in shades of grey. A theme's pointer applies from the next log-in.

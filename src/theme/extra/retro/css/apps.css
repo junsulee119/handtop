@@ -1,0 +1,64 @@
+/* Retro: a 90s look for GTK 3 apps, on top of Adwaita (light). GTK applies this file to
+   every GTK 3 program, the taskbar, app drawer and power menu included. */
+* { border-radius: 0; -gtk-outline-radius: 0; }
+window, .background, dialog, popover, menu, .menu, menubar, toolbar, .toolbar, statusbar,
+notebook > header, actionbar, .sidebar, placessidebar, paned > separator {
+  background-color: #c0c0c0; background-image: none; color: #000000;
+}
+headerbar, .titlebar {
+  background-image: linear-gradient(to right, #000080, #1084d0); color: #ffffff;
+  border: none; box-shadow: none; min-height: 24px; padding: 0 4px;
+}
+headerbar label, .titlebar label, headerbar .title { color: #ffffff; font-weight: bold; }
+headerbar button { color: #000000; min-height: 16px; min-width: 16px; padding: 0 4px; }
+button, headerbar button, combobox button, spinbutton button {
+  background-color: #c0c0c0; background-image: none; color: #000000; text-shadow: none;
+  -gtk-icon-shadow: none; border: 1px solid; border-color: #ffffff #000000 #000000 #ffffff; box-shadow: inset -1px -1px #808080, inset 1px 1px #dfdfdf;
+}
+button:hover { background-color: #c8c8c8; background-image: none; }
+button:active, button:checked { background-color: #dfdfdf; background-image: none; border: 1px solid; border-color: #000000 #ffffff #ffffff #000000; box-shadow: inset 1px 1px #808080, inset -1px -1px #dfdfdf; }
+button:disabled { color: #808080; background-color: #c0c0c0; }
+button.flat { border-color: transparent; box-shadow: none; background-color: transparent; }
+button.flat:hover { border: 1px solid; border-color: #ffffff #000000 #000000 #ffffff; box-shadow: inset -1px -1px #808080, inset 1px 1px #dfdfdf; background-color: #c0c0c0; }
+entry, spinbutton, textview, textview text, treeview, treeview.view, iconview {
+  background-color: #ffffff; color: #000000;
+}
+entry, spinbutton { background-image: none; border: 1px solid; border-color: #808080 #ffffff #ffffff #808080; box-shadow: inset 1px 1px #000000, inset -1px -1px #dfdfdf; }
+entry:focus { border: 1px solid; border-color: #808080 #ffffff #ffffff #808080; box-shadow: inset 1px 1px #000000, inset -1px -1px #dfdfdf; }
+scrolledwindow.frame, frame > border { border: 1px solid; border-color: #808080 #ffffff #ffffff #808080; box-shadow: inset 1px 1px #000000, inset -1px -1px #dfdfdf; }
+*:selected, treeview.view:selected, row:selected, entry selection, textview text selection,
+.view:selected, iconview:selected, menuitem:hover, menu menuitem:hover, modelbutton:hover,
+placessidebar row:selected {
+  background-color: #000080; color: #ffffff;
+}
+menuitem:hover label, menu menuitem:hover label, row:selected label { color: #ffffff; }
+menu, .menu, popover { border: 1px solid; border-color: #ffffff #000000 #000000 #ffffff; box-shadow: inset -1px -1px #808080, inset 1px 1px #dfdfdf; padding: 2px; }
+menubar > menuitem:hover { background-color: #000080; color: #ffffff; }
+check, radio {
+  background-color: #ffffff; background-image: none; color: #000000; border: 1px solid; border-color: #808080 #ffffff #ffffff #808080; box-shadow: inset 1px 1px #000000, inset -1px -1px #dfdfdf;
+  min-width: 13px; min-height: 13px;
+}
+radio { border-radius: 50%; }
+switch { background-color: #ffffff; background-image: none; border: 1px solid; border-color: #808080 #ffffff #ffffff #808080; box-shadow: inset 1px 1px #000000, inset -1px -1px #dfdfdf; }
+switch:checked { background-color: #000080; }
+switch slider { background-color: #c0c0c0; background-image: none; border: 1px solid; border-color: #ffffff #000000 #000000 #ffffff; box-shadow: inset -1px -1px #808080, inset 1px 1px #dfdfdf; }
+notebook > header tab { background-color: #c0c0c0; border: 1px solid; border-color: #ffffff #000000 #000000 #ffffff; box-shadow: inset -1px -1px #808080, inset 1px 1px #dfdfdf; border-bottom: none; margin: 0 1px; }
+notebook > header tab:checked { background-color: #c0c0c0; padding-bottom: 6px; }
+notebook > stack { background-color: #c0c0c0; }
+scrollbar {
+  -GtkScrollbar-has-backward-stepper: true; -GtkScrollbar-has-forward-stepper: true;
+  background-color: #dfdfdf; background-image: none; border: none;
+}
+scrollbar slider {
+  min-width: 14px; min-height: 14px; margin: 0; background-color: #c0c0c0; border: 1px solid; border-color: #ffffff #000000 #000000 #ffffff; box-shadow: inset -1px -1px #808080, inset 1px 1px #dfdfdf;
+}
+scrollbar button { min-width: 14px; min-height: 14px; padding: 0; border: 1px solid; border-color: #ffffff #000000 #000000 #ffffff; box-shadow: inset -1px -1px #808080, inset 1px 1px #dfdfdf; }
+scrollbar.overlay-indicator:not(.dragging):not(.hovering) slider { min-width: 6px; min-height: 6px; }
+progressbar trough { background-color: #ffffff; border: 1px solid; border-color: #808080 #ffffff #ffffff #808080; box-shadow: inset 1px 1px #000000, inset -1px -1px #dfdfdf; min-height: 14px; }
+progressbar progress { background-color: #000080; background-image: none; border: none; min-height: 10px; }
+scale trough { background-color: #ffffff; border: 1px solid; border-color: #808080 #ffffff #ffffff #808080; box-shadow: inset 1px 1px #000000, inset -1px -1px #dfdfdf; }
+scale highlight { background-color: #000080; background-image: none; }
+scale slider { background-color: #c0c0c0; background-image: none; border: 1px solid; border-color: #ffffff #000000 #000000 #ffffff; box-shadow: inset -1px -1px #808080, inset 1px 1px #dfdfdf; min-width: 10px; min-height: 18px; }
+tooltip, tooltip.background { background-color: #ffffe1; color: #000000; border: 1px solid #000000; box-shadow: none; }
+tooltip * { color: #000000; }
+separator { background-color: #808080; min-height: 1px; min-width: 1px; }
