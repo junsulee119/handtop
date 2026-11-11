@@ -538,6 +538,8 @@ HOTSPOTS = {"arrow": [19, 3], "hand": [3, 0], "text": [3, 7], "busy": [5, 5], "p
 
 
 def pointer(shape):
+    """The 24 px drawing, centred, and its hotspot moved with it (HOTSPOTS are where the drawing
+    is made, at the top left; centring shifts it)."""
     p = P(24, 24)
     if shape in ("arrow", "progress"):
         glove(p, 0, 0)
@@ -546,7 +548,11 @@ def pointer(shape):
     else:
         rows = {"hand": UP, "text": IBEAM, "busy": COIN}[shape]
         p.grid(0, 0, [r.replace("_", " ") for r in rows])
-    return p.centred()
+    b = p.im.getbbox()
+    p.centred()
+    a = p.im.getbbox()
+    hx, hy = HOTSPOTS[shape]
+    return p, [hx + a[0] - b[0], hy + a[1] - b[1]]
 
 
 # ---- wallpaper: a dithered landscape, 320x240 doubled ---------------------------------------------------
@@ -633,7 +639,7 @@ THEME = {
     },
     "wallpaper": {"color": H["a"], "image": "images/wallpaper.png", "mode": "center"},
     "gtk": {"color_scheme": "default", "theme": "Adwaita", "icon_theme": "Adwaita"},
-    "cursor": {"size": 24, "hotspots": {k: [v[0] * 2, v[1] * 2] for k, v in HOTSPOTS.items()}},
+    "cursor": {"size": 24, "hotspots": {k: [v * 2 for v in pointer(k)[1]] for k in HOTSPOTS}},
     "fonts": {"ui": "Pixelify Sans", "mono": "VT323", "scale": 1.0},
     "borders": 2,
 }
@@ -670,7 +676,7 @@ notebook > header, notebook > stack, actionbar, .sidebar, placessidebar, paned >
   background-color: {H["a"]}; background-image: none; color: {H["d"]};
 }}
 headerbar, .titlebar {{ background-image: none; background-color: {H["d"]}; color: {H["a"]}; border: none; }}
-headerbar label, headerbar .title {{ color: {H["a"]}; }}
+headerbar .title, headerbar .subtitle {{ color: {H["a"]}; }}   /* not every label: buttons keep theirs */
 button {{ background-image: none; background-color: {H["b"]}; color: {H["d"]}; {BD} }}
 button:hover {{ background-color: {H["d"]}; color: {H["a"]}; }}
 button:hover label, button:hover image {{ color: {H["a"]}; }}
@@ -736,6 +742,7 @@ def main(out):
         for size in (22, 20):                                      # taskbar buttons and title bars
             small = P(size, size)
             small.im.paste(mini(name, light=True).im, ((size - 12) // 2, (size - 12) // 2))
+            small.outline("d")      # light on the dark bars, outlined for the light inactive title bar
             save(big(small, 1), f"icons/apps/{name}@{size}.png")
     for act in S.POWER_ACTIONS:
         p = power(act)
@@ -744,7 +751,7 @@ def main(out):
     for t in S.USB_TARGETS:
         save(usbtarget(t).rgba(), f"icons/controller/usbtarget-{t}.png")
     for shape in S.CURSOR_SHAPES:
-        save(big(pointer(shape), 2), f"cursors/{shape}.png")
+        save(big(pointer(shape)[0], 2), f"cursors/{shape}.png")
     save(wallpaper(), "images/wallpaper.png")
     for part, css in CSS.items():
         p = os.path.join(out, "css", f"{part}.css")

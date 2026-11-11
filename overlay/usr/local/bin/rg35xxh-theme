@@ -548,7 +548,12 @@ def _session(t):
     _link(LABWC_USER_THEME, LABWC_RENDERED, (OLD_LABWC_LIGHT,))
     # labwc re-reads the theme file only on reconfigure (also when only its content changed);
     # outside the session there is no labwc to tell, and it reads the file when it starts
-    _run(["labwc", "--reconfigure"], 10, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    # (labwc finds itself through LABWC_PID, which only its own children have: over ssh it is
+    # taken from the running labwc, else title bars kept the old theme until the next log-in)
+    env = dict(os.environ)
+    if not env.get("LABWC_PID") and _pids("labwc"):
+        env["LABWC_PID"] = str(_pids("labwc")[0])
+    _run(["labwc", "--reconfigure"], 10, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=env)
     return ok
 
 

@@ -7,7 +7,7 @@ notebook > header, notebook > stack, actionbar, .sidebar, placessidebar, paned >
   background-color: #9bbc0f; background-image: none; color: #0f380f;
 }
 headerbar, .titlebar { background-image: none; background-color: #0f380f; color: #9bbc0f; border: none; }
-headerbar label, headerbar .title { color: #9bbc0f; }
+headerbar .title, headerbar .subtitle { color: #9bbc0f; }   /* not every label: buttons keep theirs */
 button { background-image: none; background-color: #8bac0f; color: #0f380f; border: 2px solid #0f380f; }
 button:hover { background-color: #0f380f; color: #9bbc0f; }
 button:hover label, button:hover image { color: #9bbc0f; }

@@ -20,4 +20,5 @@ row:selected label, menuitem:hover label { color: #ffffff; }
 check:checked, radio:checked, switch:checked { background-image: none; background-color: #e8321d; border-color: #e8321d; }
 progressbar progress, scale highlight { background-image: none; background-color: #e8321d; border-color: #e8321d; }
 headerbar { background-image: none; background-color: #111111; color: #ffffff; box-shadow: none; }
-headerbar label { color: #ffffff; }
+headerbar .title, headerbar .subtitle { color: #ffffff; }   /* not every label: buttons keep theirs */
+headerbar button { color: #111111; }                          /* white button, black text */

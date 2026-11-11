@@ -319,3 +319,46 @@ def test_r12_stuck_command_counts_as_failed(cli):
     assert cli._run(["no-such-command-here"], 1).returncode != 0
     assert cli._run(["true"], 5).returncode == 0
     assert isinstance(r, subprocess.CompletedProcess)
+
+
+# ---- review of the extra themes (D01-D04, 2026-11-11) --------------------------------------------
+EXTRA = os.path.join(REPO, "src", "theme", "extra")
+EXTRA_IDS = sorted(os.listdir(EXTRA)) if os.path.isdir(EXTRA) else []
+
+
+@pytest.mark.parametrize("tid", EXTRA_IDS)
+def test_d01_hotspots_on_the_drawing(tid):
+    """Each pointer's hotspot is on an opaque pixel (Pocket's moved off when the art was centred)."""
+    from PIL import Image
+    with open(os.path.join(EXTRA, tid, "theme.json")) as f:
+        cur = json.load(f).get("cursor", {})
+    for shape, (x, y) in cur.get("hotspots", {}).items():
+        img = Image.open(os.path.join(EXTRA, tid, "cursors", f"{shape}.png")).convert("RGBA")
+        assert img.getpixel((x, y))[3] > 0, (tid, shape, x, y)
+
+
+@pytest.mark.parametrize("tid", EXTRA_IDS)
+def test_d03_headerbar_title_colour_spares_buttons(tid):
+    """A colour for every label in a header bar also hits its buttons' labels (white on white)."""
+    f = os.path.join(EXTRA, tid, "css", "apps.css")
+    if os.path.exists(f):
+        with open(f) as fh:
+            css = fh.read()
+        assert "headerbar label" not in css and ".titlebar label" not in css
+
+
+def test_d04_preview_tiles_a_tiled_wallpaper(tmp_path, builtins):
+    cairo = pytest.importorskip("cairo")
+    from handtop_theme import preview
+    tile = tmp_path / "w.png"
+    s = cairo.ImageSurface(cairo.FORMAT_ARGB32, 8, 8)
+    cr = cairo.Context(s)
+    cr.set_source_rgb(1, 0, 0)
+    cr.paint()
+    s.write_to_png(str(tile))
+    t = theme.load(os.path.join(builtins, "handtop-dark"), builtins)
+    t.wallpaper = {"color": "#000000", "image": str(tile), "mode": "tile"}
+    out = preview.draw(t, 640, 480, own_picture=False)
+    data, stride = out.get_data(), out.get_stride()
+    b, g, r, a = data[2 * stride + 4 * 2: 2 * stride + 4 * 2 + 4]       # (2, 2): a corner tile
+    assert (r, g, b) == (255, 0, 0)

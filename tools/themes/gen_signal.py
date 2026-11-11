@@ -15,7 +15,7 @@ import math
 import os
 import sys
 
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageFilter
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from gen_glass import V, VSharp, centred, centred_in  # noqa: E402  (drawing helpers only)
@@ -244,8 +244,19 @@ def app_glyph(name, w=3.2):
     return v.final()
 
 
+def halo(img, colour, r):
+    """A rim of colour r px wide around the drawing, under it. In the colour of the surface the icon
+    normally sits on it does not show; on the black of a hovered drawer tile or the active title
+    bar it keeps the black lines visible (they would merge with the black)."""
+    a = img.split()[3].filter(ImageFilter.MaxFilter(2 * r + 1))
+    out = Image.new("RGBA", img.size, colour + (0,))
+    out.putalpha(a)
+    out.alpha_composite(img)
+    return out
+
+
 def app(name):
-    return centred_in(app_glyph(name), (0, 0, 56, 56))
+    return halo(centred_in(app_glyph(name), (0, 0, 56, 56)), WHITE, 2)      # drawer tiles are white
 
 
 def app_small(name, size):
@@ -432,7 +443,8 @@ row:selected label, menuitem:hover label {{ color: {W}; }}
 check:checked, radio:checked, switch:checked {{ background-image: none; background-color: {R}; border-color: {R}; }}
 progressbar progress, scale highlight {{ background-image: none; background-color: {R}; border-color: {R}; }}
 headerbar {{ background-image: none; background-color: {I}; color: {W}; box-shadow: none; }}
-headerbar label {{ color: {W}; }}
+headerbar .title, headerbar .subtitle {{ color: {W}; }}   /* not every label: buttons keep theirs */
+headerbar button {{ color: {I}; }}                          /* white button, black text */
 """,
 }
 
@@ -467,7 +479,7 @@ def main(out):
     for name in S.HANDTOP_APPS + S.DEFAULT_APPS:
         save(app(name), f"icons/apps/{name}.png")
         for size in (22, 20):
-            save(app_small(name, size), f"icons/apps/{name}@{size}.png")
+            save(halo(app_small(name, size), PAPER, 1), f"icons/apps/{name}@{size}.png")   # taskbar
     for act in S.POWER_ACTIONS:
         save(power(act, False), f"icons/power-menu/{act}.png")
         save(power(act, True), f"icons/power-menu/{act}-focus.png")

@@ -46,6 +46,26 @@ def _paste(cr, img, x, y, h):
     return img.get_width() * z
 
 
+def _wallpaper(cr, img, mode):
+    """The wallpaper image on a 640 x 480 screen as swaybg places it (its -m modes)."""
+    iw, ih = img.get_width(), img.get_height()
+    if mode == "tile":
+        cr.set_source_surface(img, 0, 0)
+        cr.get_source().set_extend(cairo.EXTEND_REPEAT)
+    elif mode in ("stretch", "fill", "fit"):
+        if mode == "stretch":
+            kx, ky = 640 / iw, 480 / ih
+        else:
+            kx = ky = (max if mode == "fill" else min)(640 / iw, 480 / ih)
+        cr.translate((640 - iw * kx) / 2, (480 - ih * ky) / 2)
+        cr.scale(kx, ky)
+        cr.set_source_surface(img, 0, 0)
+    else:                                         # center (the taskbar's 32 px kept clear)
+        cr.set_source_surface(img, (640 - iw) / 2, (448 - ih) / 2)
+    cr.get_source().set_filter(cairo.FILTER_GOOD if mode in ("stretch", "fill", "fit") else cairo.FILTER_NEAREST)
+    cr.paint()
+
+
 def draw(t, W, H, font="Noto Sans", own_picture=True):
     """An ARGB32 surface W x H showing theme t (a resolved theme.Theme). own_picture: use the
     theme's preview.png when it has one (not for the Duplicate screen's live preview)."""
@@ -70,9 +90,7 @@ def draw(t, W, H, font="Noto Sans", own_picture=True):
             img = cairo.ImageSurface.create_from_png(t.wallpaper["image"])
             cr.save()
             cr.scale(W / 640, H / 480)
-            cr.set_source_surface(img, (640 - img.get_width()) / 2, (448 - img.get_height()) / 2)
-            cr.get_source().set_filter(cairo.FILTER_NEAREST)
-            cr.paint()
+            _wallpaper(cr, img, t.wallpaper["mode"])
             cr.restore()
         except (OSError, cairo.Error):
             pass

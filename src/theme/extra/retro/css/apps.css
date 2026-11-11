@@ -9,7 +9,7 @@ headerbar, .titlebar {
   background-image: linear-gradient(to right, #000080, #1084d0); color: #ffffff;
   border: none; box-shadow: none; min-height: 24px; padding: 0 4px;
 }
-headerbar label, .titlebar label, headerbar .title { color: #ffffff; font-weight: bold; }
+headerbar .title, headerbar .subtitle, .titlebar .title { color: #ffffff; font-weight: bold; }   /* buttons keep theirs */
 headerbar button { color: #000000; min-height: 16px; min-width: 16px; padding: 0 4px; }
 button, headerbar button, combobox button, spinbutton button {
   background-color: #c0c0c0; background-image: none; color: #000000; text-shadow: none;
