@@ -1,0 +1,4 @@
+/* Signal: a plain grid; the chosen app turns into a black block. The hover itself comes
+   from css/apps.css (GTK applies it here too, and it wins). */
+entry { border-radius: 0; border: none; border-bottom: 2px solid #111111; background-color: #ffffff; }
+button { border-radius: 0; }

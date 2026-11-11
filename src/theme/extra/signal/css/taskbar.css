@@ -1,0 +1,9 @@
+/* Signal: a white strip under a black rule; Apps is a black block; the active window is
+   underlined in red; bold numbers for the clock and battery. */
+#custom-apps { margin: 0; padding: 0 12px 0 31px; font-weight: bold; }
+#custom-apps:hover { background-color: #e8321d; }
+#taskbar button { margin: 0 1px; padding: 0 8px; border-bottom: 3px solid transparent; }
+#taskbar button.active { border-bottom-color: #e8321d; }
+#taskbar button:hover { background-color: #e4e4df; }
+#clock { font-weight: bold; font-size: 14px; }
+#battery { font-weight: bold; }

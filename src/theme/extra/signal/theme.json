@@ -1,0 +1,126 @@
+{
+  "schema": 1,
+  "id": "signal",
+  "name": "Signal",
+  "base": "light",
+  "author": "Handtop",
+  "description": "A minimal design object: black and white on a grid, one signal red, bold type.",
+  "palette": {
+    "bg": "#f2f2ef",
+    "surface": "#ffffff",
+    "surface_hi": "#e4e4df",
+    "border": "#111111",
+    "fg": "#111111",
+    "fg_dim": "#6b6b67",
+    "accent": "#e8321d",
+    "accent_fg": "#e8321d",
+    "on_accent": "#ffffff",
+    "warn": "#e8321d",
+    "error": "#e8321d",
+    "brightness": "#111111",
+    "success": "#111111"
+  },
+  "colors": {
+    "taskbar.bg": "#f2f2ef",
+    "taskbar.fg": "#111111",
+    "taskbar.border": "#111111",
+    "taskbar.apps_bg": "#111111",
+    "taskbar.apps_fg": "#ffffff",
+    "taskbar.active_bg": "#f2f2ef",
+    "taskbar.warn": "#e8321d",
+    "taskbar.critical": "#e8321d",
+    "titlebar.active_bg": "#111111",
+    "titlebar.inactive_bg": "#e4e4df",
+    "titlebar.active_fg": "#ffffff",
+    "titlebar.inactive_fg": "#6b6b67",
+    "titlebar.active_button": "#ffffff",
+    "titlebar.inactive_button": "#6b6b67",
+    "drawer.bg": "#f2f2ef",
+    "drawer.fg": "#111111",
+    "drawer.entry_bg": "#ffffff",
+    "drawer.hover_bg": "#111111",
+    "powermenu.backdrop": "#f2f2eff2",
+    "powermenu.button_bg": "#ffffff",
+    "powermenu.button_border": "#111111",
+    "powermenu.fg": "#111111",
+    "powermenu.hover_bg": "#e8321d",
+    "powermenu.hover_border": "#e8321d",
+    "powermenu.focus": "#e8321d",
+    "notify.bg": "#ffffff",
+    "notify.fg": "#111111",
+    "notify.border": "#111111",
+    "osk.bg": "#f2f2ef",
+    "osk.key": "#ffffff",
+    "osk.border": "#111111",
+    "osk.fg": "#111111",
+    "osk.spec": "#e4e4df",
+    "osk.spec_border": "#111111",
+    "osk.spec_fg": "#111111",
+    "osk.sel": "#111111",
+    "osk.sel_border": "#111111",
+    "osk.sel_fg": "#ffffff",
+    "osk.latch": "#e8321d",
+    "osk.latch_sel": "#e8321d",
+    "osk.latch_border": "#111111",
+    "osk.badge": "#e8321d",
+    "osk.hit": "#d0d0cb",
+    "osk.hit_border": "#111111",
+    "osk.hit_fg": "#111111",
+    "terminal.bg": "#ffffff",
+    "terminal.fg": "#111111",
+    "terminal.cursor": "#e8321d",
+    "terminal.cursor_text": "#ffffff",
+    "terminal.selection_bg": "#111111",
+    "terminal.selection_fg": "#ffffff",
+    "osd.bg": "#ffffff",
+    "osd.volume_border": "#111111",
+    "osd.volume_level": "#111111",
+    "osd.brightness_border": "#111111",
+    "osd.brightness_level": "#e8321d",
+    "osd.text": "#111111"
+  },
+  "wallpaper": {
+    "color": "#f2f2ef",
+    "image": "images/wallpaper.png",
+    "mode": "fill"
+  },
+  "status_screen": {
+    "style": "solid"
+  },
+  "gtk": {
+    "color_scheme": "default",
+    "theme": "Adwaita",
+    "icon_theme": "Adwaita"
+  },
+  "cursor": {
+    "size": 24,
+    "hotspots": {
+      "arrow": [
+        4,
+        3
+      ],
+      "hand": [
+        19,
+        4
+      ],
+      "text": [
+        18,
+        20
+      ],
+      "busy": [
+        22,
+        22
+      ],
+      "progress": [
+        4,
+        3
+      ]
+    }
+  },
+  "fonts": {
+    "ui": "Space Grotesk",
+    "mono": "Space Mono",
+    "scale": 1.0
+  },
+  "borders": 2
+}

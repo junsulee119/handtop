@@ -1,0 +1,3 @@
+/* Signal: square tiles with a black frame; the chosen one fills red. */
+button { border-radius: 0; font-weight: bold; }
+button:hover { color: #ffffff; }

@@ -1,0 +1,19 @@
+/* Signal: square corners and the red accent in GTK 3 apps (Adwaita light). GTK also reads this
+   in the taskbar, app drawer and power menu. */
+* { border-radius: 0; -gtk-outline-radius: 0; }
+button { background-image: none; background-color: #ffffff; border: 2px solid #111111; box-shadow: none; text-shadow: none; }
+button:hover { background-color: #111111; color: #ffffff; }
+button:hover label, button:hover image { color: #ffffff; }
+button:active, button:checked { background-color: #e8321d; border-color: #e8321d; color: #ffffff; }
+button.flat { border-color: transparent; background-color: transparent; }
+button.flat:hover { background-color: #111111; }
+entry { background-image: none; border: 2px solid #111111; box-shadow: none; }
+treeview.view:selected, .view:selected, iconview:selected, row:selected, placessidebar row:selected,
+textview text selection, entry selection, menuitem:hover, modelbutton:hover {
+  background-color: #e8321d; color: #ffffff;
+}
+row:selected label, menuitem:hover label { color: #ffffff; }
+check:checked, radio:checked, switch:checked { background-image: none; background-color: #e8321d; border-color: #e8321d; }
+progressbar progress, scale highlight { background-image: none; background-color: #e8321d; border-color: #e8321d; }
+headerbar { background-image: none; background-color: #111111; color: #ffffff; box-shadow: none; }
+headerbar label { color: #ffffff; }

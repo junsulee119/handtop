@@ -31,13 +31,15 @@ Taken unmodified from the official image
 ## Fonts in the downloadable themes
 
 Not in the SD card image: they are in `src/theme/extra/retro/fonts/` and inside the release asset
-`handtop-retro.handtop-theme`, and likewise for Glass and Pocket,
+`handtop-retro.handtop-theme`, and likewise for Glass, Pocket and Signal,
 unmodified, with their licences in each theme's `fonts/LICENSE.txt`.
 
 | Font | License | Source |
 |---|---|---|
 | W95FA (Retro, `fonts/ui.otf`), by Alina Sava | SIL Open Font License 1.1 | [FontsArena](https://fontsarena.com/w95fa-by-alina-sava/) |
 | Inter 4.1, variable (Glass, `fonts/ui.ttf`), by Rasmus Andersson and the Inter project | SIL Open Font License 1.1 | [rsms/inter](https://github.com/rsms/inter) |
+| Space Grotesk, variable (Signal, `fonts/ui.ttf`), by Florian Karsten | SIL Open Font License 1.1 | [Space Grotesk](https://github.com/floriankarsten/space-grotesk) via Google Fonts |
+| Space Mono (Signal, `fonts/mono.ttf`), by Colophon Foundry | SIL Open Font License 1.1 | [Space Mono](https://github.com/googlefonts/spacemono) via Google Fonts |
 | Pixelify Sans, variable (Pocket, `fonts/ui.ttf`), by Stefie Justprince | SIL Open Font License 1.1 | [Pixelify Sans](https://github.com/eifetx/Pixelify-Sans) via Google Fonts |
 | VT323 (Pocket, `fonts/mono.ttf`), by Peter Hull | SIL Open Font License 1.1 | [VT323](https://github.com/phoikoi/VT323) via Google Fonts |
 | PxPlus IBM VGA 8x16 (`fonts/mono.ttf`), from The Ultimate Oldschool PC Font Pack v2.2 by VileR | CC BY-SA 4.0 | [int10h.org](https://int10h.org/oldschool-pc-fonts/) |
