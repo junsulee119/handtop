@@ -178,7 +178,6 @@ def test_display(rendered, palettes, tid, key):
 @pytest.mark.parametrize("tid,key", [("handtop-dark", "dark"), ("handtop-light", "light")])
 def test_status_screen(rendered, palettes, tid, key):
     pal, t = palettes["status"][key], rendered[tid][0]
-    assert t.status_style == ("solid" if key == "dark" else "hologram")
     assert len(pal) - 1 + 4 == sum(1 for k in t.colors if k.startswith("status."))   # FACE = 4 keys
     for k, col in pal.items():
         if k == "FACE":

@@ -91,11 +91,11 @@ def test_bad_sections():
                 names={"foot": "", "theme": "X", "thunar": "Files"})
     e, w = errors(d), warnings(d)
     assert {"palette.bg", "colors.osk.bg", "colors.taskbar.bg", "wallpaper.image", "wallpaper.mode",
-            "wallpaper.color", "status_screen.style", "gtk.color_scheme", "gtk.theme", "cursor.size",
+            "wallpaper.color", "gtk.color_scheme", "gtk.theme", "cursor.size",
             "cursor.theme", "fonts.scale", "fonts.ui", "icons.apps/thunar", "icons.apps/theme",
             "names.foot"} <= e
     assert "colors.titlebar.active_button" not in e          # nullable
-    assert {"palette.nope", "colors.x.y", "icons.nope", "names.theme"} <= w
+    assert {"palette.nope", "colors.x.y", "icons.nope", "names.theme", "status_screen"} <= w   # dropped field
     assert "names.thunar" not in e | w
 
 

@@ -26,7 +26,7 @@ import shutil
 import tempfile
 
 from . import colors as C
-from . import xcursor
+from . import fsutil, xcursor
 from . import schema as S
 
 ICON_THEME = "Handtop-Current"
@@ -258,7 +258,7 @@ def theme_env(t, final_dir):
            ("ICON_THEME", ICON_THEME),
            ("WALLPAPER", os.path.join(final_dir, "wallpaper.png") if t.wallpaper["image"] else ""),
            ("WALLPAPER_COLOR", t.wallpaper["color"]), ("WALLPAPER_MODE", t.wallpaper["mode"]),
-           ("STATUS_STYLE", t.status_style), ("BORDERS", t.borders),
+           ("BORDERS", t.borders),
            ("GTK_COLOR_SCHEME", t.gtk["color_scheme"]), ("GTK_THEME", t.gtk["theme"]),
            ("GTK_ICON_THEME", t.gtk["icon_theme"]),
            ("CURSOR_THEME", t.cursor["theme"]), ("CURSOR_SIZE", t.cursor["size"]),
@@ -394,14 +394,10 @@ def render(theme, state_dir, ops=None, app_dirs=APP_DIRS):
         for desktop, text in app_names(theme, app_dirs).items():
             with open(os.path.join(tmp, "applications", desktop), "w", encoding="utf-8") as f:
                 f.write(text)
-        old = None
-        if os.path.lexists(final):
-            old = tempfile.mkdtemp(prefix=".old-", dir=parent)
-            os.rename(final, os.path.join(old, "x"))
-        os.rename(tmp, final)
-        tmp = None
-        if old:
-            shutil.rmtree(old, ignore_errors=True)
+        with fsutil.lock():
+            fsutil.recover(final)
+            fsutil.swap_in(tmp, final)               # on failure the rendered theme in use stays
+            tmp = None
     finally:
         if tmp:
             shutil.rmtree(tmp, ignore_errors=True)

@@ -724,7 +724,6 @@ THEME = {
         "osd.brightness_border": HEX["K"], "osd.brightness_level": HEX["O"], "osd.text": HEX["K"],
     },
     "wallpaper": {"color": HEX["T"], "image": "images/wallpaper.png", "mode": "tile"},
-    "status_screen": {"style": "solid"},
     "gtk": {"color_scheme": "default", "theme": "Adwaita", "icon_theme": "Adwaita"},
     "cursor": {"size": 24, "hotspots": HOTSPOTS},
     "fonts": {"ui": "W95FA", "mono": "PxPlus IBM VGA 8x16", "scale": 1.0},

@@ -31,11 +31,10 @@ def generate():
     a("| `id` | 1-40 characters `a-z`, `0-9`, `-`; also the folder name. `handtop-…` is kept for the built-in themes |")
     a(f"| `name` | shown in the Theme app, 1-{S.NAME_MAX} characters |")
     a("| `base` | `dark` or `light`: the built-in Handtop theme that fills in anything left out, and what apps that only know dark / light use |")
-    a("| `author`, `description` | optional, one line each |")
+    a("| `author`, `description` | optional, one line each (anything else is ignored) |")
     a("| `palette` | the shared colours (below) |")
     a("| `colors` | optional per-part colours (below), `\"<part>.<key>\": \"#rrggbb\"` |")
-    a(f"| `wallpaper` | `color`, `image` (`\"{S.WALLPAPER_FILE}\"` or `null`), `mode` ({', '.join(S.WALLPAPER_MODES)}) |")
-    a(f"| `status_screen` | `style`: {' or '.join(S.STATUS_STYLES)} (External Controller's drawn handheld) |")
+    a(f"| `wallpaper` | `color` (an alpha part is dropped: the wallpaper is opaque), `image` (`\"{S.WALLPAPER_FILE}\"` or `null`), `mode` ({', '.join(S.WALLPAPER_MODES)}) |")
     a(f"| `gtk` | `color_scheme` ({', '.join(S.GTK_SCHEMES)}), `theme`, `icon_theme`: installed names |")
     a(f"| `cursor` | `theme` (installed; ignored when the theme draws its own pointer), `size` {S.CURSOR_SIZES[0]}-{S.CURSOR_SIZES[1]}, "
       f"`hotspots` (`\"<shape>\": [x, y]` on the {S.CURSOR_ART} px drawing). Applies at the next log-in |")

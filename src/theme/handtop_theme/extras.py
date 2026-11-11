@@ -12,6 +12,7 @@ import subprocess
 
 FONT_MAGIC = (b"\x00\x01\x00\x00", b"OTTO", b"true")
 _BAD_CSS = re.compile(r"@import|url\s*\(|\\", re.I)
+_COMMENT = re.compile(r"/\*.*?\*/", re.S)
 
 
 def font_problem(path):
@@ -60,7 +61,11 @@ def css_problem(path):
         return "not UTF-8 text"
     if "\x00" in text:
         return "not text"
-    m = _BAD_CSS.search(text)
+    # GTK reads a comment as white space ("url/**/(" is a url): check the text without them
+    bare = _COMMENT.sub(" ", text)
+    if "/*" in bare:
+        return "a comment is not closed"
+    m = _BAD_CSS.search(bare)
     if m:
         return f"{m.group(0)!r} is not allowed (no @import, url() or backslash escapes)"
     return None

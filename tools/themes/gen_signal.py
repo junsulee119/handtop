@@ -384,7 +384,6 @@ THEME = {
         "osd.brightness_level": R, "osd.text": I,
     },
     "wallpaper": {"color": P, "image": "images/wallpaper.png", "mode": "fill"},
-    "status_screen": {"style": "solid"},
     "gtk": {"color_scheme": "default", "theme": "Adwaita", "icon_theme": "Adwaita"},
     "cursor": {"size": 24, "hotspots": HOTSPOTS},
     "fonts": {"ui": "Space Grotesk", "mono": "Space Mono", "scale": 1.0},

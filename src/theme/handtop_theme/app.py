@@ -11,6 +11,7 @@ with the D-pad / pointer and A; Escape (B) goes back from a sub-screen.
 Applying is rg35xxh-theme's apply(); everything else is the handtop_theme package."""
 import os
 import subprocess
+import sys
 
 import cairo
 import gi
@@ -185,7 +186,11 @@ class App:
     def reload(self, select=None):
         self.themes = {}
         for tid, path, builtin in package.list_themes():
-            t = T.load(path)
+            try:
+                t = T.load(path)
+            except Exception as e:                   # one broken theme never hides the others
+                print(f"rg35xxh-theme: {tid}: cannot be read ({e})", file=sys.stderr)
+                continue
             if not t.errors:
                 self.themes[tid] = t
         ids = [i for i in ORDER if i in self.themes]
@@ -498,7 +503,11 @@ class App:
         d.destroy()
         if path:
             if not path.endswith(Z.EXT):
-                path += Z.EXT
+                path += Z.EXT                       # the chooser asked about the name without it
+                if os.path.lexists(path) and not self.confirm(
+                        f"Replace “{os.path.basename(path)}”?", "A file with this name is already there.",
+                        "Replace"):
+                    return
             self.on_export(path)
 
     def on_import(self, path, replace=False):
@@ -508,6 +517,9 @@ class App:
         except package.ThemeExists as e:
             if self.confirm(f"Replace “{e.id}”?", "A theme with this id is already installed.", "Replace"):
                 self.on_import(path, replace=True)
+            return
+        except OSError as e:
+            self.show_main(f"Could not import {name}: {e.strerror or e}")
             return
         except T.ThemeError as e:
             lines = [f"• {p.where}: {p.message}" for p in e.problems[:8]]

@@ -45,6 +45,13 @@ class StubOps:
         shutil.copyfile(src, dst)
 
 
+@pytest.fixture(autouse=True)
+def _theme_lock(tmp_path_factory, monkeypatch):
+    """The theme-change lock lives in a test folder of its own, not in ~/.local/state."""
+    from handtop_theme import fsutil
+    monkeypatch.setattr(fsutil, "LOCK", str(tmp_path_factory.mktemp("lock") / "theme.lock"))
+
+
 @pytest.fixture(scope="session")
 def builtins(tmp_path_factory):
     d = tmp_path_factory.mktemp("builtin")

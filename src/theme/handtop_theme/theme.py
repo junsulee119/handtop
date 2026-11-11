@@ -22,7 +22,7 @@ BUILTIN_DIR = "/usr/share/rg35xxh/themes"
 _NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9 ._+-]{0,63}\Z")    # font / GTK / cursor theme names
 _CTRL = re.compile(r"[\x00-\x1f\x7f]")
 TOP_KEYS = ("schema", "id", "name", "base", "author", "description", "palette", "colors",
-            "wallpaper", "status_screen", "gtk", "cursor", "fonts", "borders", "icons", "names")
+            "wallpaper", "gtk", "cursor", "fonts", "borders", "icons", "names")
 
 
 class Problem:
@@ -50,7 +50,6 @@ class Theme:
         self.author = self.description = ""
         self.palette, self.colors, self.images, self.names = {}, {}, {}, {}
         self.wallpaper = {"color": None, "image": None, "mode": "center"}
-        self.status_style = "solid"
         self.borders = 1
         self.gtk, self.cursor, self.fonts = {}, {}, {}
         self.cursor_images = {}     # shape -> path (the theme's own pointer, 48 px art)
@@ -82,10 +81,27 @@ def read_json(path, problems):
     except (OSError, UnicodeDecodeError, ValueError) as e:
         problems.append(Problem("error", S.THEME_FILE, f"not valid JSON ({e})"))
         return None
+    except RecursionError:
+        problems.append(Problem("error", S.THEME_FILE, "nested too deeply"))
+        return None
+    if _depth(data) > S.MAX_JSON_DEPTH:
+        problems.append(Problem("error", S.THEME_FILE, "nested too deeply"))
+        return None
     if not isinstance(data, dict):
         problems.append(Problem("error", S.THEME_FILE, "must be a JSON object"))
         return None
     return data
+
+
+def _depth(data):
+    """How deeply lists and objects nest (without recursion)."""
+    deepest, todo = 0, [(data, 1)]
+    while todo:
+        v, d = todo.pop()
+        if isinstance(v, (dict, list)):
+            deepest = max(deepest, d)
+            todo.extend((x, d + 1) for x in (v.values() if isinstance(v, dict) else v))
+    return deepest
 
 
 def _text(v, maxlen):
@@ -153,9 +169,6 @@ def validate(data):
     if "mode" in wp and wp["mode"] not in S.WALLPAPER_MODES:
         err("wallpaper.mode", "one of " + ", ".join(S.WALLPAPER_MODES))
 
-    st = section("status_screen")
-    if "style" in st and st["style"] not in S.STATUS_STYLES:
-        err("status_screen.style", "\"solid\" or \"hologram\"")
 
     gtk = section("gtk")
     if "color_scheme" in gtk and gtk["color_scheme"] not in S.GTK_SCHEMES:
@@ -280,7 +293,8 @@ def load(path, builtin_dir=BUILTIN_DIR, decode=False, _stack=()):
                 P.extend(check_image(f, S.slot_file(slot), (w, h), S.MAX_ICON_BYTES))
         return t
     t.id, t.name, t.base = data["id"], data["name"], data["base"]
-    t.author, t.description = data.get("author", ""), data.get("description", "")
+    # a bad author / description was warned about as ignored: it is ignored (the app shows text only)
+    t.author, t.description = (data[k] if _text(data.get(k), 200) else "" for k in ("author", "description"))
     base_id = S.RESERVED_PREFIX + t.base
     is_base = t.id == base_id
     base = None
@@ -308,7 +322,8 @@ def load(path, builtin_dir=BUILTIN_DIR, decode=False, _stack=()):
     wp = data.get("wallpaper", {})
     # wallpaper colour missing: the theme's own background if it sets one, else the base's
     default_wp = base.wallpaper["color"] if base and "bg" not in own_pal else t.palette["bg"]
-    t.wallpaper = {"color": wp.get("color", default_wp),
+    # swaybg takes #rrggbb only: a colour's alpha (its own or the palette's) is dropped
+    t.wallpaper = {"color": wp.get("color", default_wp)[:7],
                    "mode": wp.get("mode", base.wallpaper["mode"] if base else "center"),
                    "image": None}
     if wp.get("image"):
@@ -318,7 +333,6 @@ def load(path, builtin_dir=BUILTIN_DIR, decode=False, _stack=()):
         else:
             P.extend(check_image(f, S.WALLPAPER_FILE, None, S.MAX_WALLPAPER_BYTES, decode))
             t.wallpaper["image"] = f
-    t.status_style = data.get("status_screen", {}).get("style", base.status_style if base else "solid")
     t.borders = data.get("borders", base.borders if base else 1)
     for attr, defaults in (("gtk", {"color_scheme": "prefer-dark" if t.base == "dark" else "default",
                                     "theme": "Adwaita", "icon_theme": "Adwaita"}),

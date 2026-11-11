@@ -632,7 +632,6 @@ THEME = {
         "osd.brightness_border": H["d"], "osd.brightness_level": H["c"], "osd.text": H["d"],
     },
     "wallpaper": {"color": H["a"], "image": "images/wallpaper.png", "mode": "center"},
-    "status_screen": {"style": "solid"},
     "gtk": {"color_scheme": "default", "theme": "Adwaita", "icon_theme": "Adwaita"},
     "cursor": {"size": 24, "hotspots": {k: [v[0] * 2, v[1] * 2] for k, v in HOTSPOTS.items()}},
     "fonts": {"ui": "Pixelify Sans", "mono": "VT323", "scale": 1.0},

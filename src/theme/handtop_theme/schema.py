@@ -167,7 +167,6 @@ COLORS = OrderedDict([
 
 # ---- other fields ------------------------------------------------------------------------------
 WALLPAPER_MODES = ("center", "fill", "fit", "stretch", "tile")
-STATUS_STYLES = ("solid", "hologram")
 GTK_SCHEMES = ("prefer-dark", "default", "prefer-light")
 CURSOR_SIZES = (16, 64)          # inclusive range
 FONT_SCALES = (0.75, 1.5)
@@ -320,6 +319,7 @@ MAX_ICON_BYTES = 256 * 1024
 MAX_WALLPAPER_BYTES = 4 * 1024 * 1024
 MAX_WALLPAPER_SIZE = (3840, 2160)
 MAX_JSON_BYTES = 64 * 1024
+MAX_JSON_DEPTH = 16              # theme.json nests 4 deep; deeper is refused, not parsed further
 MAX_GUIDE_BYTES = 256 * 1024
 
 

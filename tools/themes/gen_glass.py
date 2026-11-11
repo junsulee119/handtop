@@ -630,7 +630,6 @@ THEME = {
         "terminal.cursor_text": "#ffffff", "terminal.selection_bg": "#c9ccf5", "terminal.selection_fg": hx(INK),
     },
     "wallpaper": {"color": "#5a5cd6", "image": "images/wallpaper.png", "mode": "fill"},
-    "status_screen": {"style": "solid"},
     "gtk": {"color_scheme": "default", "theme": "Adwaita", "icon_theme": "Adwaita"},
     "cursor": {"size": 24, "hotspots": HOTSPOTS},
     "fonts": {"ui": "Inter Variable", "mono": "Noto Sans Mono", "scale": 1.0},

@@ -46,9 +46,6 @@
     "image": null,
     "mode": "center"
   },
-  "status_screen": {
-    "style": "solid"
-  },
   "gtk": {
     "color_scheme": "default",
     "theme": "Adwaita",

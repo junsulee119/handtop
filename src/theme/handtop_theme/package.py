@@ -13,7 +13,7 @@ import stat
 import tempfile
 import zipfile
 
-from . import guide
+from . import fsutil, guide
 from . import schema as S
 from .theme import BUILTIN_DIR, Problem, ThemeError, load
 
@@ -159,16 +159,12 @@ def import_theme(zip_path, user_dir=USER_DIR, builtin_dir=BUILTIN_DIR, replace=F
         if t.id.startswith(S.RESERVED_PREFIX):
             raise ThemeError([Problem("error", "id", f"\"{S.RESERVED_PREFIX}…\" is kept for the built-in themes")])
         final = os.path.join(user_dir, t.id)
-        if os.path.lexists(final) and not replace:
-            raise ThemeExists(t.id)
-        old = None
-        if os.path.lexists(final):
-            old = tempfile.mkdtemp(prefix=".old-", dir=user_dir)
-            os.rename(final, os.path.join(old, "t"))
-        os.rename(tmp, final)
-        tmp = None
-        if old:
-            shutil.rmtree(old, ignore_errors=True)
+        with fsutil.lock():
+            fsutil.recover(final)
+            if os.path.lexists(final) and not replace:
+                raise ThemeExists(t.id)
+            fsutil.swap_in(tmp, final)               # on failure the installed one stays
+            tmp = None
         t2 = load(final, builtin_dir, False)
         t2.problems = problems + [p for p in t2.problems if p.level != "error"]
         return t2
@@ -239,10 +235,13 @@ def duplicate(path, new_id, new_name, user_dir=USER_DIR, builtin_dir=BUILTIN_DIR
         t = load(tmp, builtin_dir)
         if t.errors:
             raise ThemeError(t.problems)
-        os.rename(tmp, dest)
-        tmp = None
-        with open(os.path.join(dest, S.GUIDE_FILE), "w", encoding="utf-8") as fh:
+        with open(os.path.join(tmp, S.GUIDE_FILE), "w", encoding="utf-8") as fh:
             fh.write(guide.generate())               # for whoever edits the copy
+        with fsutil.lock():
+            if os.path.lexists(dest):
+                raise ThemeExists(new_id)
+            os.rename(tmp, dest)
+            tmp = None
         return load(dest, builtin_dir)
     finally:
         if tmp:
@@ -254,7 +253,8 @@ def delete(theme_id, user_dir=USER_DIR):
     if not re.match(S.ID_RE, theme_id) or theme_id.startswith(S.RESERVED_PREFIX):
         raise ValueError(f"not a user theme: {theme_id!r}")
     p = os.path.join(user_dir, theme_id)
-    if os.path.islink(p):
-        os.unlink(p)
-    elif os.path.isdir(p):
-        shutil.rmtree(p)
+    with fsutil.lock():
+        if os.path.islink(p):
+            os.unlink(p)
+        elif os.path.isdir(p):
+            shutil.rmtree(p)

@@ -36,15 +36,18 @@ The choice (a theme id) is ~/.config/rg35xxh/theme; v0.3.x's "dark" / "light" ar
 built-in themes.
 """
 import configparser
+import hashlib
+import json
 import os
 import shutil
 import signal
 import subprocess
 import sys
+import tempfile
 import time
 
 sys.path.insert(0, "/usr/local/lib/rg35xxh-theme")
-from handtop_theme import package, render, xcursor  # noqa: E402
+from handtop_theme import fsutil, package, render, xcursor  # noqa: E402
 from handtop_theme import schema as S  # noqa: E402
 from handtop_theme import theme as T  # noqa: E402
 from handtop_theme.current import STATE  # noqa: E402
@@ -74,6 +77,16 @@ def log(*a):
     print("rg35xxh-theme:", *a, file=sys.stderr)
 
 
+def _run(cmd, timeout, **kw):
+    """subprocess.run with a time limit: a stuck fc-cache / gsettings / labwc never holds up the
+    log-in or the Theme app for good. A command that cannot run or takes too long counts as failed."""
+    try:
+        return subprocess.run(cmd, timeout=timeout, **kw)
+    except (OSError, subprocess.TimeoutExpired) as e:
+        log(f"{cmd[0]}: {e}")
+        return subprocess.CompletedProcess(cmd, 1, "", "")
+
+
 # ---- the choice ------------------------------------------------------------------------------------
 def current():
     try:
@@ -92,16 +105,64 @@ def _save_choice(tid):
     os.replace(tmp, CHOICE)
 
 
-def _stamp(path):
-    """What the rendered files were made from: renderer version, theme folder, newest file."""
-    newest = 0
-    for root, _d, files in os.walk(path):
-        for n in files:
+def _files(path):
+    """Every file under path with its size and time: a file added, changed or removed changes this."""
+    h = hashlib.sha256()
+    for root, dirs, files in os.walk(path):
+        dirs.sort()
+        for n in sorted(files):
+            f = os.path.join(root, n)
             try:
-                newest = max(newest, os.stat(os.path.join(root, n)).st_mtime_ns)
+                st = os.stat(f)
             except OSError:
-                pass
-    return f"{render.RENDER_VERSION} {os.path.realpath(path)} {newest}"
+                continue
+            h.update(f"{os.path.relpath(f, path)}\0{st.st_size}\0{st.st_mtime_ns}\n".encode())
+    return h.hexdigest()[:16]
+
+
+def _stamp(path):
+    """What the rendered files are made from: the renderer version, the theme folder and its files,
+    and the built-in theme it builds on (a user theme takes what it leaves out from there)."""
+    parts = [str(render.RENDER_VERSION), os.path.realpath(path), _files(path)]
+    try:
+        with open(os.path.join(path, S.THEME_FILE), encoding="utf-8") as f:
+            base = json.load(f).get("base")
+    except (OSError, ValueError, RecursionError, AttributeError):
+        base = None
+    tid = os.path.basename(os.path.normpath(path))
+    if base in S.BASES and tid != S.RESERVED_PREFIX + base:
+        bpath = package.find(S.RESERVED_PREFIX + base)
+        if bpath:
+            parts.append(_files(bpath))
+    return " ".join(parts)
+
+
+def _outputs():
+    """The rendered files, as written to the stamp (checked at log-in: none may be missing)."""
+    out = []
+    for root, _d, files in os.walk(STATE):
+        out += [os.path.relpath(os.path.join(root, n), STATE) for n in files if not n.startswith(".stamp")]
+    return sorted(out)
+
+
+def _write_stamp(t):
+    """Written last, when the whole change is done: until then --ensure redoes it."""
+    tmp = STAMP + ".tmp"
+    with open(tmp, "w") as f:
+        f.write(_stamp(t.path) + "\n" + "\n".join(_outputs()) + "\n")
+    os.replace(tmp, STAMP)
+
+
+def _stamp_ok(path):
+    """The stamp matches the theme at path and every rendered file it lists is there."""
+    try:
+        with open(STAMP) as f:
+            lines = f.read().splitlines()
+    except OSError:
+        return False
+    if path is None or not lines or lines[0] != _stamp(path):
+        return False
+    return all(os.path.exists(os.path.join(STATE, rel)) for rel in lines[1:] if rel)
 
 
 def _load(tid):
@@ -111,7 +172,11 @@ def _load(tid):
         if path is None:
             log(f"theme {cand!r} is not installed")
             continue
-        t = T.load(path, decode=not cand.startswith("handtop-"))
+        try:
+            t = T.load(path, decode=not cand.startswith("handtop-"))
+        except Exception as e:                     # never stop the log-in over one theme
+            log(f"theme {cand!r} cannot be read ({e})")
+            continue
         for p in t.problems:
             log(f"{cand}: {p}")
         if not t.errors:
@@ -138,7 +203,7 @@ def _installed(kind, name):
         return any(os.path.isfile(os.path.join(d, name, "index.theme")) for d in _dirs("icons"))
     if kind == ("cursor", "theme"):
         return any(os.path.isdir(os.path.join(d, name, "cursors")) for d in _dirs("icons"))
-    r = subprocess.run(["fc-list", ":", "family"], capture_output=True, text=True)
+    r = _run(["fc-list", ":", "family"], 20, capture_output=True, text=True)
     families = {f.strip() for line in r.stdout.splitlines() for f in line.split(",")}
     return r.returncode != 0 or name in families        # no fc-list: do not second-guess
 
@@ -156,19 +221,21 @@ def _check_installed(t):
 
 
 def _replace_dir(dest, fill):
-    """Build a folder with fill(tmp) next to dest, then swap it in."""
+    """Build a folder with fill(tmp) next to dest, then swap it in (on failure dest stays)."""
     parent = os.path.dirname(dest)
     os.makedirs(parent, exist_ok=True)
-    tmp = dest + ".new"
-    shutil.rmtree(tmp, ignore_errors=True)
-    os.makedirs(tmp)
-    fill(tmp)
-    old = dest + ".old"
-    shutil.rmtree(old, ignore_errors=True)
-    if os.path.lexists(dest):
-        os.rename(dest, old)
-    os.rename(tmp, dest)
-    shutil.rmtree(old, ignore_errors=True)
+    for n in (os.path.basename(dest) + ".new", os.path.basename(dest) + ".old"):
+        if os.path.isdir(os.path.join(parent, n)):            # v0.4.0 test builds' fixed names
+            shutil.rmtree(os.path.join(parent, n), ignore_errors=True)
+    fsutil.recover(dest)
+    tmp = tempfile.mkdtemp(prefix=f".new-{os.path.basename(dest)}-", dir=parent)
+    try:
+        fill(tmp)
+        fsutil.swap_in(tmp, dest)
+        tmp = None
+    finally:
+        if tmp:
+            shutil.rmtree(tmp, ignore_errors=True)
 
 
 def _fonts(t):
@@ -187,8 +254,8 @@ def _fonts(t):
     if not want:
         if ours:
             shutil.rmtree(FONTS_DIR, ignore_errors=True)
-            subprocess.run(["fc-cache", os.path.dirname(FONTS_DIR)], stdout=subprocess.DEVNULL,
-                           stderr=subprocess.DEVNULL)
+            _run(["fc-cache", os.path.dirname(FONTS_DIR)], 60, stdout=subprocess.DEVNULL,
+                 stderr=subprocess.DEVNULL)
         return
 
     def fill(d):
@@ -196,7 +263,7 @@ def _fonts(t):
         for n, f in want.items():
             shutil.copyfile(f, os.path.join(d, n))
     _replace_dir(FONTS_DIR, fill)
-    subprocess.run(["fc-cache", "-f", FONTS_DIR], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    _run(["fc-cache", "-f", FONTS_DIR], 60, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
 def _same(a, b):
@@ -249,41 +316,58 @@ def _pointer(t):
 
 
 def prepare(tid):
-    """Render theme tid (or the fallback) into STATE. Returns the Theme."""
+    """Render theme tid (or the fallback) into STATE. Returns the Theme. The stamp is removed
+    first and written by the caller once everything is done (_write_stamp)."""
+    try:
+        os.remove(STAMP)
+    except OSError:
+        pass
     t = _load(tid)
     _fonts(t)
     _check_installed(t)
     render.render(t, STATE)
     _pointer(t)
-    with open(STAMP, "w") as f:
-        f.write(_stamp(t.path) + "\n")
     return t
 
 
 # ---- applying ----------------------------------------------------------------------------------------
 def _gget(key):
-    r = subprocess.run(["gsettings", "get", "org.gnome.desktop.interface", key],
-                       capture_output=True, text=True)
+    r = _run(["gsettings", "get", "org.gnome.desktop.interface", key], 10,
+             capture_output=True, text=True)
     return r.stdout.strip().strip("'") if r.returncode == 0 else None
 
 
 def _gsettings(key, value):
-    """Set an org.gnome.desktop.interface key when it differs (each write wakes every GTK app)."""
-    if _gget(key) != str(value):
-        subprocess.run(["gsettings", "set", "org.gnome.desktop.interface", key, str(value)],
-                       stderr=subprocess.DEVNULL)
+    """Set an org.gnome.desktop.interface key when it differs (each write wakes every GTK app).
+    False when it could not be set."""
+    if _gget(key) == str(value):
+        return True
+    r = _run(["gsettings", "set", "org.gnome.desktop.interface", key, str(value)], 10,
+             stderr=subprocess.DEVNULL)
+    if r.returncode:
+        log(f"gsettings {key} could not be set")
+    return r.returncode == 0
+
+
+def _write_ini(cp):
+    os.makedirs(os.path.dirname(GTK_INI), exist_ok=True)
+    tmp = GTK_INI + ".tmp"
+    with open(tmp, "w") as f:
+        cp.write(f, space_around_delimiters=False)
+    os.replace(tmp, GTK_INI)
 
 
 def _gtk(t):
-    _gsettings("color-scheme", t.gtk["color_scheme"])
-    _gsettings("gtk-theme", t.gtk["theme"])
+    """False when a setting could not be made (gsettings / D-Bus not there or stuck)."""
+    ok = _gsettings("color-scheme", t.gtk["color_scheme"])
+    ok &= _gsettings("gtk-theme", t.gtk["theme"])
     own_icons = _gget("icon-theme") in OUR_ICON_THEMES
     if own_icons:
-        _gsettings("icon-theme", render.ICON_THEME)
-    _gsettings("text-scaling-factor", float(t.fonts["scale"]))
-    _gsettings("font-name", f"{t.fonts['ui']} {GTK_FONT_SIZE}")          # GTK apps' text
-    _gsettings("document-font-name", f"{t.fonts['ui']} {GTK_FONT_SIZE}")
-    _gsettings("monospace-font-name", f"{t.fonts['mono']} {GTK_FONT_SIZE}")
+        ok &= _gsettings("icon-theme", render.ICON_THEME)
+    ok &= _gsettings("text-scaling-factor", float(t.fonts["scale"]))
+    ok &= _gsettings("font-name", f"{t.fonts['ui']} {GTK_FONT_SIZE}")          # GTK apps' text
+    ok &= _gsettings("document-font-name", f"{t.fonts['ui']} {GTK_FONT_SIZE}")
+    ok &= _gsettings("monospace-font-name", f"{t.fonts['mono']} {GTK_FONT_SIZE}")
     cp = configparser.ConfigParser(interpolation=None)
     cp.optionxform = str
     try:
@@ -298,9 +382,8 @@ def _gtk(t):
     s["gtk-font-name"] = f"{t.fonts['ui']} {GTK_FONT_SIZE}"
     if own_icons and s.get("gtk-icon-theme-name", "Adwaita") in OUR_ICON_THEMES:
         s["gtk-icon-theme-name"] = render.ICON_THEME
-    os.makedirs(os.path.dirname(GTK_INI), exist_ok=True)
-    with open(GTK_INI, "w") as f:
-        cp.write(f, space_around_delimiters=False)
+    _write_ini(cp)
+    return ok
 
 
 def _session_cursor():
@@ -323,9 +406,7 @@ def _session_cursor():
         cp.add_section("Settings")
     cp["Settings"]["gtk-cursor-theme-name"] = name
     cp["Settings"]["gtk-cursor-theme-size"] = size
-    os.makedirs(os.path.dirname(GTK_INI), exist_ok=True)
-    with open(GTK_INI, "w") as f:
-        cp.write(f, space_around_delimiters=False)
+    _write_ini(cp)
 
 
 def render_env():
@@ -441,8 +522,11 @@ def _restart(name):
         if not any(os.path.exists(f"/proc/{p}") for p in pids):   # release the tray first)
             break
         time.sleep(0.1)
-    if looped:
-        return
+    if not looped:
+        _start(name)
+
+
+def _start(name):
     os.makedirs(LOG, exist_ok=True)
     with open(os.path.join(LOG, f"{name}.log"), "a") as lg:
         subprocess.Popen(["rg35xxh-themed", name], stdin=subprocess.DEVNULL, stdout=lg, stderr=lg,
@@ -450,8 +534,9 @@ def _restart(name):
 
 
 def _session(t):
-    """Everything outside STATE that points at the rendered theme."""
-    _gtk(t)
+    """Everything outside STATE that points at the rendered theme. False when the GTK settings
+    could not all be made (the next log-in tries again)."""
+    ok = _gtk(t)
     _link(ICON_LINK, os.path.join(STATE, "icon-theme"), ())
     _old_desktop_copies()
     _app_names()
@@ -461,39 +546,54 @@ def _session(t):
     # GTK 3 apps: the theme's CSS (a header only when it has none); a gtk.css of your own wins
     _link(GTK_CSS, os.path.join(STATE, "gtk.css"), ())
     _link(LABWC_USER_THEME, LABWC_RENDERED, (OLD_LABWC_LIGHT,))
-    # labwc re-reads the theme file only on reconfigure (also when only its content changed)
-    subprocess.run(["labwc", "--reconfigure"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    # labwc re-reads the theme file only on reconfigure (also when only its content changed);
+    # outside the session there is no labwc to tell, and it reads the file when it starts
+    _run(["labwc", "--reconfigure"], 10, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    return ok
+
+
+def _in_session():
+    """This runs inside the desktop (not over ssh without it): components may be started."""
+    return bool(os.environ.get("WAYLAND_DISPLAY")) and bool(_pids("labwc"))
 
 
 def apply(tid):
-    t = prepare(tid)
-    _save_choice(t.id)
-    _session(t)
-    _waybar_refresh()                             # (a Waybar < 3 s old is skipped: it is new anyway)
-    for name in ("swaybg", "mako", "waybar"):     # the new Waybar draws the new icons at start
-        if _pids(name):
-            _restart(name)
-    return t
+    """One theme change at a time (fsutil.lock): the Theme app, a command and the log-in never mix
+    two themes. The stamp is written last, so a change cut short is redone at the next log-in."""
+    with fsutil.lock():
+        t = prepare(tid)
+        _save_choice(t.id)
+        done = _session(t)
+        _waybar_refresh()                         # (a Waybar < 3 s old is skipped: it is new anyway)
+        live = None
+        for name in ("swaybg", "mako", "waybar"):  # the new Waybar draws the new icons at start
+            if _pids(name):
+                _restart(name)
+            elif name != "waybar":                # (Waybar has its own restart loop)
+                if live is None:
+                    live = _in_session()
+                if live:                          # stopped earlier (e.g. by a bad theme): start it
+                    _start(name)
+        if done:
+            _write_stamp(t)
+        return t
 
 
 def ensure():
     """Session start: make sure the rendered files match the current theme. Fast when they do."""
-    tid = current()
-    path = package.find(tid)
-    try:
-        with open(STAMP) as f:
-            ok = path is not None and f.read().strip() == _stamp(path)
-    except OSError:
-        ok = False
-    if ok and os.path.exists(os.path.join(STATE, "theme.env")):
+    with fsutil.lock():
+        tid = current()
+        if _stamp_ok(package.find(tid)) and os.path.exists(CHOICE):
+            _session_cursor()
+            _pointer_sets({render_env().get("CURSOR_THEME", "")} | _running_pointer())
+            return
+        t = prepare(tid)
+        if t.id != tid or not os.path.exists(CHOICE) or open(CHOICE).read().strip() != t.id:
+            _save_choice(t.id)                     # migrates "dark" / "light"
+        done = _session(t)
         _session_cursor()
-        _pointer_sets({render_env().get("CURSOR_THEME", "")} | _running_pointer())
-        return
-    t = prepare(tid)
-    if t.id != tid or not os.path.exists(CHOICE) or open(CHOICE).read().strip() != t.id:
-        _save_choice(t.id)                         # migrates "dark" / "light"
-    _session(t)
-    _session_cursor()
+        if done:
+            _write_stamp(t)
 
 
 # ---- the app -----------------------------------------------------------------------------------------
@@ -509,7 +609,11 @@ def main(argv):
         print(current())
     elif argv[0] == "--list":
         for tid, path, builtin in package.list_themes():
-            t = T.load(path)
+            try:
+                t = T.load(path)
+            except Exception as e:
+                print(f"{tid}\t{'built-in' if builtin else 'user'}\t(cannot be read: {e})")
+                continue
             print(f"{tid}\t{'built-in' if builtin else 'user'}\t{t.name or '(broken)'}")
     elif argv[0] == "--ensure":
         ensure()

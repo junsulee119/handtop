@@ -72,7 +72,7 @@ def test_palette_only_theme(tmp_path, builtins):
 def test_light_base(tmp_path, builtins):
     t = load(tmp_path, builtins, minimal(base="light"))
     light = theme.load(os.path.join(builtins, "handtop-light"), builtins)
-    assert t.palette == light.palette and t.status_style == "hologram"
+    assert t.palette == light.palette
     assert t.wallpaper["color"] == "#dfe4ec" and t.wallpaper["image"] is None
     assert t.gtk["color_scheme"] == "default"
 

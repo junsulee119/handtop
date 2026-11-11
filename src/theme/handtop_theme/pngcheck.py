@@ -58,7 +58,10 @@ def check(data, max_size=(4096, 4096)):
     d = zlib.decompressobj()
     out = 0
     for chunk in idat:
-        out += len(d.decompress(chunk, limit + 1 - out))
+        try:
+            out += len(d.decompress(chunk, limit + 1 - out))
+        except zlib.error:
+            raise BadPNG("image data is damaged") from None
         if out > limit or d.unconsumed_tail:
             raise BadPNG("image data larger than its size says")
     if not d.eof:
