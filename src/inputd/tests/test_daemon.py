@@ -330,3 +330,22 @@ def test_missing_layout_file_means_handheld_speed(monkeypatch, tmp_path):
     path.unlink()
     d._layout_reload()
     assert d.core.pointer_scale == 1.0
+
+
+def test_spawn_leaves_no_zombie():
+    """A program started with spawn() is waited for once it exits (2026-11-11: a finished
+    wlogout stayed a zombie and the taskbar's power button stopped opening the menu)."""
+    import time
+    p = daemon.spawn("true")
+    assert p is not None
+    for _ in range(100):
+        if p.returncode is not None:
+            break
+        time.sleep(0.02)
+    assert p.returncode == 0
+    with pytest.raises(ChildProcessError):
+        os.waitpid(p.pid, os.WNOHANG)                # already reaped: nothing left to wait for
+
+
+def test_spawn_missing_program():
+    assert daemon.spawn("/nonexistent/rg35xxh-nothing") is None

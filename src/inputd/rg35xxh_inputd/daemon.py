@@ -21,6 +21,7 @@ import socket
 import struct
 import subprocess
 import sys
+import threading
 import time
 
 import evdev
@@ -156,11 +157,17 @@ def _proc_age(pid):
 
 
 def spawn(*argv):
+    """Start a program and forget it. A thread waits for it so it never lingers as a zombie: a
+    finished wlogout left behind made rg35xxh-power-menu's `pgrep -x wlogout` think the menu was
+    still open, so the taskbar's power button closed it instead of opening it (2026-11-11)."""
     try:
-        subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                         stderr=subprocess.DEVNULL, start_new_session=True)
+        p = subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                             stderr=subprocess.DEVNULL, start_new_session=True)
     except OSError as e:
         log.warning("cannot run %s: %s", argv[0], e)
+        return None
+    threading.Thread(target=p.wait, name=f"reap-{argv[0]}", daemon=True).start()
+    return p
 
 
 class Daemon:

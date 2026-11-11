@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **Fixed: the taskbar's power button sometimes did nothing** after the power menu had been opened with the Power key (it needed a second press). The input daemon now cleans up the programs it starts.
 - **Theme files can bring their own pointer, fonts and CSS.** A theme may include pointer images (made into a pointer set when applied), a text and a terminal font (checked with fontconfig, installed for your user only while the theme is in use, with their licence), and extra CSS for app windows, the taskbar, the app drawer and the power menu. A theme's text font now also reaches app windows.
 - **Retro theme (download).** A 90s desktop: grey bevelled buttons, navy title bars, a teal desktop, 16-colour pixel-art icons, its own pointer, a pixel font and a DOS-style terminal. Download `handtop-retro.handtop-theme` from the release and import it in the Theme app.
 - **The terminal and the volume / brightness bar follow the theme.** New terminal windows take the theme's colours (Handtop dark and light keep the dark terminal), and the bar takes them as soon as a theme is applied. A theme can also rename the default apps (Terminal, File Manager, ...).
