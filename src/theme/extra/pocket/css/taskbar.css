@@ -1,0 +1,8 @@
+/* Pocket: the handheld's dark HUD strip; Apps is the light START pill. */
+window#waybar { border-top: 2px solid #306230; }
+#custom-apps { margin: 5px 4px 5px 5px; padding: 0 10px 0 28px; border-radius: 10px; font-weight: bold; }
+#custom-apps:hover { background-color: #8bac0f; }
+#taskbar button { margin: 4px 1px; padding: 0 6px; border-radius: 0; border: 2px solid transparent; }
+#taskbar button.active { background-color: #306230; border-color: #9bbc0f; }
+#taskbar button:hover { background-color: #306230; }
+#clock { padding: 0 10px; font-weight: bold; }

@@ -1,0 +1,4 @@
+/* Pocket: a game menu. Every tile is a text box with a double frame; the chosen one goes
+   dark (the hover itself comes from css/apps.css, which GTK applies here too and which wins). */
+entry { border-radius: 0; background-color: #9bbc0f; color: #0f380f; border: 3px solid #0f380f; box-shadow: inset 0 0 0 3px #9bbc0f, inset 0 0 0 4px #0f380f; }
+button { border-radius: 0; margin: 4px; border: 3px solid #0f380f; box-shadow: inset 0 0 0 3px #9bbc0f, inset 0 0 0 4px #0f380f; }

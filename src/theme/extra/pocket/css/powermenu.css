@@ -1,0 +1,3 @@
+/* Pocket: a pause menu. Double-framed boxes; the chosen one goes dark. */
+button { border-radius: 0; border: 3px solid #0f380f; box-shadow: inset 0 0 0 3px #9bbc0f, inset 0 0 0 4px #0f380f; }
+button:hover { color: #9bbc0f; box-shadow: inset 0 0 0 3px #306230, inset 0 0 0 5px #9bbc0f; }

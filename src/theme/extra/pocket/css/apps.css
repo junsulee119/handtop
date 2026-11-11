@@ -1,0 +1,39 @@
+/* Pocket: GTK 3 apps in the four greens, on top of Adwaita (light). GTK also applies this
+   to the taskbar, app drawer and power menu: the colour rules here are the same as theirs, so
+   broad selectors (.view, list, row: white in Adwaita) are safe here. */
+* { border-radius: 0; -gtk-outline-radius: 0; box-shadow: none; text-shadow: none; -gtk-icon-shadow: none; }
+window, .background, dialog, popover, menu, .menu, menubar, toolbar, .toolbar, statusbar,
+notebook > header, notebook > stack, actionbar, .sidebar, placessidebar, paned > separator {
+  background-color: #9bbc0f; background-image: none; color: #0f380f;
+}
+headerbar, .titlebar { background-image: none; background-color: #0f380f; color: #9bbc0f; border: none; }
+headerbar label, headerbar .title { color: #9bbc0f; }
+button { background-image: none; background-color: #8bac0f; color: #0f380f; border: 2px solid #0f380f; }
+button:hover { background-color: #0f380f; color: #9bbc0f; }
+button:hover label, button:hover image { color: #9bbc0f; }
+button:hover { box-shadow: inset 0 0 0 3px #0f380f, inset 0 0 0 4px #9bbc0f; }
+button:active, button:checked { background-color: #306230; color: #9bbc0f; }
+button:disabled { color: #306230; }
+button.flat { border-color: transparent; background-color: transparent; }
+button.flat:hover { background-color: #0f380f; border: 2px solid #0f380f; }   /* like every hover: dark, light icon */
+entry, spinbutton, textview, textview text, treeview, treeview.view, iconview, .view, list, row,
+scrolledwindow viewport {
+  background-image: none; background-color: #9bbc0f; color: #0f380f;
+}
+entry, spinbutton { border: 2px solid #0f380f; }
+scrolledwindow.frame, frame > border { border: 3px solid #0f380f; box-shadow: inset 0 0 0 3px #9bbc0f, inset 0 0 0 4px #0f380f; }
+*:selected, treeview.view:selected, row:selected, .view:selected, iconview:selected,
+entry selection, textview text selection, menuitem:hover, modelbutton:hover,
+placessidebar row:selected { background-color: #306230; color: #9bbc0f; }
+row:selected label, menuitem:hover label { color: #9bbc0f; }
+check, radio, switch { background-image: none; background-color: #9bbc0f; border: 2px solid #0f380f; }
+check:checked, radio:checked, switch:checked { background-color: #0f380f; color: #9bbc0f; }
+switch slider { background-image: none; background-color: #8bac0f; border: 2px solid #0f380f; }
+scrollbar { background-color: #8bac0f; border: none; }
+scrollbar slider { background-color: #306230; border: 2px solid #8bac0f; min-width: 8px; min-height: 8px; }
+progressbar trough, scale trough { background-image: none; background-color: #8bac0f; border: 2px solid #0f380f; }
+progressbar progress, scale highlight { background-image: none; background-color: #0f380f; border: none; }
+scale slider { background-image: none; background-color: #9bbc0f; border: 2px solid #0f380f; }
+tooltip, tooltip.background { background-color: #0f380f; color: #9bbc0f; border: none; }
+tooltip * { color: #9bbc0f; }
+separator { background-color: #306230; }
