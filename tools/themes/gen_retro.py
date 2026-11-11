@@ -231,14 +231,42 @@ def inputmode(mode):
         if mode == "gamepad":
             a.grid(9, 2, ["KK.KK", "KYKYK", ".KYK.", "KYKYK", "KK.KK"][:0])
         elif mode == "bt":
-            a.rect(8, 0, 14, 7, "N")
-            a.box(8, 0, 14, 7, "K")
-            a.grid(10, 1, [".W.", ".WW", "WWW", ".W.", "WWW", ".WW"][:6])
+            # a navy badge with the Bluetooth rune above the handheld (drawn again lower down)
+            a = Art(23, 23)
+            a.grid(7, 0, [
+                ".KKKKKKK.",
+                "KNNNNNNNK",
+                "KNNNWNNNK",
+                "KNNNWWNNK",
+                "KNWNWNWNK",
+                "KNNWWWNNK",
+                "KNNNWNNNK",
+                "KNNWWWNNK",
+                "KNWNWNWNK",
+                "KNNNWWNNK",
+                "KNNNWNNNK",
+                "KNNNNNNNK",
+                ".KKKKKKK.",
+            ])
+            handheld(a, 4, 14)
         elif mode == "wired":
-            a.vline(11, 0, 7, "K")
-            a.rect(9, 2, 13, 5, "S")
-            a.box(9, 2, 13, 5, "K")
-            a.px(10, 1, "K"); a.px(12, 1, "K")
+            # a USB plug on its cable, plugged into the top of the handheld
+            a = Art(23, 23)
+            a.grid(8, 0, [
+                ".KKKKK.",
+                ".KSKSK.",
+                ".KSSSK.",
+                "KKKKKKK",
+                "KGGGGGK",
+                "KGGGGGK",
+                "KGGGGGK",
+                ".KKKKK.",
+                "...K...",
+                "...K...",
+                "...K...",
+                "...K...",
+            ])
+            handheld(a, 4, 12)
     return a
 
 
