@@ -214,8 +214,44 @@ def panel_power():
     return centred(v.final())
 
 
+# ---- pixel-exact images -------------------------------------------------------------------------------
+# External Controller shows the Bluetooth / wired input-mode, battery and USB-cable images enlarged 2-3x with hard
+# pixel scaling (made for pixel art), so smooth edges turned blocky and blurred there (Jason
+# 2026-11-11). These are drawn pixel-exact: thin ink lines on whole pixels, no smoothing.
+def grid(rows, colours, w=None, h=None):
+    """An image from a string grid ('.' clear), centred in w x h."""
+    gw, gh = len(rows[0]), len(rows)
+    assert all(len(r) == gw for r in rows), rows
+    out = Image.new("RGBA", (w or gw, h or gh), (0, 0, 0, 0))
+    ox, oy = ((w or gw) - gw) // 2, ((h or gh) - gh) // 2
+    for y, r in enumerate(rows):
+        for x, ch in enumerate(r):
+            if ch != ".":
+                out.putpixel((ox + x, oy + y), rgba(colours[ch]))
+    return out
+
+
+INKS = {"K": INK, "W": WHITE, "Y": AMBER, "R": RED, "G": GREEN}
+
+HANDHELD = [
+    "..KKKKKKKKKKKKKKK..",
+    ".KKKKKKKKKKKKKKKKK.",
+    "KK...............KK",
+    "KK.....KKKKK.....KK",
+    "KK..K..KKKKK.....KK",
+    "KK.KKK.KKKKK..KK.KK",
+    "KK..K..KKKKK..KK.KK",
+    "KK.....KKKKK.....KK",
+    "KK...............KK",
+    ".KKKKKKKKKKKKKKKKK.",
+    "..KKKKKKKKKKKKKKK..",
+]
+BT_BADGE = ["..K..", "..KK.", "K.K.K", ".KKK.", "..K..", ".KKK.", "K.K.K", "..KK.", "..K.."]
+PLUG = [".K.K.", "KKKKK", "KKKKK", "..K..", "..K..", "..K.."]
+
+
 def handheld23(v, y):
-    """The handheld at taskbar size: body outline, a filled screen, D-pad and a button."""
+    """The handheld at taskbar size, smooth: body outline, a filled screen, D-pad and a button."""
     v.rrect(1.8, y, 21.2, y + 10.5, 3.2, outline=INK, width=1.6)
     v.rrect(8, y + 2.6, 15, y + 7.9, 1, fill=INK)
     v.line([(4.4, y + 5.25), (7.0, y + 5.25)], 1.3, INK)
@@ -224,33 +260,55 @@ def handheld23(v, y):
 
 
 def inputmode(mode):
-    v = V(23, 23)
-    if mode == "desktop":
-        g_mouse(v, 11.5, 11.5, 7, 1.7, INK)
-    else:
-        handheld23(v, 8 if mode != "gamepad" else 6.25)
-        if mode == "bt":
-            g_bt(v, 11.5, 3.3, 5.6, 1.3, INK)
-        elif mode == "wired":
-            v.line([(11.5, 0.8), (11.5, 6.6)], 1.6, INK)
-            v.rrect(9.5, 0.6, 13.5, 3.4, 0.8, fill=INK)
-    return centred(v.final())
+    """Desktop and gamepad are only shown on the taskbar: smooth (Jason liked the smooth mouse).
+    Bluetooth and wired are also enlarged by External Controller: pixel-exact."""
+    if mode in ("desktop", "gamepad"):
+        v = V(23, 23)
+        if mode == "desktop":
+            g_mouse(v, 11.5, 11.5, 7, 1.7, INK)
+        else:
+            handheld23(v, 6.25)
+        return centred(v.final())
+    badge = BT_BADGE if mode == "bt" else PLUG
+    gap = 2 if mode == "bt" else 0
+    pad = [r.center(19, ".") for r in badge]
+    return grid(pad + ["." * 19] * gap + list(HANDHELD), INKS, 23, 23)
 
 
 def battery(n, charging=False, low=False, saver=False):
-    v = V(20, 11)
-    edge = GREEN if saver else INK
-    v.rrect(0.75, 0.75, 17.25, 10.25, 2.6, outline=edge, width=1.5)
-    v.rrect(17.6, 3.6, 19.4, 7.4, 0.8, fill=edge)
-    fill = RED if low else (GREEN if saver else INK)
-    if n:
-        v.rrect(2.6, 2.6, 2.6 + 12.8 * n / 5, 8.4, 1.4, fill=fill)
+    e = "G" if saver else "K"
+    f = "R" if low else ("G" if saver else "K")
+    rows = [".EEEEEEEEEEEEEEEE...", "E................E..", "E................EEE",
+            "E................EEE", "E................EEE", "E................EEE",
+            "E................EEE", "E................EEE", "E................EEE",
+            "E................E..", ".EEEEEEEEEEEEEEEE..."]
+    rows = [r.replace("E", e) for r in rows]
+    lw = round(14 * n / 5)
+    for y in range(2, 9):
+        rows[y] = rows[y][:2] + f * lw + rows[y][2 + lw:]
+    img = grid(rows, INKS)
     if charging:
-        bolt = [(10.4, 1.2), (6.6, 6.0), (9.3, 6.0), (8.4, 9.8), (12.4, 4.8), (9.7, 4.8)]
-        for dx, dy in ((-0.9, 0), (0.9, 0), (0, -0.9), (0, 0.9)):     # white rim for contrast
-            v.poly([(x + dx, y + dy) for x, y in bolt], WHITE)
-        v.poly(bolt, AMBER)
-    return v.final()
+        bolt = grid(["....WWW", "...WYYW", "..WYYW.", ".WYYYYW", "WYYYYW.", ".WYYW..", ".WYW...",
+                     "WYW....", "WW....."], INKS)
+        img.alpha_composite(bolt, (6, 1))
+    return img
+
+
+def usbtarget(t):
+    if t == "pc":
+        rows = ["KKKKKKKKKKKKKKKKKKK", "KKKKKKKKKKKKKKKKKKK"] + ["KK...............KK"] * 9 + \
+               ["KKKKKKKKKKKKKKKKKKK", "KKKKKKKKKKKKKKKKKKK", "........KKK........",
+                ".....KKKKKKKKK.....", "...................",
+                ".KKKKKKKKKKKKKKKKK.", ".K...............K.", ".K.K.K.K.K.K.K.K.K.",
+                ".K...............K.", ".KKKKKKKKKKKKKKKKK."]
+    else:
+        rows = ["KKKKKKKKKKKKKKKKKKKKK", "KKKKKKKKKKKKKKKKKKKKK"] + ["KK.................KK"] * 8 + \
+               ["KKKKKKKKKKKKKKKKKKKKK", "KKKKKKKKKKKKKKKKKKKKK", ".........KKK.........",
+                "......KKKKKKKKK......", ".....................",
+                "....KKKKKKKKKKKKK....", "...KK...........KK...", "...K..K.......K..K...",
+                "...K.KKK.....K.K.K...", "...K..K.......K..K...", "...KK...........KK...",
+                "....KKKKKKKKKKKKK...."]
+    return grid(rows, INKS, 23, 23)
 
 
 # ---- tray -------------------------------------------------------------------------------------------
@@ -302,16 +360,6 @@ def bluetooth(state):
     return img
 
 
-def usbtarget(t):
-    v = V(23, 23)
-    if t == "pc":
-        g_monitor(v, 11.5, 9, 9, 1.6, INK)
-        v.rrect(3.5, 17.5, 19.5, 21.5, 1.5, outline=INK, width=1.4)
-    else:
-        v.rrect(2.5, 1.5, 20.5, 13.5, 2, outline=INK, width=1.6)
-        v.line([(9, 15.5), (14, 15.5)], 1.6, INK)
-        v.rrect(5.5, 17, 17.5, 22, 2.5, outline=INK, width=1.4)
-    return centred(v.final())
 
 
 # ---- app icons: the line glyph alone (the drawer's glass tile frames it) ---------------------------
