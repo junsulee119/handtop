@@ -13,7 +13,8 @@ import shutil
 from . import schema as S
 
 MAPPED = ("handtop-dark", "handtop-light")
-IDS = MAPPED + ("handtop-debian", "handtop-high-contrast", "handtop-grayscale")
+IDS = MAPPED + ("handtop-retro", "handtop-glass", "handtop-pocket", "handtop-signal",
+                "handtop-debian", "handtop-high-contrast", "handtop-grayscale")
 _I = "overlay/usr/local/share/rg35xxh/icons"
 # Default-app, Wi-Fi and Bluetooth icons: generated into src/theme/art/icons (not installed as such;
 # until v0.3.9 they sat in overlay/usr/local/share/icons and overrode the packages' own icons)

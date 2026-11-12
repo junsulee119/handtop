@@ -24,7 +24,8 @@ from . import package, preview  # noqa: E402
 from . import theme as T  # noqa: E402
 
 ICONS = "/usr/local/share/rg35xxh/icons"
-ORDER = ("handtop-dark", "handtop-light", "handtop-debian", "handtop-high-contrast", "handtop-grayscale")
+ORDER = ("handtop-dark", "handtop-light", "handtop-retro", "handtop-glass", "handtop-pocket", "handtop-signal",
+         "handtop-debian", "handtop-high-contrast", "handtop-grayscale")
 PW, PH = 352, 264          # main preview
 SW, SH = 208, 156          # Duplicate's live preview
 CSS = b"""

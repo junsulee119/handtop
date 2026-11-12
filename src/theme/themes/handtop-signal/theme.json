@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "id": "signal",
+  "id": "handtop-signal",
   "name": "Signal",
   "base": "light",
   "author": "Handtop",

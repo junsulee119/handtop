@@ -22,7 +22,7 @@ def problems(t, level="error"):
 def _a_font():
     """A small real font: the Retro theme's (in the repo)."""
     from conftest import REPO
-    f = os.path.join(REPO, "src", "theme", "extra", "retro", "fonts", "mono.ttf")
+    f = os.path.join(REPO, "src", "theme", "themes", "handtop-retro", "fonts", "mono.ttf")
     return f if os.path.isfile(f) else None
 
 
@@ -200,7 +200,7 @@ def test_guide_lists_extras():
 def test_variable_font_accepted(tmp_path, builtins):
     """A variable font: fontconfig lists its named instances, all one family (Glass's Inter)."""
     from conftest import REPO
-    var = os.path.join(REPO, "src", "theme", "extra", "glass", "fonts", "ui.ttf")
+    var = os.path.join(REPO, "src", "theme", "themes", "handtop-glass", "fonts", "ui.ttf")
     from handtop_theme.extras import font_families
     assert font_families(var) == ["Inter Variable"]
     d = write_theme(str(tmp_path), minimal(fonts={"ui": "Inter Variable"}),

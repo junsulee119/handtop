@@ -8,7 +8,7 @@ anti-aliased shapes, square line ends). Images External Controller enlarges with
 scaling (Bluetooth / wired input modes, battery, USB cable pictures) are drawn pixel-exact.
 Every drawing is centred in its image.
 
-Usage: python3 tools/themes/gen_signal.py [theme folder]      (src/theme/extra/signal)
+Usage: python3 tools/themes/gen_signal.py [theme folder]      (src/theme/themes/handtop-signal)
 Needs Pillow."""
 import json
 import math
@@ -371,7 +371,7 @@ def wallpaper(w=960, h=720, ss=3):
 # ---- theme.json and CSS -------------------------------------------------------------------------------------
 I, R, P, W, G = HEX(INK), HEX(RED), HEX(PAPER), HEX(WHITE), HEX(GREY)
 THEME = {
-    "schema": 1, "id": "signal", "name": "Signal", "base": "light", "author": "Handtop",
+    "schema": 1, "id": "handtop-signal", "name": "Signal", "base": "light", "author": "Handtop",
     "description": "A minimal design object: black and white on a grid, one signal red, bold type.",
     "palette": {"bg": P, "surface": W, "surface_hi": "#e4e4df", "border": I, "fg": I, "fg_dim": "#6b6b67",
                 "accent": R, "accent_fg": R, "on_accent": W, "warn": R, "error": R, "brightness": I,
@@ -496,4 +496,4 @@ def main(out):
 
 
 if __name__ == "__main__":
-    main(sys.argv[1] if len(sys.argv) > 1 else "src/theme/extra/signal")
+    main(sys.argv[1] if len(sys.argv) > 1 else "src/theme/themes/handtop-signal")

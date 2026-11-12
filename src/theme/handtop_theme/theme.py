@@ -22,7 +22,10 @@ BUILTIN_DIR = "/usr/share/rg35xxh/themes"
 _NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9 ._+-]{0,63}\Z")    # font / GTK / cursor theme names
 _CTRL = re.compile(r"[\x00-\x1f\x7f]")
 TOP_KEYS = ("schema", "id", "name", "base", "author", "description", "palette", "colors",
-            "wallpaper", "gtk", "cursor", "fonts", "borders", "icons", "names")
+            "wallpaper", "gtk", "cursor", "fonts", "borders", "icons", "names",
+            "version", "license", "tags")        # the last three: for sharing (docs/theme-store)
+_TAG = re.compile(r"[a-z0-9][a-z0-9-]{0,19}\Z")
+MAX_TAGS = 8
 
 
 class Problem:
@@ -47,7 +50,9 @@ class Theme:
     def __init__(self, path):
         self.path = path
         self.id = self.name = self.base = None
-        self.author = self.description = ""
+        self.author = self.description = self.license = ""
+        self.version = None         # optional whole number, raised by the author on every change
+        self.tags = []
         self.palette, self.colors, self.images, self.names = {}, {}, {}, {}
         self.wallpaper = {"color": None, "image": None, "mode": "center"}
         self.borders = 1
@@ -108,6 +113,15 @@ def _text(v, maxlen):
     return isinstance(v, str) and 0 < len(v) <= maxlen and not _CTRL.search(v)
 
 
+def _version(v):
+    return isinstance(v, int) and not isinstance(v, bool) and 1 <= v <= 1_000_000
+
+
+def _tags(v):
+    return (isinstance(v, list) and len(v) <= MAX_TAGS
+            and all(isinstance(x, str) and _TAG.match(x) for x in v) and len(set(v)) == len(v))
+
+
 def validate(data):
     """Check theme.json's content against the contract. Returns a list of Problems."""
     P = []
@@ -140,9 +154,13 @@ def validate(data):
         err("name", f"1-{S.NAME_MAX} characters, one line")
     if data.get("base") not in S.BASES:
         err("base", "must be \"dark\" or \"light\"")
-    for k in ("author", "description"):
+    for k in ("author", "description", "license"):
         if k in data and not _text(data[k], 200):
             warn(k, "1-200 characters, one line; ignored")
+    if "version" in data and not _version(data["version"]):
+        warn("version", "a whole number from 1; ignored")
+    if "tags" in data and not _tags(data["tags"]):
+        warn("tags", f"a list of up to {MAX_TAGS} tags (1-20 characters: a-z, 0-9 and -); ignored")
 
     for k, v in section("palette").items():
         if k not in S.PALETTE:
@@ -294,7 +312,10 @@ def load(path, builtin_dir=BUILTIN_DIR, decode=False, _stack=()):
         return t
     t.id, t.name, t.base = data["id"], data["name"], data["base"]
     # a bad author / description was warned about as ignored: it is ignored (the app shows text only)
-    t.author, t.description = (data[k] if _text(data.get(k), 200) else "" for k in ("author", "description"))
+    t.author, t.description, t.license = (data[k] if _text(data.get(k), 200) else ""
+                                          for k in ("author", "description", "license"))
+    t.version = data["version"] if _version(data.get("version")) else None
+    t.tags = list(data["tags"]) if _tags(data.get("tags")) else []
     base_id = S.RESERVED_PREFIX + t.base
     is_base = t.id == base_id
     base = None

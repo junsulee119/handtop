@@ -8,7 +8,7 @@ Original drawings, no logos. Writes a complete theme folder except fonts/ (kept 
 Every drawing is centred in its image (GUIDE.md, "Drawing tips"): shapes are laid out around
 the image's middle, 2 px strokes sit on whole-pixel coordinates so they stay crisp.
 
-Usage: python3 tools/themes/gen_glass.py [theme folder]     (src/theme/extra/glass)
+Usage: python3 tools/themes/gen_glass.py [theme folder]     (src/theme/themes/handtop-glass)
 Needs Pillow."""
 import json
 import math
@@ -604,7 +604,7 @@ def hx(c, a=None):
 
 A = hx(ACCENT)
 THEME = {
-    "schema": 1, "id": "glass", "name": "Glass", "base": "light", "author": "Handtop",
+    "schema": 1, "id": "handtop-glass", "name": "Glass", "base": "light", "author": "Handtop",
     "description": "Light, modern: milky glass panels over a blue-violet gradient, monotone line icons, Inter.",
     "palette": {
         "bg": "#f4f6fb", "surface": "#ffffff", "surface_hi": "#e3e7f6", "border": "#cdd4e6",
@@ -721,4 +721,4 @@ def main(out):
 
 
 if __name__ == "__main__":
-    main(sys.argv[1] if len(sys.argv) > 1 else "src/theme/extra/glass")
+    main(sys.argv[1] if len(sys.argv) > 1 else "src/theme/themes/handtop-glass")

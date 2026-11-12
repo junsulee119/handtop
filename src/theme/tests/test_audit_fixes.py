@@ -322,8 +322,8 @@ def test_r12_stuck_command_counts_as_failed(cli):
 
 
 # ---- review of the extra themes (D01-D04, 2026-11-11) --------------------------------------------
-EXTRA = os.path.join(REPO, "src", "theme", "extra")
-EXTRA_IDS = sorted(os.listdir(EXTRA)) if os.path.isdir(EXTRA) else []
+EXTRA = os.path.join(REPO, "src", "theme", "themes")      # the four looks are built-ins since v0.4.0
+EXTRA_IDS = ["handtop-retro", "handtop-glass", "handtop-pocket", "handtop-signal"]
 
 
 @pytest.mark.parametrize("tid", EXTRA_IDS)
@@ -362,3 +362,24 @@ def test_d04_preview_tiles_a_tiled_wallpaper(tmp_path, builtins):
     data, stride = out.get_data(), out.get_stride()
     b, g, r, a = data[2 * stride + 4 * 2: 2 * stride + 4 * 2 + 4]       # (2, 2): a corner tile
     assert (r, g, b) == (255, 0, 0)
+
+
+# ---- sharing fields (version, license, tags), 2026-11-12 ------------------------------------------
+def _data(**kw):
+    d = {"schema": 1, "id": "x-1", "name": "X", "base": "dark"}
+    d.update(kw)
+    return d
+
+
+def test_sharing_fields_accepted_without_warnings():
+    P = theme.validate(_data(version=3, license="CC BY 4.0; fonts OFL 1.1", tags=["pixel", "retro-90s"]))
+    assert not [p for p in P if p.where in ("version", "license", "tags")]
+
+
+@pytest.mark.parametrize("key,val", [("version", 0), ("version", "2"), ("version", True), ("version", 2.5),
+                                     ("license", ""), ("license", "a\nb"), ("tags", "pixel"),
+                                     ("tags", ["Pixel"]), ("tags", ["a"] * 9), ("tags", ["a", "a"])])
+def test_bad_sharing_fields_are_warned_and_ignored(key, val):
+    P = theme.validate(_data(**{key: val}))
+    assert [p for p in P if p.where == key and p.level == "warning"]
+    assert not [p for p in P if p.level == "error"]

@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "id": "glass",
+  "id": "handtop-glass",
   "name": "Glass",
   "base": "light",
   "author": "Handtop",

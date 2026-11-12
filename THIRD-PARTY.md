@@ -28,11 +28,11 @@ Taken unmodified from the official image
 | nwg-drawer v0.7.5 | MIT | https://github.com/nwg-piotr/nwg-drawer, built by `build/04b-nwg-drawer.sh` |
 | FFmpeg 7.1.5 with the V4L2 request-API patchset, plus a local patch registering the decoders under the DRM device type | GPL-2.0-or-later | https://github.com/FFmpeg/FFmpeg tag `n7.1.5` (commit `3a0867c2bfda4a4d4309ca1a8cbdc6175e67f587`) + the patchset from https://github.com/Kwiboo/FFmpeg (`f46e514491172d15bd74b4abb1814cd2f05a763e..fad85d9c76611c09b561167ab405c667a0dcdeb7`, branch `v4l2-request-n7.1.3`) + `build/patches/ffmpeg-v4l2request-drm.patch`, built by `build/04c-v4l2-ffmpeg.sh` |
 
-## Fonts in the downloadable themes
+## Fonts in the Retro, Glass, Pocket and Signal themes
 
-Not in the SD card image: they are in `src/theme/extra/retro/fonts/` and inside the release asset
-`handtop-retro.handtop-theme`, and likewise for Glass, Pocket and Signal,
-unmodified, with their licences in each theme's `fonts/LICENSE.txt`.
+In the SD card image since v0.4.0 (`/usr/share/rg35xxh/themes/handtop-<theme>/fonts/`) and in the repo
+under `src/theme/themes/handtop-<theme>/fonts/`, unmodified, with their licences in each theme's
+`fonts/LICENSE.txt`; an exported copy of the theme carries them too.
 
 | Font | License | Source |
 |---|---|---|

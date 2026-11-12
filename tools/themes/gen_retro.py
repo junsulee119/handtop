@@ -1,10 +1,10 @@
 """The Retro theme (90s desktop): grey bevelled panels, navy title bars, a teal desktop and 16-colour
 pixel art. Writes a complete theme folder (theme.json, every image slot, its own pointer, CSS);
-the fonts are copied in by tools/themes/build-extra-themes.sh from src/theme/extra/retro/fonts.
+the fonts in its fonts/ folder are kept as they are (not generated).
 
 Original drawings in the style of the time: no logos, no copies of any product's icons.
 
-Usage: python3 tools/themes/gen_retro.py <theme folder>     (src/theme/extra/retro)
+Usage: python3 tools/themes/gen_retro.py <theme folder>     (src/theme/themes/handtop-retro)
 Needs Pillow."""
 import json
 import os
@@ -681,7 +681,7 @@ HOTSPOTS = {"arrow": [0, 0], "hand": [9, 0], "text": [7, 14], "busy": [11, 14], 
 # ---- theme.json and CSS ------------------------------------------------------------------------------------
 THEME = {
     "schema": 1,
-    "id": "retro",
+    "id": "handtop-retro",
     "name": "Retro",
     "base": "light",
     "author": "Handtop",
@@ -886,4 +886,4 @@ def main(out):
 
 
 if __name__ == "__main__":
-    main(sys.argv[1] if len(sys.argv) > 1 else "src/theme/extra/retro")
+    main(sys.argv[1] if len(sys.argv) > 1 else "src/theme/themes/handtop-retro")

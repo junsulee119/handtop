@@ -6,7 +6,7 @@ highlight on the upper left, darker shading on the lower right, like handheld ga
 Drawings are made of filled shapes on a small canvas; `outline()` adds the dark outline around
 everything drawn, so shapes never need it by hand. Every drawing is centred in its image.
 
-Usage: python3 tools/themes/gen_pocket.py [theme folder]      (src/theme/extra/pocket)
+Usage: python3 tools/themes/gen_pocket.py [theme folder]      (src/theme/themes/handtop-pocket)
 Needs Pillow. fonts/ (Pixelify Sans, VT323, LICENSE.txt) is kept as it is."""
 import json
 import math
@@ -18,8 +18,8 @@ from PIL import Image, ImageDraw, ImageFont
 A, B, C, D = (155, 188, 15), (139, 172, 15), (48, 98, 48), (15, 56, 15)
 SH = {"a": A, "b": B, "c": C, "d": D}
 H = {k: "#%02x%02x%02x" % v for k, v in SH.items()}
-FONT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "src", "theme", "extra",
-                    "pocket", "fonts", "ui.ttf")
+FONT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "src", "theme", "themes",
+                    "handtop-pocket", "fonts", "ui.ttf")
 IDX = {".": 0, "a": 1, "b": 2, "c": 3, "d": 4}
 
 
@@ -595,7 +595,7 @@ def wallpaper(w=640, h=480):
 
 # ---- theme.json and CSS ------------------------------------------------------------------------------
 THEME = {
-    "schema": 1, "id": "pocket", "name": "Pocket", "base": "light", "author": "Handtop",
+    "schema": 1, "id": "handtop-pocket", "name": "Pocket", "base": "light", "author": "Handtop",
     "description": "A pocket game console: four greens on a dot-matrix screen, game menus, hearts for the battery.",
     "palette": {"bg": H["a"], "surface": H["b"], "surface_hi": H["c"], "border": H["d"],
                 "fg": H["d"], "fg_dim": H["c"], "accent": H["d"], "accent_fg": H["d"],
@@ -761,4 +761,4 @@ def main(out):
 
 
 if __name__ == "__main__":
-    main(sys.argv[1] if len(sys.argv) > 1 else "src/theme/extra/pocket")
+    main(sys.argv[1] if len(sys.argv) > 1 else "src/theme/themes/handtop-pocket")
