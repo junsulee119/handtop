@@ -7,6 +7,8 @@ How Handtop works on the RG35XX H. One document per app or background service; g
 | File | Contents |
 |---|---|
 | [flashing.md](flashing.md) | Flashing the SD card and first boot |
+| [themes.md](themes.md) | Themes for users: change, copy, share, design one by hand or with an AI agent |
+| [theme-format.md](theme-format.md) | Everything a theme can set (the `GUIDE.md` inside every exported theme) |
 | [building.md](building.md) | Building the image, testing and debugging |
 | [hardware-safety.md](hardware-safety.md) | **Rules for changes** to code that holds hardware, changes power states or starts / stops those processes; checklist |
 | [ci.md](ci.md) | CI: the checks every push and pull request runs (`tools/ci-checks.sh`), and how to run them locally |
@@ -22,7 +24,7 @@ How Handtop works on the RG35XX H. One document per app or background service; g
 | [apps/external-controller.md](apps/external-controller.md) | External Controller: the handheld as a Bluetooth (Xbox), USB (Xbox 360) or Nintendo Switch game controller, status screen |
 | [apps/display.md](apps/display.md) | External display (mini HDMI) and the Display app: layouts, resolution, refresh rate |
 | [apps/files.md](apps/files.md) | Files: click-to-mount for the TF2 card and USB sticks, drive toasts |
-| [apps/theme.md](apps/theme.md) | Theme app: dark / light |
+| [apps/theme.md](apps/theme.md) | Theme app and theme system: how themes are checked, rendered and applied |
 | [apps/power-menu.md](apps/power-menu.md) | Power button, power menu, sleep and auto-sleep, shutdown |
 | [apps/recenter-sticks.md](apps/recenter-sticks.md) | Re-center sticks: stick drift and the fix |
 | [apps/enable-ssh.md](apps/enable-ssh.md) | Enable SSH |

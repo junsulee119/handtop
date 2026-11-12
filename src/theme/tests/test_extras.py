@@ -206,3 +206,13 @@ def test_variable_font_accepted(tmp_path, builtins):
     d = write_theme(str(tmp_path), minimal(fonts={"ui": "Inter Variable"}),
                     {"fonts/ui.ttf": open(var, "rb").read(), "fonts/LICENSE.txt": b"x"})
     assert T.load(d, builtins, decode=True).errors == []
+
+
+def test_docs_copy_of_the_guide_is_current():
+    """docs/theme-format.md is GUIDE.md as the Theme app writes it (for people and AI agents without
+    an exported theme). Regenerate: cd src/theme && python3 -c "from handtop_theme import guide;
+    open('../../docs/theme-format.md', 'w').write(guide.generate())" """
+    from conftest import REPO
+    from handtop_theme import guide
+    with open(os.path.join(REPO, "docs", "theme-format.md"), encoding="utf-8") as f:
+        assert f.read() == guide.generate(), "docs/theme-format.md is out of date (see this test's docstring)"

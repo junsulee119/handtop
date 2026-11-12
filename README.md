@@ -20,14 +20,15 @@ an external monitor over mini HDMI, and everything else Debian's arm64 archive o
 - **Desktop:** labwc (Wayland) + Waybar + nwg-drawer + wlogout, 640×480 on the built-in screen
 - **Controls:** a custom input daemon turns the gamepad into mouse + keyboard, with an on-screen keyboard
 
-Status: **v0.3.9**, developed and tested on the RG35XX H.
+Status: **v0.4.0**, developed and tested on the RG35XX H.
 
 <p align="center">
-  <img src="media/handtop-v0.3.8.png" width="800" alt="Handtop v0.3.5 to v0.3.8: the power menu with the new Battery saver button, the low-battery shutdown countdown and the green-outlined battery icon, and YouTube playing in Chromium on the video engine, all on the RG35XX H">
+  <img src="media/handtop-v0.4.0.png" width="800" alt="Handtop v0.4.0: the new theme system, with the four new built-in looks on the RG35XX H: Retro's app drawer in 90s pixel art, Glass's see-through power menu, Pocket's green game-console app drawer and Signal's black, white and red power menu">
 </p>
 
 ## Features
 
+- **Themes** (new in v0.4.0): nine looks built in, including Retro, Glass, Pocket and Signal; make your own copy in a few taps, or design a theme from scratch and share it as one file (see [Themes](#themes))
 - Desktop mode by default: stick / D-pad pointer, A/B clicks, right-stick scrolling, L1/R1/R2 = Esc/Enter/Backspace, L3/R3 = copy/paste
 - On-screen keyboard (X), navigable with the D-pad
 - Gamepad mode (tap Start) presents an Xbox 360 pad, e.g. for Moonlight; hold Start 1 s to go back
@@ -45,11 +46,35 @@ Status: **v0.3.9**, developed and tested on the RG35XX H.
 
 Full control map: [docs/services/input-daemon.md](docs/services/input-daemon.md).
 
+## Themes
+
+A theme changes the whole desktop's look: taskbar and icons, app drawer, power menu,
+notifications, title bars, on-screen keyboard, terminal, pointer, fonts and wallpaper. Open
+**Apps → Theme**, pick one and press **Apply**.
+
+<p align="center">
+  <img src="media/themes/themes-gallery.png" width="640" alt="The nine built-in themes with the app drawer open: Handtop dark and light, Retro, Glass, Pocket, Signal, Debian, High contrast and Grayscale">
+</p>
+
+- **Built in:** Handtop (dark and light), **Retro** (a 90s desktop), **Glass** (light and
+  see-through), **Pocket** (a pocket game console in four greens), **Signal** (black and white with
+  one red), Debian, High contrast and Grayscale.
+- **Make your own copy:** **Duplicate** a theme and choose its name, accent and background colours,
+  icons, pointer size and text size.
+- **Share:** **Export** writes a theme to one `.handtop-theme` file; **Import** checks a file and
+  installs it.
+- **Design one from scratch**, by hand or with an AI agent: a theme is a `theme.json` with colours
+  plus optional images, pointer, fonts and a little CSS. Anything left out comes from Handtop dark
+  or light.
+
+How to change, share and design themes, including a ready-made prompt for AI agents:
+[docs/themes.md](docs/themes.md). Everything a theme can set: [docs/theme-format.md](docs/theme-format.md).
+
 ## Install
 
 You need a microSD card (16 GB or larger) and balenaEtcher or Rufus.
 
-1. Download `handtop-<date>-v0.3.9.img.xz` and its `.sha256` from the Releases page. If that image does nothing at all on power-on (no LED), your unit has DDR3 RAM: use the `-DDR3` image instead.
+1. Download `handtop-<date>-v0.4.0.img.xz` and its `.sha256` from the Releases page. If that image does nothing at all on power-on (no LED), your unit has DDR3 RAM: use the `-DDR3` image instead.
 2. Flash the `.img.xz` directly (no need to unpack). If Windows offers to format the card afterwards, choose **Cancel**.
 3. Optional: on the `RG35XXHBOOT` drive, fill in `wifi.txt` (SSID, password, country).
 4. Put the card in the **TF1** (left) slot and power on. The first boot takes longer (the system grows to fill the card).
@@ -115,8 +140,9 @@ sudo bash build/10-image.sh        # → work/out/handtop-<date>-<version>.img.x
 - `build/` — numbered build scripts, package lists, kernel patch and device-tree overlay
 - `overlay/` — files copied into the root filesystem
 - `src/inputd/` — input daemon and on-screen keyboard (Python), with unit tests
+- `src/theme/` — the theme system and Theme app (Python), the built-in themes and tests
 - `boot-files/` — files placed on the FAT boot partition
-- `tools/` — test helpers (QEMU boot test, headless desktop screenshots, Wi-Fi import test)
+- `tools/` — test helpers (QEMU boot test, headless desktop screenshots, Wi-Fi import test) and the generators of the built-in themes
 - `docs/` — how everything works and why
 
 ## Disclaimer
