@@ -28,7 +28,7 @@ Status: **v0.4.0**, developed and tested on the RG35XX H.
 
 ## Features
 
-- **Themes** (new in v0.4.0): nine looks built in, including Retro, Glass, Pocket and Signal; make your own copy in a few taps, or design a theme from scratch and share it as one file (see [Themes](#themes))
+- **Themes** (new in v0.4.0): nine looks built in, your own copies, shareable theme files (see [Themes](#themes))
 - Desktop mode by default: stick / D-pad pointer, A/B clicks, right-stick scrolling, L1/R1/R2 = Esc/Enter/Backspace, L3/R3 = copy/paste
 - On-screen keyboard (X), navigable with the D-pad
 - Gamepad mode (tap Start) presents an Xbox 360 pad, e.g. for Moonlight; hold Start 1 s to go back
@@ -48,27 +48,15 @@ Full control map: [docs/services/input-daemon.md](docs/services/input-daemon.md)
 
 ## Themes
 
-A theme changes the whole desktop's look: taskbar and icons, app drawer, power menu,
-notifications, title bars, on-screen keyboard, terminal, pointer, fonts and wallpaper. Open
-**Apps → Theme**, pick one and press **Apply**.
+Nine looks are built in, including the new **Retro**, **Glass**, **Pocket** and **Signal**. Switch in
+**Apps → Theme**, make your own copy with new colours, or design a theme from scratch (by hand or
+with an AI agent) and share it as one file.
 
 <p align="center">
   <img src="media/themes/themes-gallery.png" width="640" alt="The nine built-in themes with the app drawer open: Handtop dark and light, Retro, Glass, Pocket, Signal, Debian, High contrast and Grayscale">
 </p>
 
-- **Built in:** Handtop (dark and light), **Retro** (a 90s desktop), **Glass** (light and
-  see-through), **Pocket** (a pocket game console in four greens), **Signal** (black and white with
-  one red), Debian, High contrast and Grayscale.
-- **Make your own copy:** **Duplicate** a theme and choose its name, accent and background colours,
-  icons, pointer size and text size.
-- **Share:** **Export** writes a theme to one `.handtop-theme` file; **Import** checks a file and
-  installs it.
-- **Design one from scratch**, by hand or with an AI agent: a theme is a `theme.json` with colours
-  plus optional images, pointer, fonts and a little CSS. Anything left out comes from Handtop dark
-  or light.
-
-How to change, share and design themes, including a ready-made prompt for AI agents:
-[docs/themes.md](docs/themes.md). Everything a theme can set: [docs/theme-format.md](docs/theme-format.md).
+How to change, share and design themes: [docs/themes.md](docs/themes.md).
 
 ## Install
 
