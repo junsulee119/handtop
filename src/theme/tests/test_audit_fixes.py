@@ -329,7 +329,7 @@ EXTRA_IDS = sorted(os.listdir(EXTRA)) if os.path.isdir(EXTRA) else []
 @pytest.mark.parametrize("tid", EXTRA_IDS)
 def test_d01_hotspots_on_the_drawing(tid):
     """Each pointer's hotspot is on an opaque pixel (Pocket's moved off when the art was centred)."""
-    from PIL import Image
+    Image = pytest.importorskip("PIL.Image")
     with open(os.path.join(EXTRA, tid, "theme.json")) as f:
         cur = json.load(f).get("cursor", {})
     for shape, (x, y) in cur.get("hotspots", {}).items():
