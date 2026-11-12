@@ -67,8 +67,6 @@ You need a microSD card (16 GB or larger) and balenaEtcher or Rufus.
 3. Optional: on the `RG35XXHBOOT` drive, fill in `wifi.txt` (SSID, password, country).
 4. Put the card in the **TF1** (left) slot and power on. The first boot takes longer (the system grows to fill the card).
 
-> ⚠️ **Known issue:** Bluetooth is sometimes missing on the first boot after flashing (no adapter: the Bluetooth icon shows it off and External Controller → Bluetooth can't start). Restart once (Power → Restart); it works from then on.
-
 **Login:** user `rg`, password `rg35xxh` (used for sudo). **SSH is off by default**:
 open Apps → **Enable SSH**, which makes you choose your own password first.
 
