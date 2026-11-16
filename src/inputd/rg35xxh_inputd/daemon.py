@@ -416,7 +416,7 @@ class Daemon:
 
     def _create_virtual_devices(self):
         self.mouse = evdev.UInput({
-            E.EV_KEY: [E.BTN_LEFT, E.BTN_RIGHT, E.BTN_MIDDLE],
+            E.EV_KEY: [E.BTN_LEFT, E.BTN_RIGHT, E.BTN_MIDDLE, E.BTN_SIDE, E.BTN_EXTRA],   # side/extra: back/forward
             E.EV_REL: [E.REL_X, E.REL_Y, E.REL_WHEEL, E.REL_HWHEEL, E.REL_WHEEL_HI_RES, E.REL_HWHEEL_HI_RES],
         }, name="rg35xxh virtual mouse")
         # No power/sleep keys: logind would otherwise watch this device for them.
@@ -799,7 +799,8 @@ class Daemon:
                     self._wheel_notch(E.REL_HWHEEL, a[2], 1)
                 mouse_dirty = True
             elif kind == "mouse":
-                btn = {"left": E.BTN_LEFT, "right": E.BTN_RIGHT, "middle": E.BTN_MIDDLE}[a[1]]
+                btn = {"left": E.BTN_LEFT, "right": E.BTN_RIGHT, "middle": E.BTN_MIDDLE,
+                       "back": E.BTN_SIDE, "forward": E.BTN_EXTRA}[a[1]]
                 self.mouse.write(E.EV_KEY, btn, 1 if a[2] else 0)
                 mouse_dirty = True
             elif kind == "key":
@@ -809,6 +810,8 @@ class Daemon:
                     self._ui_send("osk", "key_state", a[1], a[2])
             elif kind == "clipboard":
                 self._clipboard(a[1])
+            elif kind == "launch":
+                self._launch(a[1])
             elif kind == "osk" and not self.ui:
                 log.warning("on-screen keyboard requested but unavailable")
             elif kind == "osk":
@@ -871,6 +874,20 @@ class Daemon:
             acc[idx] -= notches * 120
             self.mouse.write(E.EV_REL, code, notches)
         self._notch_acc = acc
+
+    def _launch(self, app_id):
+        """launch:<desktop id> binding: start that app like the app drawer does (gio launch on its
+        .desktop file; first match in the user's, Handtop's and Debian's application folders)."""
+        dirs = [os.path.join(os.environ.get("XDG_DATA_HOME") or os.path.expanduser("~/.local/share"), "applications"),
+                "/usr/local/share/applications", "/usr/share/applications"]
+        path = next((os.path.join(d, app_id + ".desktop") for d in dirs
+                     if os.path.isfile(os.path.join(d, app_id + ".desktop"))), None)
+        if path is None:
+            log.warning("launch: no app %r", app_id)
+            spawn("notify-send", "-t", "3000", "Controls", f"No app named {app_id}")
+            return
+        log.info("launch: %s", path)
+        spawn("gio", "launch", path)
 
     def _clipboard(self, what):
         letter = "KEY_C" if what == "copy" else "KEY_V"

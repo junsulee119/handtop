@@ -10,8 +10,9 @@ The daemon feeds normalized events in and executes the returned actions:
 Every call returns a list of actions (tuples):
   ("rel", dx, dy)                 move pointer (integer pixels)
   ("wheel", v, h)                 hi-res scroll units (120 = one notch); v>0 = up, h>0 = right
-  ("mouse", "left"|"right"|"middle", pressed)
-  ("key", "KEY_ENTER", pressed)
+  ("mouse", "left"|"right"|"middle"|"back"|"forward", pressed)
+  ("key", "KEY_ENTER", pressed)   (a combo: one per key, pressed in order, released in reverse)
+  ("launch", "<desktop id>")      start an app (on press)
   ("clipboard", "copy"|"paste")   daemon picks Ctrl(+Shift)+C/V depending on focused app
   ("osk", "toggle") / ("osk", "move", dx, dy) / ("osk", "press") / ("osk", "release")
   / ("osk", "repeat") (A held on a key) / ("osk", "shift") (L2 while the keyboard is open)
@@ -47,6 +48,9 @@ DEFAULT_SETTINGS = {
     "osk_key_repeat_interval": 0.06,
     "vol_repeat_delay": 0.40,      # hold Vol (or F+Vol): repeat after this
     "vol_repeat_interval": 0.12,
+    "natural_scroll": False,       # True: content follows the stick (scroll directions reversed)
+    "swap_sticks": False,          # True: right stick = pointer, left stick = scroll (desktop mode)
+    "pad_layout": "position",      # gamepad mode: "position" (bottom = Xbox A) or "label" (A = A)
 }
 
 # Desktop-mode bindings (overridable from the config file).
@@ -72,6 +76,9 @@ PAD_BUTTONS = {
     "l1": "BTN_TL", "r1": "BTN_TR", "select": "BTN_SELECT", "start": "BTN_START",
     "l3": "BTN_THUMBL", "r3": "BTN_THUMBR",
 }
+# By label (pad_layout = label, local gamepad mode only): the handheld's A sends Xbox A, and so on.
+# The External Controller modes always use PAD_BUTTONS: their services translate by position.
+PAD_BUTTONS_LABEL = dict(PAD_BUTTONS, a="BTN_A", b="BTN_B", x="BTN_X", y="BTN_Y")
 PAD_TRIGGERS = {"l2": "ABS_Z", "r2": "ABS_RZ"}
 PAD_AXES = {"lx": "ABS_X", "ly": "ABS_Y", "rx": "ABS_RX", "ry": "ABS_RY"}
 # BT Controller mode exits with this combo instead of holding Start (same as Moonlight's quit
@@ -133,6 +140,12 @@ class Core:
             self.osk_key_next = None
             self.osk_shift_button = None
             self.swallowed |= {n for n in self.held if n in BUTTONS and n != "f"}
+        elif (settings or {}).get("pad_layout", "position") != self.s["pad_layout"]:
+            # Gamepad mode, layout switched: release the face buttons down under the old layout.
+            for n in ("a", "b", "x", "y"):
+                if n in self.held and n not in self.swallowed:
+                    out.extend(self._pad_button(n, False))
+                    self.swallowed.add(n)
         self._configure(settings, bindings)
         return out
 
@@ -294,8 +307,10 @@ class Core:
         if self.screen_off or dt == 0.0:
             return out
 
-        # Pointer: left stick (analog) + D-pad (digital, when the keyboard is hidden).
-        vx, vy = self._stick_velocity(self.axes["lx"], self.axes["ly"], self.s["pointer_max_speed"],
+        # Pointer: left stick (analog) + D-pad (digital, when the keyboard is hidden); swap_sticks
+        # trades the sticks' roles (left-handed use).
+        px, py, sx_, sy_ = ("rx", "ry", "lx", "ly") if self.s["swap_sticks"] else ("lx", "ly", "rx", "ry")
+        vx, vy = self._stick_velocity(self.axes[px], self.axes[py], self.s["pointer_max_speed"],
                                       self._power_curve)
         if not self.osk_visible:
             dx, dy = 0, 0
@@ -315,9 +330,11 @@ class Core:
             self.acc[1] -= my
             out.append(("rel", mx, my))
 
-        # Scroll: right stick, both directions. Stick up = scroll up.
-        sx, sy = self._stick_velocity(self.axes["rx"], self.axes["ry"], self.s["scroll_speed"] * 120.0,
+        # Scroll: right stick, both directions. Stick up = scroll up (natural_scroll: down).
+        sx, sy = self._stick_velocity(self.axes[sx_], self.axes[sy_], self.s["scroll_speed"] * 120.0,
                                       self._log_curve)
+        if self.s["natural_scroll"]:
+            sx, sy = -sx, -sy
         self.acc[2] += -sy * dt
         self.acc[3] += sx * dt
         wv, wh = int(self.acc[2]), int(self.acc[3])
@@ -369,8 +386,13 @@ class Core:
             return [("mouse", action[len("click_"):], pressed)]
         if action.startswith("key:"):
             return [("key", action[4:], pressed)]
+        if action.startswith("combo:"):
+            keys = action[6:].split("+")
+            return [("key", k, True) for k in keys] if pressed else [("key", k, False) for k in reversed(keys)]
         if not pressed:
             return []  # the rest act on press only
+        if action.startswith("launch:"):
+            return [("launch", action[7:])]
         if action in ("copy", "paste"):
             return [("clipboard", action)]
         if action == "osk_toggle":
@@ -390,6 +412,8 @@ class Core:
                     out.append(("mouse", action[len("click_"):], False))
                 elif action.startswith("key:"):
                     out.append(("key", action[4:], False))
+                elif action.startswith("combo:"):
+                    out.extend(("key", k, False) for k in reversed(action[6:].split("+")))
         return out
 
     def _enter_gamepad(self):
@@ -453,8 +477,9 @@ class Core:
         return [("mode", "desktop")]
 
     def _pad_button(self, name, pressed):
-        if name in PAD_BUTTONS:
-            return [("pad_key", PAD_BUTTONS[name], 1 if pressed else 0)]
+        table = PAD_BUTTONS_LABEL if self.s["pad_layout"] == "label" and not self.combo_exit else PAD_BUTTONS
+        if name in table:
+            return [("pad_key", table[name], 1 if pressed else 0)]
         if name in PAD_TRIGGERS:
             return [("pad_abs", PAD_TRIGGERS[name], 255 if pressed else 0)]
         if name in DPAD:

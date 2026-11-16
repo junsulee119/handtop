@@ -33,7 +33,11 @@ DEFAULT_PROFILE = "default"
 PROFILE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 _.-]{0,39}$")
 BUTTON_NAMES = tuple(DEFAULT_BINDINGS)
 HARDWARE_KEYS = ("invert_lx", "invert_ly", "invert_rx", "invert_ry")
-_ACTION_RE = re.compile(r"^(none|click_(left|right|middle)|key:KEY_[A-Z0-9_]+|copy|paste|osk_toggle|mode_gamepad|power_menu)$")
+_ACTION_RE = re.compile(r"^(none|click_(left|right|middle|back|forward)|key:KEY_[A-Z0-9_]+"
+                        r"|combo:KEY_[A-Z0-9_]+(\+KEY_[A-Z0-9_]+){1,3}|launch:[A-Za-z0-9][A-Za-z0-9._-]{0,99}"
+                        r"|copy|paste|osk_toggle|mode_gamepad|power_menu)$")
+BOOL_SETTINGS = ("natural_scroll", "swap_sticks")
+CHOICE_SETTINGS = {"pad_layout": ("position", "label")}
 
 log = logging.getLogger("rg35xxh-inputd")
 
@@ -168,7 +172,19 @@ def parse(cp, label="config"):
     settings, bindings, hardware = {}, {}, {}
     if cp.has_section("settings"):
         for k, v in cp.items("settings"):
-            if k in DEFAULT_SETTINGS:
+            if k in BOOL_SETTINGS:
+                try:
+                    settings[k] = cp.getboolean("settings", k)
+                except ValueError:
+                    log.warning("%s: settings.%s: not yes/no: %r (ignored)", label, k, v)
+            elif k in CHOICE_SETTINGS:
+                v = v.strip().lower()
+                if v in CHOICE_SETTINGS[k]:
+                    settings[k] = v
+                else:
+                    log.warning("%s: settings.%s: %r is not one of %s (ignored)", label, k, v,
+                                ", ".join(CHOICE_SETTINGS[k]))
+            elif k in DEFAULT_SETTINGS:
                 lo, hi = SETTING_RANGES.get(k, (-math.inf, math.inf))
                 try:
                     x = float(v)
@@ -190,6 +206,8 @@ def parse(cp, label="config"):
                 log.warning("%s: desktop.%s: unknown action %r", label, k, v)
             elif v.startswith("key:") and not _known_key(v[4:]):
                 log.warning("%s: desktop.%s: unknown key %r (ignored)", label, k, v[4:])
+            elif v.startswith("combo:") and not all(_known_key(x) for x in v[6:].split("+")):
+                log.warning("%s: desktop.%s: unknown key in %r (ignored)", label, k, v)
             else:
                 bindings[k] = v
     if cp.has_section("hardware"):

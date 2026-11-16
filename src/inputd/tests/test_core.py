@@ -575,6 +575,87 @@ def test_minimal_controls_check():
     assert len(config.minimal_problems({"deadzone": 0.9, "dpad_speed_ratio": 0.05}, {})) == 1
     assert len(config.minimal_problems({"pointer_max_speed": 20}, {"a": "none"})) == 2
 
+
+# ---- options added for the Controls app
+def _scroll(c):
+    out, _ = run_ticks(c, 0.0, 0.3)
+    return sum(a[1] for a in out if a[0] == "wheel"), sum(a[2] for a in out if a[0] == "wheel")
+
+
+def test_natural_scroll_reverses_both_directions():
+    c = Core()
+    c.axis("ry", -0.8, 0.0)                     # stick up
+    c.axis("rx", 0.8, 0.0)                      # and right
+    v, h = _scroll(c)
+    n = Core({"natural_scroll": True})
+    n.axis("ry", -0.8, 0.0)
+    n.axis("rx", 0.8, 0.0)
+    nv, nh = _scroll(n)
+    assert v > 0 and h > 0 and nv < 0 and nh < 0
+
+
+def test_swap_sticks_moves_pointer_with_the_right_stick():
+    c = Core({"swap_sticks": True})
+    c.axis("rx", 0.8, 0.0)
+    out, _ = run_ticks(c, 0.0, 0.2)
+    assert any(a[0] == "rel" and a[1] > 0 for a in out)
+    assert not any(a[0] == "wheel" for a in out)
+    c.axis("rx", 0.0, 0.3)
+    c.axis("ly", -0.8, 0.3)
+    out, _ = run_ticks(c, 0.3, 0.2)
+    assert any(a[0] == "wheel" for a in out) and not any(a[0] == "rel" for a in out)
+
+
+def _to_gamepad(c):
+    c.button("start", True, 0.0)
+    c.button("start", False, 0.1)
+    assert c.mode == "gamepad"
+
+
+def test_pad_layout_by_label_local_mode_only():
+    c = Core({"pad_layout": "label"})
+    _to_gamepad(c)
+    assert c.button("a", True, 0.2) == [("pad_key", "BTN_A", 1)]
+    assert c.button("a", False, 0.3) == [("pad_key", "BTN_A", 0)]
+    e = Core({"pad_layout": "label"})
+    e.request_gamepad(combo_exit=True)          # External Controller: always by position
+    assert e.button("a", True, 0.2) == [("pad_key", "BTN_B", 1)]
+
+
+def test_pad_layout_switch_releases_held_face_button():
+    c = Core()
+    _to_gamepad(c)
+    assert c.button("b", True, 0.2) == [("pad_key", "BTN_A", 1)]
+    assert c.reconfigure({"pad_layout": "label"}, {}) == [("pad_key", "BTN_A", 0)]
+    assert c.button("b", False, 0.3) == []      # not a stray BTN_B release
+    assert c.button("b", True, 0.4) == [("pad_key", "BTN_B", 1)]
+
+
+def test_mouse_back_forward_combo_and_launch():
+    c = Core(bindings={"y": "click_back", "select": "click_forward", "l2": "combo:KEY_LEFTALT+KEY_TAB",
+                       "r3": "launch:chromium"})
+    assert c.button("y", True, 0.0) == [("mouse", "back", True)]
+    assert c.button("select", True, 0.0) == [("mouse", "forward", True)]
+    assert c.button("l2", True, 0.0) == [("key", "KEY_LEFTALT", True), ("key", "KEY_TAB", True)]
+    assert c.button("l2", False, 0.1) == [("key", "KEY_TAB", False), ("key", "KEY_LEFTALT", False)]
+    assert c.button("r3", True, 0.0) == [("launch", "chromium")]
+    assert c.button("r3", False, 0.1) == []
+
+
+def test_reconfigure_releases_a_held_combo_in_reverse():
+    c = Core(bindings={"l2": "combo:KEY_LEFTCTRL+KEY_LEFTSHIFT+KEY_T"})
+    c.button("l2", True, 0.0)
+    assert c.reconfigure({}, {}) == [("key", "KEY_T", False), ("key", "KEY_LEFTSHIFT", False),
+                                     ("key", "KEY_LEFTCTRL", False)]
+
+
+def test_config_new_options_validated():
+    s, b, _, _ = _load_conf("[settings]\nnatural_scroll = yes\nswap_sticks = maybe\npad_layout = Label\n"
+                            "[desktop]\ny = combo:KEY_LEFTCTRL+KEY_C\nx = combo:KEY_A\nl2 = launch:../evil\n"
+                            "r3 = launch:org.xfce.mousepad\nselect = click_back\n")
+    assert s == {"natural_scroll": True, "pad_layout": "label"}
+    assert b == {"y": "combo:KEY_LEFTCTRL+KEY_C", "r3": "launch:org.xfce.mousepad", "select": "click_back"}
+
 if __name__ == "__main__":
     failed = 0
     tests = [(n, f) for n, f in sorted(globals().items()) if n.startswith("test_")]
