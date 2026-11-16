@@ -1,5 +1,10 @@
 # Handtop changelog
 
+## Unreleased
+
+- **Controls apply at once.** Changes to the control settings no longer need a re-login; the input daemon picks them up within a second. Groundwork for the Controls app.
+- **Change: the boot partition's `rg35xxh-input.conf` is now a rescue file, all commented out.** A line you uncomment wins over everything else; if the controls are ever broken, uncomment `use_app_settings = no` at the top to ignore what the Controls app saved. Cards flashed before keep their old file, which still works but fixes every setting it lists.
+
 ## v0.4.0
 Themes: nine looks built in (new: Retro, Glass, Pocket, Signal), a Theme app to copy and share them, and theme files you can design yourself.
 

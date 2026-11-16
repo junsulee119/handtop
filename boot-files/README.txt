@@ -3,7 +3,8 @@ Handtop (Debian desktop for the RG35XX H) - boot partition
 
 Files you may edit on this partition (from Windows):
   wifi.txt               Wi-Fi network. Imported at next boot, password is then removed from the file.
-  rg35xxh-input.conf     Controls (speeds, button actions). Applies after re-login/reboot.
+  rg35xxh-input.conf     Controls rescue: all commented out. A line you uncomment wins over
+                         Apps > Controls. Controls broken? Uncomment use_app_settings = no.
   panel.txt              Screen panel: auto (default), regular or rev6.
   logs\boot-NNNN.txt     Diagnostic logs of the last 5 boots (written by the device).
 

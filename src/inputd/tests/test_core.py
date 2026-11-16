@@ -465,6 +465,116 @@ def test_config_unknown_key_keeps_default():
         config._known_key = real
     assert "y" not in b and b["select"] == "key:KEY_TAB"
 
+
+# ---- settings layers (Controls app): system < profile < trial < boot partition, per key
+def _layers(files, now=1000.0):
+    import tempfile
+    from rg35xxh_inputd import config
+    tmp = tempfile.mkdtemp()
+    layers = []
+    for kind in ("system", "profile", "trial", "boot"):
+        p = os.path.join(tmp, kind + ".conf")
+        if kind in files:
+            with open(p, "w") as f:
+                f.write(files[kind])
+        layers.append((kind, p))
+    return config.load_layers(layers, now=now)
+
+
+def test_layers_merge_per_key_and_boot_wins():
+    cfg = _layers({"system": "[settings]\npointer_max_speed = 450\nscroll_speed = 8\n[desktop]\na = click_left\n",
+                   "profile": "[settings]\npointer_max_speed = 600\n[desktop]\na = none\ny = copy\n",
+                   "boot": "[desktop]\na = click_left\n[hardware]\ninvert_lx = yes\n"})
+    assert cfg.settings == {"pointer_max_speed": 600.0, "scroll_speed": 8.0}
+    assert cfg.bindings == {"a": "click_left", "y": "copy"}
+    assert cfg.hardware["invert_lx"] is True and cfg.hardware["invert_ly"] is False
+    assert cfg.locked == {"desktop.a", "hardware.invert_lx"}
+
+
+def test_layers_bad_value_in_profile_keeps_lower_layer():
+    cfg = _layers({"system": "[settings]\ndeadzone = 0.2\n", "profile": "[settings]\ndeadzone = 5\n"})
+    assert cfg.settings["deadzone"] == 0.2
+
+
+def test_trial_applies_until_it_expires():
+    files = {"profile": "[desktop]\na = click_left\n",
+             "trial": "[trial]\nexpires = 1015\n[desktop]\na = none\n"}
+    cfg = _layers(files, now=1000.0)
+    assert cfg.bindings["a"] == "none" and not cfg.trial_expired
+    cfg = _layers(files, now=1015.0)
+    assert cfg.bindings["a"] == "click_left" and cfg.trial_expired
+
+
+def test_trial_without_expiry_is_ignored():
+    cfg = _layers({"trial": "[desktop]\na = none\n"})
+    assert "a" not in cfg.bindings and cfg.trial_expired
+
+
+def test_reconfigure_releases_held_binding_and_swallows_its_release():
+    c = Core()
+    assert c.button("a", True, 0.0) == [("mouse", "left", True)]
+    out = c.reconfigure({}, {"a": "key:KEY_ENTER"})
+    assert out == [("mouse", "left", False)]
+    assert c.button("a", False, 0.1) == []                     # not a stray Enter release
+    assert c.button("a", True, 0.2) == [("key", "KEY_ENTER", True)]
+
+
+def test_reconfigure_releases_osk_key():
+    c = Core()
+    c.set_osk_visible(True)
+    assert c.button("a", True, 0.0) == [("osk", "press")]
+    out = c.reconfigure({}, {})
+    assert ("osk", "release") in out
+    assert c.button("a", False, 0.1) == []
+
+
+def test_reconfigure_in_gamepad_mode_keeps_pad_and_applies_settings():
+    c = Core()
+    c.button("start", True, 0.0)
+    c.button("start", False, 0.1)
+    assert c.mode == "gamepad"
+    assert c.button("b", True, 0.2) == [("pad_key", "BTN_A", 1)]
+    assert c.reconfigure({"start_hold_seconds": 2.0}, {"b": "copy"}) == []
+    assert c.button("b", False, 0.3) == [("pad_key", "BTN_A", 0)]
+    assert c.s["start_hold_seconds"] == 2.0 and c.bind["b"] == "copy"
+
+
+def _template():
+    from rg35xxh_inputd import config
+    here = os.path.dirname(os.path.abspath(__file__))
+    with open(os.path.join(here, "..", "..", "..", "overlay", "etc", "rg35xxh", "input.conf")) as f:
+        return config.boot_template(f.read())
+
+
+def test_shipped_boot_file_locks_nothing():
+    cfg = _layers({"profile": "[desktop]\na = none\n", "boot": _template()})
+    assert cfg.locked == set() and cfg.bindings["a"] == "none" and cfg.app_settings
+
+
+def test_uncommenting_one_line_in_the_boot_file_wins():
+    boot = _template().replace("# a = click_left", "a = click_left", 1)
+    cfg = _layers({"profile": "[desktop]\na = none\n", "boot": boot})
+    assert cfg.locked == {"desktop.a"} and cfg.bindings["a"] == "click_left"
+
+
+def test_rescue_switch_ignores_profile_and_trial():
+    boot = _template().replace("# use_app_settings = no", "use_app_settings = no", 1)
+    cfg = _layers({"system": "[settings]\nscroll_speed = 9\n",
+                   "profile": "[desktop]\na = none\n[settings]\nscroll_speed = 30\n",
+                   "trial": "[trial]\nexpires = 2000\n[desktop]\nb = none\n", "boot": boot})
+    assert not cfg.app_settings
+    assert "a" not in cfg.bindings and "b" not in cfg.bindings and cfg.settings["scroll_speed"] == 9
+
+
+def test_minimal_controls_check():
+    from rg35xxh_inputd import config
+    assert config.minimal_problems({}, {}) == []
+    assert len(config.minimal_problems({}, {"a": "none"})) == 1                       # no left click
+    assert config.minimal_problems({}, {"a": "none", "y": "click_left"}) == []        # moved, fine
+    assert config.minimal_problems({"deadzone": 0.9}, {}) == []                       # D-pad still moves it
+    assert len(config.minimal_problems({"deadzone": 0.9, "dpad_speed_ratio": 0.05}, {})) == 1
+    assert len(config.minimal_problems({"pointer_max_speed": 20}, {"a": "none"})) == 2
+
 if __name__ == "__main__":
     failed = 0
     tests = [(n, f) for n, f in sorted(globals().items()) if n.startswith("test_")]

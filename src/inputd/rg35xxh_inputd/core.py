@@ -87,12 +87,7 @@ HOME_TAP_SECONDS = 0.1      # F tap: Home pressed this long (one report would be
 
 class Core:
     def __init__(self, settings=None, bindings=None):
-        self.s = dict(DEFAULT_SETTINGS)
-        self.s.update(settings or {})
-        if "dpad_speed" in self.s and "dpad_speed_ratio" not in (settings or {}):   # older configs: px/s
-            self.s["dpad_speed_ratio"] = self.s["dpad_speed"] / max(1.0, self.s["pointer_max_speed"])
-        self.bind = dict(DEFAULT_BINDINGS)
-        self.bind.update(bindings or {})
+        self._configure(settings, bindings)
         self.mode = "desktop"
         self.combo_exit = False     # gamepad mapping left with EXIT_COMBO (BT Controller mode)
         self.f_buttons = False      # F gives Home / Capture (Switch Controller mode)
@@ -115,6 +110,31 @@ class Core:
         self.capture_down = False   # Select is held as Capture (F + Select, external modes)
         self.last_tick = None
         self.acc = [0.0, 0.0, 0.0, 0.0]   # sub-unit accumulators: x, y, wheel v, wheel h
+
+    def _configure(self, settings, bindings):
+        self.s = dict(DEFAULT_SETTINGS)
+        self.s.update(settings or {})
+        if "dpad_speed" in self.s and "dpad_speed_ratio" not in (settings or {}):   # older configs: px/s
+            self.s["dpad_speed_ratio"] = self.s["dpad_speed"] / max(1.0, self.s["pointer_max_speed"])
+        self.bind = dict(DEFAULT_BINDINGS)
+        self.bind.update(bindings or {})
+
+    def reconfigure(self, settings=None, bindings=None):
+        """New settings and bindings while running (the Controls app, a changed config file).
+        Whatever the old bindings hold is released first, as on a mode switch, and buttons still
+        down are swallowed: their release must not act under the new binding. Only data changes
+        here; the daemon touches no device for it."""
+        out = []
+        if self.mode == "desktop":
+            out = self._release_all_desktop()
+            if self.osk_pressed_button:
+                out.append(("osk", "release"))
+            self.osk_pressed_button = None
+            self.osk_key_next = None
+            self.osk_shift_button = None
+            self.swallowed |= {n for n in self.held if n in BUTTONS and n != "f"}
+        self._configure(settings, bindings)
+        return out
 
     # ---------------------------------------------------------------- inputs
     def set_osk_visible(self, visible):

@@ -61,7 +61,9 @@ LABEL rg35xxh
   APPEND root=PARTUUID=$PARTUUID_ROOT rootwait rootfstype=ext4 ro rdinit=/nonexistent console=ttyS0,115200 console=tty0 loglevel=4 cma=$CMA_SIZE
 X
 cp "$TOP/boot-files/wifi.txt" "$TOP/boot-files/README.txt" "$BOOTDIR/"
-sed 's/$/\r/' "$TOP/overlay/etc/rg35xxh/input.conf" > "$BOOTDIR/rg35xxh-input.conf"
+# Controls rescue file: the defaults, all commented out (nothing locked in the Controls app)
+python3 "$TOP/tools/boot-input-conf.py" "$TOP/overlay/etc/rg35xxh/input.conf" | sed 's/$/\r/' > "$BOOTDIR/rg35xxh-input.conf"
+grep -q '^\[rescue\]' "$BOOTDIR/rg35xxh-input.conf" || { echo "rg35xxh-input.conf: template failed" >&2; exit 1; }
 sed 's/$/\r/' "$TOP/boot-files/panel.txt" > "$BOOTDIR/panel.txt"
 mkfs.vfat -F 32 -n "$BOOT_LABEL" -C "$P/boot.vfat" $(( BOOT_SIZE_MIB * 1024 )) >/dev/null
 MTOOLS_SKIP_CHECK=1 mcopy -s -i "$P/boot.vfat" "$BOOTDIR"/* ::/

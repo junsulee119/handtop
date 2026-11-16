@@ -349,3 +349,91 @@ def test_spawn_leaves_no_zombie():
 
 def test_spawn_missing_program():
     assert daemon.spawn("/nonexistent/rg35xxh-nothing") is None
+
+
+def _config_daemon(monkeypatch, tmp_path):
+    from rg35xxh_inputd import config
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path / "run"))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "cfg"))
+    (tmp_path / "run").mkdir()
+    (tmp_path / "cfg" / "rg35xxh" / "controls").mkdir(parents=True)
+    monkeypatch.setattr(config, "SYSTEM", str(tmp_path / "system.conf"))
+    monkeypatch.setattr(config, "BOOT", str(tmp_path / "boot.conf"))
+    d = daemon.Daemon.__new__(daemon.Daemon)
+    d.core = daemon.Core()
+    d.layout = daemon.PointerLayout()
+    d.hw = {}
+    d.gamepad = None
+    d.anim = None
+    d.haptic_scale = d.core.s["haptic_strength"]
+    d.cfg_stamp = config.stamp()
+    d.ran = []
+    d._run = d.ran.extend
+    return d, config
+
+
+def test_profile_change_is_applied_without_restart(monkeypatch, tmp_path):
+    d, config = _config_daemon(monkeypatch, tmp_path)
+    with open(config.profile_path("default"), "w") as f:
+        f.write("[settings]\npointer_max_speed = 700\n[desktop]\ny = copy\n[hardware]\ninvert_ry = yes\n")
+    d._config_reload()
+    assert d.core.s["pointer_max_speed"] == 700 and d.core.bind["y"] == "copy"
+    assert d.hw["invert_ry"] is True
+
+
+def test_expired_trial_is_deleted_and_undone(monkeypatch, tmp_path):
+    import time
+    d, config = _config_daemon(monkeypatch, tmp_path)
+    with open(config.trial_path(), "w") as f:
+        f.write(f"[trial]\nexpires = {time.time() + 60}\n[desktop]\na = none\n")
+    d._config_reload()
+    assert d.core.bind["a"] == "none"
+    later = time.time() + 61                      # the countdown runs out; the file is untouched
+    monkeypatch.setattr(daemon.time, "time", lambda: later)
+    d._config_reload()
+    assert d.core.bind["a"] == "click_left"
+    assert not os.path.exists(config.trial_path())
+
+
+def test_boot_file_beats_the_profile(monkeypatch, tmp_path):
+    d, config = _config_daemon(monkeypatch, tmp_path)
+    with open(config.profile_path("default"), "w") as f:
+        f.write("[desktop]\na = none\n")
+    with open(config.BOOT, "w") as f:
+        f.write("[desktop]\na = click_left\n")
+    d._config_reload()
+    assert d.core.bind["a"] == "click_left"
+
+
+def test_active_profile_pointer_switches_profile(monkeypatch, tmp_path):
+    d, config = _config_daemon(monkeypatch, tmp_path)
+    with open(config.profile_path("games"), "w") as f:
+        f.write("[settings]\nscroll_speed = 20\n")
+    with open(config.active_file(), "w") as f:
+        f.write("games\n")
+    d._config_reload()
+    assert d.core.s["scroll_speed"] == 20
+    with open(config.active_file(), "w") as f:
+        f.write("../etc/passwd\n")              # not a profile name: back to "default"
+    d._config_reload()
+    assert d.core.s["scroll_speed"] == daemon.Core().s["scroll_speed"]
+
+
+def test_haptic_preview_waits_for_the_new_strength_and_skips_gamepad_mode(monkeypatch, tmp_path):
+    d, config = _config_daemon(monkeypatch, tmp_path)
+    played = []
+    d.step_ids = {}
+    d._preview_step = lambda: played.append(d.core.s["haptic_strength"]) or False
+    monkeypatch.setattr(daemon.GLib, "timeout_add", lambda *a: 1, raising=False)
+    d.core.s["haptic_strength"] = 0.5                  # changed, pulses not re-uploaded yet
+    open(daemon.runtime_flag("rg35xxh-haptic-preview"), "w").close()
+    d._haptic_preview()
+    assert played == [] and d.preview_pending
+    d.haptic_scale = 0.5                               # re-uploaded
+    d._haptic_preview()
+    assert played == [0.5] and not d.preview_pending
+    d.preview = None
+    d.core.mode = "gamepad"
+    open(daemon.runtime_flag("rg35xxh-haptic-preview"), "w").close()
+    d._haptic_preview()
+    assert played == [0.5] and not d.preview_pending

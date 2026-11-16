@@ -1,16 +1,38 @@
-"""Config file loading. First existing file wins:
-   /boot/firmware/rg35xxh-input.conf   (FAT boot partition, editable from Windows)
-   /etc/rg35xxh/input.conf             (system default)
+"""Config file loading.
+
+Settings come in layers; per key, the last layer that sets it wins (docs/services/input-daemon.md,
+"Settings layers"):
+  1. built-in defaults (core.py)
+  2. /etc/rg35xxh/input.conf                  system
+  3. ~/.config/rg35xxh/controls/<profile>.conf the active profile (Controls app); <profile> is named
+                                               in ~/.config/rg35xxh/controls/active, "default" if none
+  4. $XDG_RUNTIME_DIR/rg35xxh-controls-trial.conf
+                                               a change on trial ("Keep these controls?"); ignored once
+                                               its [trial] expires time has passed
+  5. /boot/firmware/rg35xxh-input.conf         FAT boot partition, editable from Windows: wins, so it
+                                               always rescues a broken profile. Images ship it with
+                                               every setting commented out (boot_template()), so it
+                                               locks nothing until a line is uncommented; its
+                                               [rescue] use_app_settings = no drops layers 3 and 4
+load() is the older single-file reader (first existing file wins), kept for the tests.
 """
 import configparser
 import logging
 import math
+import os
 import re
+import time
 
 from .core import DEFAULT_BINDINGS, DEFAULT_SETTINGS
 
-PATHS = ("/boot/firmware/rg35xxh-input.conf", "/etc/rg35xxh/input.conf")
+SYSTEM = "/etc/rg35xxh/input.conf"
+BOOT = "/boot/firmware/rg35xxh-input.conf"
+PATHS = (BOOT, SYSTEM)
+TRIAL_NAME = "rg35xxh-controls-trial.conf"
+DEFAULT_PROFILE = "default"
+PROFILE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 _.-]{0,39}$")
 BUTTON_NAMES = tuple(DEFAULT_BINDINGS)
+HARDWARE_KEYS = ("invert_lx", "invert_ly", "invert_rx", "invert_ry")
 _ACTION_RE = re.compile(r"^(none|click_(left|right|middle)|key:KEY_[A-Z0-9_]+|copy|paste|osk_toggle|mode_gamepad|power_menu)$")
 
 log = logging.getLogger("rg35xxh-inputd")
@@ -50,22 +72,100 @@ def _known_key(name):
     return isinstance(ecodes.ecodes.get(name), int)
 
 
-def load(paths=PATHS):
-    settings, bindings, hardware = {}, {}, {"invert_ly": False, "invert_ry": False, "invert_lx": False, "invert_rx": False}
-    cp = configparser.ConfigParser(inline_comment_prefixes=("#", ";"))
-    used = None
-    for p in paths:
+# Smallest set of controls that still lets you reach the Controls app and undo a change. The
+# Controls app warns before a change that breaks one of them (then the usual 15 s "Keep these
+# controls?" countdown follows).
+MIN_POINTER_SPEED = 60.0       # px/s: slower than this, by stick or D-pad, counts as no pointer
+MAX_USABLE_DEADZONE = 0.6      # beyond this the stick hardly moves the pointer
+
+
+def minimal_problems(settings=None, bindings=None):
+    """What a configuration takes away of the minimal controls: a list of short sentences, empty
+    when the pointer still moves (stick or D-pad) and some button still gives a left click."""
+    s = dict(DEFAULT_SETTINGS)
+    s.update(settings or {})
+    b = dict(DEFAULT_BINDINGS)
+    b.update(bindings or {})
+    out = []
+    stick = s["deadzone"] <= MAX_USABLE_DEADZONE and s["pointer_max_speed"] >= MIN_POINTER_SPEED
+    dpad = s["dpad_speed_ratio"] * s["pointer_max_speed"] >= MIN_POINTER_SPEED
+    if not (stick or dpad):
+        out.append("The pointer would hardly move, with the stick or the D-pad.")
+    if "click_left" not in b.values():
+        out.append("No button would give a left click.")
+    return out
+
+
+# ------------------------------------------------------------------- paths
+def controls_dir():
+    base = os.environ.get("XDG_CONFIG_HOME") or os.path.join(os.path.expanduser("~"), ".config")
+    return os.path.join(base, "rg35xxh", "controls")
+
+
+def active_file():
+    return os.path.join(controls_dir(), "active")
+
+
+def trial_path():
+    return os.path.join(os.environ.get("XDG_RUNTIME_DIR", "/tmp"), TRIAL_NAME)
+
+
+def active_profile():
+    """Name of the active profile: the first line of controls/active, if it is a valid name."""
+    try:
+        with open(active_file(), encoding="utf-8-sig") as f:
+            name = f.readline().strip()
+    except OSError:
+        return DEFAULT_PROFILE
+    if not PROFILE_RE.match(name):
+        log.warning("%s: not a profile name: %r (using %r)", active_file(), name, DEFAULT_PROFILE)
+        return DEFAULT_PROFILE
+    return name
+
+
+def profile_path(name):
+    return os.path.join(controls_dir(), name + ".conf")
+
+
+def layer_paths():
+    """(kind, path) from lowest to highest priority."""
+    return [("system", SYSTEM), ("profile", profile_path(active_profile())),
+            ("trial", trial_path()), ("boot", BOOT)]
+
+
+def stamp():
+    """Cheap change detector for the daemon's housekeeping: (path, inode, mtime_ns, size) of every
+    layer file and the active-profile pointer (the inode catches an atomic replace within one
+    timestamp tick); None for a missing file."""
+    out = []
+    for p in [active_file()] + [p for _, p in layer_paths()]:
         try:
-            with open(p, encoding="utf-8-sig") as f:   # tolerate a BOM from Windows editors
-                cp.read_file(f)
-            used = p
-            break
-        except FileNotFoundError:
-            continue
-        except (OSError, configparser.Error) as e:
-            log.warning("cannot read %s: %s", p, e)
-    if used:
-        log.info("config: %s", used)
+            st = os.stat(p)
+            out.append((p, st.st_ino, st.st_mtime_ns, st.st_size))
+        except OSError:
+            out.append((p, None, None, None))
+    return tuple(out)
+
+
+# ----------------------------------------------------------------- parsing
+def _read(path):
+    """ConfigParser for path, or None if the file is missing or unreadable."""
+    cp = configparser.ConfigParser(inline_comment_prefixes=("#", ";"))
+    try:
+        with open(path, encoding="utf-8-sig") as f:   # tolerate a BOM from Windows editors
+            cp.read_file(f)
+    except FileNotFoundError:
+        return None
+    except (OSError, configparser.Error, UnicodeDecodeError) as e:
+        log.warning("cannot read %s: %s", path, e)
+        return None
+    return cp
+
+
+def parse(cp, label="config"):
+    """The valid values of one file: (settings, bindings, hardware), each holding only the keys the
+    file sets. Bad values are logged and left out, so a lower layer's value (or the default) stays."""
+    settings, bindings, hardware = {}, {}, {}
     if cp.has_section("settings"):
         for k, v in cp.items("settings"):
             if k in DEFAULT_SETTINGS:
@@ -73,30 +173,130 @@ def load(paths=PATHS):
                 try:
                     x = float(v)
                 except ValueError:
-                    log.warning("settings.%s: not a number: %r (default %s kept)", k, v, DEFAULT_SETTINGS[k])
+                    log.warning("%s: settings.%s: not a number: %r (ignored)", label, k, v)
                     continue
                 if not math.isfinite(x) or not lo <= x <= hi:
-                    log.warning("settings.%s: %r outside %s..%s (default %s kept)", k, v, lo, hi, DEFAULT_SETTINGS[k])
+                    log.warning("%s: settings.%s: %r outside %s..%s (ignored)", label, k, v, lo, hi)
                     continue
                 settings[k] = x
             else:
-                log.warning("settings.%s: unknown setting", k)
+                log.warning("%s: settings.%s: unknown setting", label, k)
     if cp.has_section("desktop"):
         for k, v in cp.items("desktop"):
             v = v.strip()
             if k not in BUTTON_NAMES:
-                log.warning("desktop.%s: unknown button (valid: %s)", k, ", ".join(BUTTON_NAMES))
+                log.warning("%s: desktop.%s: unknown button (valid: %s)", label, k, ", ".join(BUTTON_NAMES))
             elif not _ACTION_RE.match(v):
-                log.warning("desktop.%s: unknown action %r", k, v)
+                log.warning("%s: desktop.%s: unknown action %r", label, k, v)
             elif v.startswith("key:") and not _known_key(v[4:]):
-                log.warning("desktop.%s: unknown key %r (default kept)", k, v[4:])
+                log.warning("%s: desktop.%s: unknown key %r (ignored)", label, k, v[4:])
             else:
                 bindings[k] = v
     if cp.has_section("hardware"):
-        for k in hardware:
+        for k in HARDWARE_KEYS:
             if cp.has_option("hardware", k):
                 try:
                     hardware[k] = cp.getboolean("hardware", k)
                 except ValueError:      # fallback= only covers a missing option, not a bad value
-                    log.warning("hardware.%s: not yes/no: %r (default no kept)", k, cp.get("hardware", k))
-    return settings, bindings, hardware, used
+                    log.warning("%s: hardware.%s: not yes/no: %r (ignored)", label, k, cp.get("hardware", k))
+    return settings, bindings, hardware
+
+
+def trial_expires(cp):
+    """Unix time the trial ends, or None if the file has no valid [trial] expires."""
+    try:
+        x = float(cp.get("trial", "expires"))
+    except (configparser.Error, ValueError):
+        return None
+    return x if math.isfinite(x) else None
+
+
+def load(paths=PATHS):
+    """Older single-file reader: the first existing file wins."""
+    hardware = {k: False for k in HARDWARE_KEYS}
+    for p in paths:
+        cp = _read(p)
+        if cp is not None:
+            log.info("config: %s", p)
+            s, b, h = parse(cp, p)
+            hardware.update(h)
+            return s, b, hardware, p
+    return {}, {}, hardware, None
+
+
+def app_settings_allowed(cp):
+    """False when the boot file says [rescue] use_app_settings = no."""
+    try:
+        return cp.getboolean("rescue", "use_app_settings", fallback=True)
+    except ValueError:
+        log.warning("%s: rescue.use_app_settings: not yes/no: %r (ignored)", BOOT,
+                    cp.get("rescue", "use_app_settings"))
+        return True
+
+
+def boot_template(system_text):
+    """The boot partition's rg35xxh-input.conf for a new image, from /etc/rg35xxh/input.conf:
+    the same settings, every one commented out (so nothing is locked in the Controls app), under
+    a header that explains the rescue. Section names stay active, so uncommenting one line is
+    enough. Line endings are the caller's business (the image writes CRLF)."""
+    lines = system_text.splitlines()
+    while lines and (lines[0].startswith("#") or not lines[0].strip()):
+        lines.pop(0)                                   # the system file's own header
+    body = [re.sub(r"^([a-z][a-z0-9_]*\s*=)", r"# \1", ln) for ln in lines]
+    head = [
+        "# Handtop controls: rescue file (boot partition, editable from Windows).",
+        "# Change controls with Apps > Controls; this file normally stays all commented out.",
+        "# A line here without # in front WINS over the Controls app (it shows it as locked).",
+        "# Every line holds the default value. Changes apply within a second, or at the next boot.",
+        "#",
+        "# Controls broken? Remove the # in front of use_app_settings below: everything the",
+        "# Controls app saved is ignored (not deleted) until you put the # back.",
+        "",
+        "[rescue]",
+        "# use_app_settings = no",
+        "",
+    ]
+    return "\n".join(head + body) + "\n"
+
+
+class Layered:
+    """Result of load_layers(): merged values plus where they came from."""
+    def __init__(self):
+        self.settings, self.bindings = {}, {}
+        self.hardware = {k: False for k in HARDWARE_KEYS}
+        self.files = []              # (kind, path) of the layers that were read
+        self.locked = set()          # "settings.x" / "desktop.a" / "hardware.invert_lx" set by the boot file
+        self.trial_expired = False   # a trial file was there but its time has passed (or it has none)
+        self.trial_until = None      # unix time the trial in use ends
+        self.app_settings = True     # False: the boot file's [rescue] switch is on
+
+
+def load_layers(layers=None, now=None):
+    now = time.time() if now is None else now
+    out = Layered()
+    layers = layer_paths() if layers is None else layers
+    files = {path: _read(path) for _, path in layers}
+    boot = next((files[p] for k, p in layers if k == "boot" and files[p] is not None), None)
+    if boot is not None and not app_settings_allowed(boot):
+        out.app_settings = False
+        log.info("config: rescue.use_app_settings = no in the boot file: Controls app settings ignored")
+    for kind, path in layers:
+        cp = files[path]
+        if cp is None or (kind in ("profile", "trial") and not out.app_settings):
+            continue
+        if kind == "trial":
+            exp = trial_expires(cp)
+            if exp is None or now >= exp:
+                out.trial_expired = True
+                continue
+            out.trial_until = exp
+        s, b, h = parse(cp, path)
+        out.settings.update(s)
+        out.bindings.update(b)
+        out.hardware.update(h)
+        out.files.append((kind, path))
+        if kind == "boot":
+            out.locked = ({"settings." + k for k in s} | {"desktop." + k for k in b}
+                          | {"hardware." + k for k in h})
+    log.info("config: %s", ", ".join(f"{k} {p}" for k, p in out.files) or "built-in defaults")
+    return out

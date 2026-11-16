@@ -15,7 +15,7 @@
 ## Before the first boot (from Windows)
 The card shows a drive named **RG35XXHBOOT**:
 - `wifi.txt` — fill in `SSID=` and `PASSWORD=` now, or later (any time, then reboot).
-- `rg35xxh-input.conf` — controls; defaults match [services/input-daemon.md](services/input-daemon.md).
+- `rg35xxh-input.conf` — controls rescue, all commented out: a line you uncomment wins over Apps → Controls; if the controls are broken, uncomment `use_app_settings = no` to ignore everything the Controls app saved ([services/input-daemon.md](services/input-daemon.md), "Settings layers").
 - `panel.txt` — screen panel: `auto` (default), `regular` or `rev6` ([services/panel.md](services/panel.md)).
 - `README.txt` — short version of this page.
 Use **Eject** before removing the card.

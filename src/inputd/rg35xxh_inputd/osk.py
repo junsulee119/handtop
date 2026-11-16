@@ -108,6 +108,26 @@ def _palette():
 
 
 class OnScreenKeyboard:
+    def set_bindings(self, bindings):
+        """Shoulder-button badges: which key each shoulder button types (from the daemon's desktop
+        bindings; again whenever the Controls app changes them)."""
+        for badge in self.badges:
+            badge.get_parent().remove(badge)
+        self.badges = []
+        badges = {}                     # key name -> "L1" ... (what that shoulder button types)
+        for btn in SHOULDERS:
+            act = (bindings or {}).get(btn, "")
+            if act.startswith("key:"):
+                badges.setdefault(act[4:], btn.upper())
+        badges["SHIFT"] = "L2"          # fixed while the keyboard is open (core.py)
+        for key, text in badges.items():
+            for over in self.overlays.get(key, ()):
+                badge = Gtk.Label(label=text, halign=Gtk.Align.END, valign=Gtk.Align.START)
+                badge.get_style_context().add_class("badge")
+                over.add_overlay(badge)
+                badge.show()
+                self.badges.append(badge)
+
     def __init__(self, emit, bindings=None):
         """emit(mods: list[str], key: str) types one key with the given modifier keys held.
         bindings: the daemon's desktop bindings, for the shoulder-button badges."""
@@ -138,12 +158,8 @@ class OnScreenKeyboard:
         GtkLayerShell.auto_exclusive_zone_enable(self.win)   # windows shrink above it
         GtkLayerShell.set_keyboard_mode(self.win, GtkLayerShell.KeyboardMode.NONE)
 
-        badges = {}                     # key name -> "L1" ... (what that shoulder button types)
-        for btn in SHOULDERS:
-            act = (bindings or {}).get(btn, "")
-            if act.startswith("key:"):
-                badges.setdefault(act[4:], btn.upper())
-        badges["SHIFT"] = "L2"          # fixed while the keyboard is open (core.py)
+        self.overlays = {}              # key name -> Gtk.Overlays of its buttons (for the badges)
+        self.badges = []                # badge labels now shown
         grid = Gtk.Grid(column_homogeneous=True, row_homogeneous=True)
         for r, row in enumerate(ROWS):
             col = 0
@@ -154,11 +170,7 @@ class OnScreenKeyboard:
                 over = Gtk.Overlay()
                 label = Gtk.Label(label=spec[0])
                 over.add(label)
-                if spec[2] in badges:
-                    badge = Gtk.Label(label=badges[spec[2]], halign=Gtk.Align.END,
-                                      valign=Gtk.Align.START)
-                    badge.get_style_context().add_class("badge")
-                    over.add_overlay(badge)
+                self.overlays.setdefault(spec[2], []).append(over)
                 b.add(over)
                 b.label = label
                 ctx = b.get_style_context()
@@ -173,6 +185,7 @@ class OnScreenKeyboard:
                 line.append((b, spec, col))
                 col += spec[3]
             self.buttons.append(line)
+        self.set_bindings(bindings)
         self.win.add(grid)
         grid.show_all()
         self._highlight()

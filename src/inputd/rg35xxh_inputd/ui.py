@@ -100,6 +100,8 @@ class UI:
             elif op == "key_state":
                 self.kb.key_state(*args)
             self._poll_visible()
+        elif what == "bindings" and op == "set":
+            self.kb.set_bindings(args[0])
         elif what == "target":
             if op == "show":
                 self._target().show_all()

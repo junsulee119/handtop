@@ -85,6 +85,7 @@ SPRING_FREQ, SPRING_DECAY, SPRING_AMP_PX = 8.33, 3.85, 2.6    # Hz, 1/s, px
 SPRING_SWINGS, SPRING_STEP_MS = 6, 60                         # 60 ms = half a period
 SPRING_PULSE_MS, SPRING_FLOOR = 40, 0.4                       # pulse length; weakest strength
 HAPTIC_LAG_MS = 70
+HAPTIC_RESCALE_MIN_S = 0.3     # haptic_strength changes: re-upload the pulses at most this often
 
 
 def _spring(t):
@@ -173,8 +174,12 @@ def spawn(*argv):
 class Daemon:
     def __init__(self):
         self._loop = None
-        settings, bindings, self.hw, self.config_path = config.load()
-        self.core = Core(settings, bindings)
+        self.cfg_stamp = config.stamp()
+        cfg = config.load_layers()
+        self.trial_until = cfg.trial_until
+        self.hw = cfg.hardware
+        self.core = Core(cfg.settings, cfg.bindings)
+        self.haptic_scale = self.core.s["haptic_strength"]   # strength step_ids were uploaded at
         self.layout = PointerLayout()   # per-screen pointer speed (rg35xxh-display writes the layout)
         self.layout_mtime = None
         self.devices = []          # grabbed physical devices
@@ -281,6 +286,7 @@ class Daemon:
             self.absinfo[code] = info
         self.haptic_id = None
         self.step_ids = {}     # (magnitude, ms) -> uploaded effect id, for SPRING_PULSES
+        self.haptic_scale = self.core.s["haptic_strength"]
         if E.EV_FF in self.gamepad.capabilities():
             try:
                 self.haptic_id = self._upload_rumble(0xFFFF, 450)   # shutdown, re-centre
@@ -655,11 +661,86 @@ class Daemon:
         now = time.monotonic()
         if self.ticks % 10 == 0:
             self.core.set_screen_off(os.path.exists(runtime_flag("rg35xxh-screen-off")))
-            self._haptic_requests()
             self._layout_reload()
+            self._config_reload()          # before the requests: a preview plays the new strength
+            self._haptic_requests()
+            self._haptic_preview()
             self.core.set_osk_visible(self.osk_visible)
         self._run(self.core.tick(now))
         return True
+
+    def _config_reload(self):
+        """Settings layers (config.py) changed: read them again and hand them to the core. Runs in
+        the 100 ms housekeeping; costs a few stat() calls when nothing changed. An expired trial
+        file ("Keep these controls?" not answered in time) is deleted here, by the daemon, so the
+        change is undone even if the Controls app is gone."""
+        st = config.stamp()
+        until = getattr(self, "trial_until", None)
+        if st == self.cfg_stamp and not (until is not None and time.time() >= until):
+            if self.haptic_scale != self.core.s["haptic_strength"]:
+                self._haptics_rescale()
+            return
+        self.cfg_stamp = st
+        cfg = config.load_layers()
+        self.trial_until = cfg.trial_until
+        if cfg.trial_expired:
+            try:
+                os.unlink(config.trial_path())
+                log.info("controls: trial ended without Keep, change undone")
+            except OSError:
+                pass
+            self.cfg_stamp = config.stamp()
+        old = ({"settings." + k: v for k, v in self.core.s.items()}, {"desktop." + k: v for k, v in self.core.bind.items()},
+               {"hardware." + k: v for k, v in self.hw.items()})
+        self.hw = cfg.hardware
+        old_bind = dict(self.core.bind)
+        self._run(self.core.reconfigure(cfg.settings, cfg.bindings))
+        new = ({"settings." + k: v for k, v in self.core.s.items()}, {"desktop." + k: v for k, v in self.core.bind.items()},
+               {"hardware." + k: v for k, v in self.hw.items()})
+        changed = [f"{k} {o.get(k)} -> {n[k]}" for o, n in zip(old, new) for k in n if o.get(k) != n[k]]
+        log.info("controls: %s", ", ".join(changed) if changed else "no change")
+        if self.core.bind != old_bind and getattr(self, "ui", None):
+            self._ui_send("bindings", "set", self.core.bind)   # keyboard badges
+        self.core.pointer_scale = self.layout.scale(self.core.s["display_speed_scale"])
+        if self.haptic_scale != self.core.s["haptic_strength"]:
+            self._haptics_rescale()
+
+    def _haptics_rescale(self):
+        """haptic_strength changed: the mode-change pulses (step_ids) were uploaded at the old
+        strength. Replace them with the motor idle, the way the stick re-centre re-uploads its
+        effects: only Handtop's own pulses, never while they may play (feedback running) or in
+        gamepad mode (games and PCs use the motor there); retried at the next housekeeping."""
+        if self.gamepad is None or self.anim or getattr(self, "preview", None) is not None \
+                or self.core.mode != "desktop":
+            return
+        now = time.monotonic()
+        if now - getattr(self, "haptic_rescaled_at", -1.0) < HAPTIC_RESCALE_MIN_S:
+            return                         # a slider being dragged: at most one re-upload per 0.3 s
+        self.haptic_rescaled_at = now
+        new = self.core.s["haptic_strength"]
+        old_ids = list(self.step_ids.values())
+        for eid in old_ids:
+            try:
+                self.gamepad.write(E.EV_FF, eid, 0)
+            except OSError as e:
+                log.debug("stop effect %d: %s", eid, e)
+        if old_ids:
+            time.sleep(0.05)               # as _release_effects: stop, let it settle, then erase
+        for eid in old_ids:
+            try:
+                self.gamepad.erase_effect(eid)
+            except OSError as e:
+                log.debug("erase effect %d: %s", eid, e)
+        self.step_ids = {}
+        self.haptic_scale = new
+        try:
+            for strength in SPRING_PULSES:
+                mag = self._magnitude(strength)
+                if mag and (mag, SPRING_PULSE_MS) not in self.step_ids:
+                    self.step_ids[(mag, SPRING_PULSE_MS)] = self._upload_rumble(mag, SPRING_PULSE_MS)
+        except OSError as e:
+            log.warning("mode-change vibration not available: %s", e)
+        log.info("controls: mode-change vibration at %.2f", new)
 
     def _layout_reload(self):
         """Screen layout for per-screen pointer speed: JSON written by rg35xxh-display on every
@@ -893,6 +974,44 @@ class Daemon:
         log.info("haptic requested")
         self._haptic()
 
+    def _haptic_preview(self):
+        """The Controls app's vibration slider: $XDG_RUNTIME_DIR/rg35xxh-haptic-preview asks for the
+        mode-change buzz at the current haptic_strength, so the user feels each value as it is set
+        (it is how this buzz feels when switching modes). Plays once the pulses are re-uploaded at
+        that strength, in desktop mode only, never over a running mode-change buzz; a request in
+        gamepad mode is dropped (the motor belongs to the game there)."""
+        try:
+            os.unlink(runtime_flag("rg35xxh-haptic-preview"))
+            self.preview_pending = True
+        except FileNotFoundError:
+            pass
+        except OSError as e:
+            log.warning("haptic preview: %s", e)
+        if not getattr(self, "preview_pending", False):
+            return
+        if self.core.mode != "desktop":
+            self.preview_pending = False
+            log.info("haptic preview dropped: not in desktop mode")
+            return
+        if (self.anim or self.haptic_scale != self.core.s["haptic_strength"]
+                or getattr(self, "preview", None) is not None):
+            return                                     # rescale or a buzz still running: next tick
+        self.preview_pending = False
+        self.preview = 0
+        self._preview_step()
+        self.preview_timer = GLib.timeout_add(SPRING_STEP_MS, self._preview_step)
+
+    def _preview_step(self):
+        k = self.preview
+        if k is None or k >= len(SPRING_PULSES) or self.core.mode != "desktop":
+            self.preview = None
+            return False
+        eid = self.step_ids.get((self._magnitude(SPRING_PULSES[k]), SPRING_PULSE_MS))
+        if eid is not None:
+            self._play_effect(eid)
+        self.preview = k + 1
+        return True
+
     def _haptic(self):
         self._play_effect(self.haptic_id)
 
@@ -951,6 +1070,9 @@ class Daemon:
     # ------------------------------------------------ mode-change feedback
     def _mode_feedback(self, new):
         """Shake the old mode's taskbar icon and wobble the motor, then show the new icon."""
+        if getattr(self, "preview", None) is not None:      # a slider preview gives way
+            GLib.source_remove(self.preview_timer)
+            self.preview = None
         if self.anim:
             GLib.source_remove(self.anim["timer"])
             self.anim = None

@@ -4,7 +4,7 @@
 
 - **Desktop mode is the default at boot.** Device is used for desktop control only; gamepad mode is kept for occasional use.
 - Physical USB/Bluetooth keyboard and mouse always work normally alongside.
-- Bindings live in a plain-text config file on the FAT boot partition (editable from Windows, no rebuild).
+- Bindings live in plain-text config files (layers below); a rescue copy on the FAT boot partition is editable from Windows.
 
 ## Mapping
 
@@ -52,7 +52,7 @@
 
 ## Implementation
 
-- Vibration requests from other programs: creating `$XDG_RUNTIME_DIR/rg35xxh-haptic-request` makes the daemon play its standard buzz (checked every 0.1 s; used by `rg35xxh-lowbattery`). The motor keeps a single owner.
+- Vibration requests from other programs: creating `$XDG_RUNTIME_DIR/rg35xxh-haptic-request` makes the daemon play its standard buzz (checked every 0.1 s; used by `rg35xxh-lowbattery`). The motor keeps a single owner. `$XDG_RUNTIME_DIR/rg35xxh-haptic-preview` plays the mode-change buzz at the current `haptic_strength` instead (the Controls app's vibration slider, so each value is felt as it is set; the setting is linear and low values are below what the motor can spin up to, decision 2026-11-16: users choose by feel). It waits until the pulses are re-uploaded at the new strength (at most one re-upload per 0.3 s while a slider moves), plays only in desktop mode, and gives way to a real mode-change buzz.
 - Signals: `SIGUSR1` re-centres the sticks (Re-center sticks app), `SIGUSR2` switches to an external controller mode (External Controller app, see [../apps/external-controller.md](../apps/external-controller.md)): gamepad mapping, events sent to `/run/rg35xxh-extpad.sock` (BT, USB or Switch service, whichever runs; it introduces itself with `hello bt` / `hello usb` / `hello switch` / `hello switch-bt`) instead of the local virtual pad; vibration comes back from the Xbox BT, USB and Switch BT services. Mode flags `rg35xxh-bt-mode` (also Switch over Bluetooth) / `rg35xxh-wired-mode` (also Switch over USB).
 - Mode-change feedback (`_mode_feedback` in `daemon.py`): the taskbar icon shakes and the motor wobbles with it, both driven by the daemon on one clock from one damped spring, x(t) = A·e^(−3.85 t)·sin(2π·8.33 t). Every 60 ms (half a period) the old mode's icon is shown at the next swing peak (drawing offset 2, −2, 1, −1, 1, −1 px; frame file `$XDG_RUNTIME_DIR/rg35xxh-inputmode-frame` + `SIGRTMIN+8` to Waybar), and the motor gives a 40 ms pulse whose strength follows the spring's decaying envelope (93 % → 57 %), delayed ~70 ms to match Waybar's redraw; then the new icon appears (~360 ms). The motor is an ERM on one PWM line (`rocknix-singleadc-joypad`, 1 kHz; strength = duty cycle; no braking), so the pulses blur into a decaying wobble. Scale or disable with `haptic_strength` (0–1) in `[settings]`. Shutdown and re-centre keep the long 450 ms buzz.
 - Pointer hidden outside desktop mode: labwc has no "hide cursor" action, but it hides the pointer after touch input until the next real pointer motion. On entering gamepad or BT Controller mode the daemon shows a 2x2 px transparent overlay window at the top-left corner, creates a short-lived virtual touchscreen, taps once on that window (so the tap reaches nothing else; tapping the taskbar border opened tray icons), then removes both. The pointer is warped there and hidden, and shows again as soon as it is moved in desktop mode (or by a real mouse).
@@ -66,8 +66,24 @@
 - Power held 1–3 s and released: cancelled (no menu, no shutdown).
 - Copy/paste: Ctrl+Shift+C/V when the active window is a terminal (foot, xterm, …), else Ctrl+C/V.
 - On-screen keyboard: US layout, 5 rows (`~ 1–0 ⌫ / Tab q–p - / a–l ; ' \ / ⇧ z–m , . / ↑ / Ctrl Alt Space = [ ] ← ↓ → Hide`). Physical L1/R1/R2 still give Esc/Enter/Backspace while it is open.
-- Config (`input.conf`): `[settings]` speeds, dead zone, scroll curve (`scroll_log_k`), Vol repeat timing, hold times; `[desktop]` button actions (`none, click_left/right/middle, key:KEY_*, copy, paste, osk_toggle, mode_gamepad, power_menu`); `[hardware]` axis inversion. The boot-partition copy overrides `/etc/rg35xxh/input.conf` completely, so it must be refreshed when defaults change.
-  - **A bad value is ignored, not fatal** (`config.py`): a number that doesn't parse, isn't finite or lies outside its range (`SETTING_RANGES`, for example `deadzone` 0–0.9, `pointer_max_speed` 1–5000, `haptic_strength` 0–1), a `[hardware]` value that isn't yes/no, and a `key:` whose name evdev doesn't know all keep the default and log one warning line in `~/.local/state/session/inputd.log` (`settings.deadzone: '1' outside 0.0..0.9 (default 0.12 kept)`). Before, `invert_lx = maybe` stopped the daemon at every start, and `deadzone = 1` or `pointer_max_speed = inf` crashed it on the first stick move, so one typo on the FAT partition left the handheld without buttons (codebase audit 2026-10-30, M04). Not shown on screen: that is for the planned dependency checks.
+- Config (`input.conf`): `[settings]` speeds, dead zone, scroll curve (`scroll_log_k`), Vol repeat timing, hold times; `[desktop]` button actions (`none, click_left/right/middle, key:KEY_*, copy, paste, osk_toggle, mode_gamepad, power_menu`); `[hardware]` axis inversion. See "Settings layers" below for where the values come from.
+  - **A bad value is ignored, not fatal** (`config.py`): a number that doesn't parse, isn't finite or lies outside its range (`SETTING_RANGES`, for example `deadzone` 0–0.9, `pointer_max_speed` 1–5000, `haptic_strength` 0–1), a `[hardware]` value that isn't yes/no, and a `key:` whose name evdev doesn't know all keep the default and log one warning line in `~/.local/state/session/inputd.log` (`/etc/rg35xxh/input.conf: settings.deadzone: '1' outside 0.0..0.9 (ignored)`; the value from a lower layer, or the default, stays). Before, `invert_lx = maybe` stopped the daemon at every start, and `deadzone = 1` or `pointer_max_speed = inf` crashed it on the first stick move, so one typo on the FAT partition left the handheld without buttons (codebase audit 2026-10-30, M04). Not shown on screen: that is for the planned dependency checks.
+
+## Settings layers and live reload
+
+Per key, the last layer that sets it wins (`config.py`, `load_layers()`):
+
+1. built-in defaults (`core.py`)
+2. `/etc/rg35xxh/input.conf` (system)
+3. the active profile, `~/.config/rg35xxh/controls/<name>.conf`; the name is the first line of `~/.config/rg35xxh/controls/active` (`default` if the file is missing or the name is not valid). Written by the Controls app
+4. a trial, `$XDG_RUNTIME_DIR/rg35xxh-controls-trial.conf`, while the Controls app asks "Keep these controls?". It must carry `[trial] expires = <unix time>`; after that time the daemon ignores and **deletes** it itself, so the change is undone even if the app is gone or the button to confirm was the one mapped away
+5. `/boot/firmware/rg35xxh-input.conf` (boot partition, editable from Windows): **wins**, the rescue path. Images ship it with every setting commented out (`tools/boot-input-conf.py` → `config.boot_template()`), so it locks nothing until a line is uncommented; a key set there is shown locked in the Controls app. `[rescue] use_app_settings = no` there ignores layers 3 and 4 (kept on disk) until the line is commented again
+
+Before 2026-11 the boot-partition file replaced `/etc/rg35xxh/input.conf` as a whole and was shipped uncommented; both start from the same defaults, so per-key merging reads an old full file the same way, but every key in it is then locked in the Controls app (cards flashed with v0.4.0 or older, until the file is commented out or deleted).
+
+**Live reload:** the 100 ms housekeeping compares `config.stamp()` (inode, mtime and size of every layer file and of `active`) and the trial's end time; on a change it reads all layers again and calls `Core.reconfigure()`. That releases whatever the old bindings hold (keys, clicks, the on-screen keyboard key), swallows the release of buttons still down, and swaps the tables; in gamepad mode the pad is left alone. It is data only: no device is reopened. One exception, `haptic_strength`: the mode-change pulses are uploaded at a fixed strength, so after a change they are stopped, erased and uploaded again (`_haptics_rescale()`), like the stick re-centre does, and only in desktop mode with no feedback running.
+
+**Minimal controls** (`config.minimal_problems()`): the pointer must still move (stick: dead zone ≤ 0.6 and speed ≥ 60 px/s, or D-pad ≥ 60 px/s) and some button must give a left click. The Controls app warns before a change that breaks either, then starts the usual countdown.
 
 ## Stopping, restarting, one instance
 
