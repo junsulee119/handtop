@@ -7,8 +7,11 @@ Settings come in layers; per key, the last layer that sets it wins (docs/service
   3. ~/.config/rg35xxh/controls/<profile>.conf the active profile (Controls app); <profile> is named
                                                in ~/.config/rg35xxh/controls/active, "default" if none
   4. $XDG_RUNTIME_DIR/rg35xxh-controls-trial.conf
-                                               a change on trial ("Keep these controls?"); ignored once
-                                               its [trial] expires time has passed
+                                               a change on trial ("Keep these controls?"): the whole
+                                               candidate profile, so while it runs it REPLACES layer 3
+                                               (a combination it leaves out is gone, not inherited);
+                                               ignored once its [trial] expires time (trial_clock())
+                                               has passed
   5. /boot/firmware/rg35xxh-input.conf         FAT boot partition, editable from Windows: wins, so it
                                                always rescues a broken profile. Images ship it with
                                                every setting commented out (boot_template()), so it
@@ -73,6 +76,17 @@ SETTING_RANGES = {
 }
 
 
+TRIAL_MAX_SECONDS = 600     # a trial claiming to run longer than this is treated as ended
+
+
+def trial_clock():
+    """Seconds since boot, counting suspend (CLOCK_BOOTTIME): the trial's clock. Setting the wall
+    clock (NTP after Wi-Fi comes up) can't stretch or cut a 15 s trial, and a trial running when
+    the handheld goes to sleep has ended when it wakes. The trial file lives in $XDG_RUNTIME_DIR,
+    which doesn't survive a reboot, so a time from another boot never meets this clock."""
+    return time.clock_gettime(time.CLOCK_BOOTTIME)
+
+
 def _known_key(name):
     """True if evdev knows the key code. Without python-evdev (the unit tests) only the
     pattern is checked."""
@@ -81,6 +95,17 @@ def _known_key(name):
     except ImportError:
         return True
     return isinstance(ecodes.ecodes.get(name), int)
+
+
+def _unknown_keys(action):
+    """The key names of a key: / combo: action that evdev doesn't know (empty for other actions)."""
+    if action.startswith("key:"):
+        names = [action[4:]]
+    elif action.startswith("combo:"):
+        names = action[6:].split("+")
+    else:
+        return []
+    return [k for k in names if not _known_key(k)]
 
 
 # Smallest set of controls that still lets you reach the Controls app and undo a change. The
@@ -124,11 +149,17 @@ def trial_path():
 
 
 def active_profile():
-    """Name of the active profile: the first line of controls/active, if it is a valid name."""
+    """Name of the active profile: the first line of controls/active, if it is a valid name.
+    Anything else (unreadable, not UTF-8, too long) means "default": a broken pointer file must
+    never stop the daemon, nor the boot file's rescue switch from being read."""
     try:
-        with open(active_file(), encoding="utf-8-sig") as f:
-            name = f.readline().strip()
+        with open(active_file(), "rb") as f:
+            raw = f.read(256)
+        name = raw.decode("utf-8-sig").splitlines()[0].strip() if raw.strip() else ""
     except OSError:
+        return DEFAULT_PROFILE
+    except (UnicodeDecodeError, IndexError):
+        log.warning("%s: not a UTF-8 profile name (using %r)", active_file(), DEFAULT_PROFILE)
         return DEFAULT_PROFILE
     if not PROFILE_RE.match(name):
         log.warning("%s: not a profile name: %r (using %r)", active_file(), name, DEFAULT_PROFILE)
@@ -163,7 +194,9 @@ def stamp():
 # ----------------------------------------------------------------- parsing
 def _read(path):
     """ConfigParser for path, or None if the file is missing or unreadable."""
-    cp = configparser.ConfigParser(inline_comment_prefixes=("#", ";"))
+    # interpolation=None: a "%" in a value (haptic_strength = 50%) is an ordinary bad value, not
+    # an InterpolationSyntaxError escaping from cp.items() later
+    cp = configparser.ConfigParser(inline_comment_prefixes=("#", ";"), interpolation=None)
     try:
         with open(path, encoding="utf-8-sig") as f:   # tolerate a BOM from Windows editors
             cp.read_file(f)
@@ -215,18 +248,18 @@ def parse(cp, label="config"):
                     log.warning("%s: desktop.%s: not a combination of two buttons (ignored)", label, k)
                 elif not _ACTION_RE.match(v) or v == "pointer":
                     log.warning("%s: desktop.%s: unknown action %r", label, k, v)
+                elif _unknown_keys(v):
+                    log.warning("%s: desktop.%s: unknown key in %r (ignored)", label, k, v)
                 else:
                     bindings[k] = v
             elif k not in BUTTON_NAMES:
                 log.warning("%s: desktop.%s: unknown button (valid: %s)", label, k, ", ".join(BUTTON_NAMES))
             elif not _ACTION_RE.match(v):
                 log.warning("%s: desktop.%s: unknown action %r", label, k, v)
-            elif v.startswith("key:") and not _known_key(v[4:]):
-                log.warning("%s: desktop.%s: unknown key %r (ignored)", label, k, v[4:])
+            elif _unknown_keys(v):
+                log.warning("%s: desktop.%s: unknown key in %r (ignored)", label, k, v)
             elif v == "pointer" and k not in DPAD_NAMES:
                 log.warning("%s: desktop.%s: pointer is for the D-pad directions only (ignored)", label, k)
-            elif v.startswith("combo:") and not all(_known_key(x) for x in v[6:].split("+")):
-                log.warning("%s: desktop.%s: unknown key in %r (ignored)", label, k, v)
             else:
                 bindings[k] = v
     if cp.has_section("hardware"):
@@ -240,7 +273,7 @@ def parse(cp, label="config"):
 
 
 def trial_expires(cp):
-    """Unix time the trial ends, or None if the file has no valid [trial] expires."""
+    """trial_clock() time the trial ends, or None if the file has no valid [trial] expires."""
     try:
         x = float(cp.get("trial", "expires"))
     except (configparser.Error, ValueError):
@@ -304,12 +337,12 @@ class Layered:
         self.files = []              # (kind, path) of the layers that were read
         self.locked = set()          # "settings.x" / "desktop.a" / "hardware.invert_lx" set by the boot file
         self.trial_expired = False   # a trial file was there but its time has passed (or it has none)
-        self.trial_until = None      # unix time the trial in use ends
+        self.trial_until = None      # trial_clock() time the trial in use ends
         self.app_settings = True     # False: the boot file's [rescue] switch is on
 
 
 def load_layers(layers=None, now=None):
-    now = time.time() if now is None else now
+    now = trial_clock() if now is None else now
     out = Layered()
     layers = layer_paths() if layers is None else layers
     files = {path: _read(path) for _, path in layers}
@@ -317,16 +350,22 @@ def load_layers(layers=None, now=None):
     if boot is not None and not app_settings_allowed(boot):
         out.app_settings = False
         log.info("config: rescue.use_app_settings = no in the boot file: Controls app settings ignored")
+    trial = next((files[p] for k, p in layers if k == "trial" and files[p] is not None), None)
+    if trial is not None and out.app_settings:
+        exp = trial_expires(trial)
+        if exp is None or now >= exp or exp - now > TRIAL_MAX_SECONDS:
+            out.trial_expired = True
+        else:
+            out.trial_until = exp
     for kind, path in layers:
         cp = files[path]
         if cp is None or (kind in ("profile", "trial") and not out.app_settings):
             continue
-        if kind == "trial":
-            exp = trial_expires(cp)
-            if exp is None or now >= exp:
-                out.trial_expired = True
-                continue
-            out.trial_until = exp
+        if kind == "trial" and out.trial_until is None:
+            continue
+        if kind == "profile" and out.trial_until is not None:
+            continue            # the trial holds the whole candidate profile and replaces this one
+
         s, b, h = parse(cp, path)
         out.settings.update(s)
         out.bindings.update(b)
@@ -335,5 +374,9 @@ def load_layers(layers=None, now=None):
         if kind == "boot":
             out.locked = ({"settings." + k for k in s} | {"desktop." + k for k in b}
                           | {"hardware." + k for k in h})
+    # "first+second = none" removes a combination a lower layer set (a profile can only list what
+    # differs from the system layer)
+    out.bindings = {k: v for k, v in out.bindings.items() if not ("+" in k and v == "none")}
     log.info("config: %s", ", ".join(f"{k} {p}" for k, p in out.files) or "built-in defaults")
+
     return out

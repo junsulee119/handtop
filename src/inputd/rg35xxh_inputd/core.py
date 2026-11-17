@@ -155,9 +155,12 @@ class Core:
             new.update(bindings or {})
             changed = {n for n in self.held if n in BINDABLE and n not in ("f", "power")
                        and self.bind.get(n) != new.get(n)}
+            in_combo = set(self.combo_active) | self.combo_wait
+            out = self._release_all_desktop(changed)
             self.dpad_bound -= changed
             self.level_bound -= changed
-            out = self._release_all_desktop(changed)
+            for n in changed:
+                self.vol_repeat.pop(n, None)   # a held Vol must not go on repeating its old action
             if self.osk_pressed_button in changed:
                 out.append(("osk", "release"))
                 self.osk_pressed_button = None
@@ -165,8 +168,11 @@ class Core:
             if self.osk_shift_button in changed:
                 self.osk_shift_button = None
             self.swallowed |= changed
-            if {k: v for k, v in self.bind.items() if "+" in k} != {k: v for k, v in new.items() if "+" in k}:
-                out += self._release_combos()      # only when the combinations themselves change
+            if ({k: v for k, v in self.bind.items() if "+" in k} != {k: v for k, v in new.items() if "+" in k}
+                    or changed & in_combo):
+                # the combinations change, or a button holding one gets a new binding: let go of
+                # them now (a held Ctrl from select+a must not outlive the binding that made it)
+                out += self._release_combos()
         elif (settings or {}).get("pad_layout", "position") != self.s["pad_layout"]:
             # Gamepad mode, layout switched: release the face buttons down under the old layout.
             for n in ("a", "b", "x", "y"):
@@ -274,6 +280,7 @@ class Core:
 
     def _release(self, name, t):
         pressed_at = self.held.pop(name, None)
+        self.vol_repeat.pop(name, None)       # also for a swallowed release (remapped while held)
         if name == "select" and self.capture_down:
             self.capture_down = False
             return [("pad_key", CAPTURE_KEY, 0)]
@@ -382,7 +389,8 @@ class Core:
         if not self.osk_visible:
             dx, dy = 0, 0
             for d in DPAD:
-                if d in self.held and d not in self.swallowed and d not in self.dpad_bound:
+                if (d in self.held and d not in self.swallowed and d not in self.dpad_bound
+                        and d not in self.combo_active):     # the second button of a combination
                     ddx, ddy = _dpad_vector(d)
                     dx += ddx
                     dy += ddy
@@ -499,9 +507,16 @@ class Core:
         return self._binding(name, True) + self._binding(name, False)
 
     def _release_all_desktop(self, names=None):
+        """Release what held buttons' own bindings hold down. Buttons in a combination (a second
+        button holding the combination's action, a first button waiting for its release) never
+        pressed their own binding: _release_combos() lets go of those."""
         out = []
+        skip = set(self.combo_active) | self.combo_wait
         for name in list(self.held):
+            if name in skip:
+                continue
             if name in BINDABLE and name not in ("f", "power") and (names is None or name in names):
+
                 action = self._binding_of(name)
                 if action.startswith("click_"):
                     out.append(("mouse", action[len("click_"):], False))

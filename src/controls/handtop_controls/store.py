@@ -13,7 +13,6 @@ time is up (so a crashed app or an unreachable Keep button still undoes it).
 import io
 import os
 import sys
-import time
 
 sys.path.append("/usr/local/lib/rg35xxh-inputd")       # appended: a copy earlier on the path wins (tests)
 from rg35xxh_inputd import config  # noqa: E402
@@ -94,6 +93,50 @@ def read_profile(name):
     return config.parse(cp, config.profile_path(name))
 
 
+def _merged(s, b, h):
+    """System values with s / b / h on top (a "first+second = none" removes that combination)."""
+    v = system_values()
+    v.settings.update(s)
+    v.bindings.update(b)
+    v.hardware.update(h)
+    v.bindings = {k: a for k, a in v.bindings.items() if not ("+" in k and a == "none")}
+    return v
+
+
+def profile_values(name):
+    """What a profile gives, without the trial and the boot file: system values + the profile."""
+    return _merged(*read_profile(name))
+
+
+def boot_values():
+    """What the boot partition's file sets (it wins over every profile): (settings, bindings,
+    hardware); all empty when it sets nothing or its rescue switch is on (then the app edits
+    nothing anyway)."""
+    cp = config._read(config.BOOT)
+    if cp is None or not config.app_settings_allowed(cp):
+        return {}, {}, {}
+    return config.parse(cp, config.BOOT)
+
+
+def _unlocked(values, name):
+    """values with every key the boot file sets put back to the profile's own value. The app
+    shows (and edits) the values in effect, boot file included; saving those would copy a
+    temporary rescue line into the profile for good."""
+    s, b, h = boot_values()
+    if not (s or b or h):
+        return values
+    own = profile_values(name)
+    v = values.copy()
+    for mine, theirs, keys in ((v.settings, own.settings, s), (v.bindings, own.bindings, b),
+                               (v.hardware, own.hardware, h)):
+        for k in keys:
+            if k in theirs:
+                mine[k] = theirs[k]
+            else:
+                mine.pop(k, None)
+    return v
+
+
 # ------------------------------------------------------------------------- writing
 def _fmt(v):
     if isinstance(v, bool):
@@ -116,26 +159,48 @@ def to_ini(values, base=None, extra=None):
     for sec in ("settings", "desktop", "hardware"):
         lines = [f"{k} = {_fmt(v)}" for s, k, v in values.items()
                  if s == sec and (base is None or v != base.get(s, k))]
+        if sec == "desktop" and base is not None:     # a lower layer's combination taken out
+            lines += [f"{k} = none" for k in base.bindings if "+" in k and k not in values.bindings]
         if lines:
             out.write(f"[{sec}]\n" + "\n".join(lines) + "\n\n")
     return out.getvalue()
 
 
 def _write_atomic(path, text):
-    os.makedirs(os.path.dirname(path), exist_ok=True)
+    """Write, fsync, rename over path, fsync the folder (so the rename itself survives a power
+    cut: the handheld is often switched off by holding Power). A failed write leaves no .tmp."""
+    folder = os.path.dirname(path)
+    os.makedirs(folder, exist_ok=True)
     tmp = path + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
-        f.write(text)
-        f.flush()
-        os.fsync(f.fileno())
-    os.replace(tmp, path)
+    try:
+        with open(tmp, "w", encoding="utf-8") as f:
+            f.write(text)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+    try:
+        fd = os.open(folder, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+    except OSError:
+        pass
 
 
 def write_profile(name, values):
+    """Save values (complete, as shown in the app) as the profile; keys the boot file locks keep
+    the profile's own value."""
     if not config.PROFILE_RE.match(name):
         raise ValueError(f"not a profile name: {name!r}")
     _write_atomic(config.profile_path(name), "# Handtop controls profile (Controls app)\n"
-                  + to_ini(values, system_values()))
+                  + to_ini(_unlocked(values, name), system_values()))
 
 
 def set_active(name):
@@ -148,13 +213,9 @@ def new_profile(name, copy_from=None):
     """Create a profile (a copy of copy_from, or empty = the system values). False if it exists."""
     if not config.PROFILE_RE.match(name) or os.path.exists(config.profile_path(name)):
         return False
-    s, b, h = read_profile(copy_from) if copy_from else ({}, {}, {})
-    base = system_values()
-    v = base.copy()
-    v.settings.update(s)
-    v.bindings.update(b)
-    v.hardware.update(h)
-    write_profile(name, v)
+    v = profile_values(copy_from) if copy_from else system_values()
+    _write_atomic(config.profile_path(name), "# Handtop controls profile (Controls app)\n"
+                  + to_ini(v, system_values()))
     return True
 
 
@@ -186,13 +247,20 @@ def problems(values):
     return config.minimal_problems(values.settings, values.bindings)
 
 
-def start_trial(values, seconds=TRIAL_SECONDS, now=None):
-    """Put values (the whole new profile) on trial; returns the end time. The daemon applies it at
-    once and drops it at the end time unless keep() came first."""
-    until = (time.time() if now is None else now) + seconds
-    # every key, not only what differs from the system: the profile layer lies underneath and must
-    # not show through for a key set back to the system value
-    _write_atomic(config.trial_path(), to_ini(values, None, {"trial": {"expires": f"{until:.0f}"}}))
+def trial_left(until):
+    """Seconds left of a trial ending at until (a start_trial() result)."""
+    return until - config.trial_clock()
+
+
+def start_trial(values, seconds=TRIAL_SECONDS, now=None, name=None):
+    """Put values (the whole new profile; name: the profile they are for, default the active one)
+    on trial; returns the end time (config.trial_clock()). The daemon applies it at once and drops
+    it at the end time unless keep() came first."""
+    until = (config.trial_clock() if now is None else now) + seconds
+    # every key, not only what differs from the system: while it runs the trial replaces the
+    # profile layer (config.load_layers), so it must hold the whole candidate profile
+    _write_atomic(config.trial_path(), to_ini(_unlocked(values, name or active()), None,
+                                              {"trial": {"expires": f"{until:.2f}"}}))
     return until
 
 
@@ -239,11 +307,7 @@ def free_name(base):
 
 def export_profile(name, path):
     """Write the profile (an input.conf fragment) to path; also usable as the boot partition's file."""
-    s, b, h = read_profile(name)
-    v = system_values()
-    v.settings.update(s)
-    v.bindings.update(b)
-    v.hardware.update(h)
+    v = profile_values(name)
     with open(path, "w", encoding="utf-8") as f:
         f.write(f"# Handtop controls profile \"{name}\" (exported by the Controls app). Import it in\n"
                 "# Controls > Advanced > Profiles, or copy lines into the boot partition's rg35xxh-input.conf.\n"
@@ -257,11 +321,11 @@ def import_profile(path, name):
     if cp is None:
         raise ValueError("not a controls file")
     s, b, h = config.parse(cp, path)
-    v = system_values()
-    v.settings.update(s)
-    v.bindings.update(b)
-    v.hardware.update(h)
-    write_profile(name, v)
+    v = _merged(s, b, h)
+    if not config.PROFILE_RE.match(name):
+        raise ValueError(f"not a profile name: {name!r}")
+    _write_atomic(config.profile_path(name), "# Handtop controls profile (Controls app)\n"
+                  + to_ini(v, system_values()))
     return len(s) + len(b) + len(h)
 
 
@@ -292,7 +356,30 @@ def record_status():
         return {}
 
 
+def macro_users(name):
+    """Where macro name is used: [(profile or "boot file", button)], every profile, not only the
+    active one, plus the boot partition's file."""
+    act = "macro:" + name
+    out = [(p, k) for p in profiles() for k, a in profile_values(p).bindings.items() if a == act]
+    out += [("boot file", k) for k, a in boot_values()[1].items() if a == act]
+    return out
+
+
+def rename_macro_refs(old, new):
+    """Point every profile's buttons and combinations that run macro old at macro new. The boot
+    file isn't touched (the app never writes it; macro rename refuses when it uses the macro)."""
+    for p in profiles():
+        own = profile_values(p)
+        if any(a == "macro:" + old for a in own.bindings.values()):
+            for k, a in list(own.bindings.items()):
+                if a == "macro:" + old:
+                    own.bindings[k] = "macro:" + new
+            _write_atomic(config.profile_path(p), "# Handtop controls profile (Controls app)\n"
+                          + to_ini(own, system_values()))
+
+
 def free_macro_name(base):
+
     names = {n.lower() for n in macros.names()}
     n = 1
     while f"{base} {n}".lower() in names:

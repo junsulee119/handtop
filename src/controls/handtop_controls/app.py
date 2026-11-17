@@ -152,9 +152,15 @@ class App(AdvancedMixin):
         if store.needs_trial(sec, key):
             self.trial(new)
         else:
-            store.write_profile(store.active(), new)
+            try:
+                store.write_profile(store.active(), new)
+            except OSError as e:
+                self._error("Could not save the change", str(e))
+                self.refresh()
+                return
             self.values = new
             if preview:
+
                 store.request_vibration_preview()
 
     def trial(self, new, profile=None, save=False, on_keep=None):
@@ -164,7 +170,24 @@ class App(AdvancedMixin):
             self.refresh()
             return
         self.busy = True
-        until = store.start_trial(new)
+        try:
+            self._trial_run(new, profile, save, on_keep)
+        except OSError as e:               # disk full, folder gone ...: nothing is on trial then
+            store.cancel()
+            self._error("Could not apply the change", str(e))
+        finally:
+            self.busy = False
+            self.refresh()
+
+    def _error(self, title, text):
+        d = Gtk.MessageDialog(transient_for=self.win, modal=True, message_type=Gtk.MessageType.ERROR,
+                              buttons=Gtk.ButtonsType.CLOSE, text=title)
+        d.format_secondary_text(text)
+        d.run()
+        d.destroy()
+
+    def _trial_run(self, new, profile, save, on_keep):
+        until = store.start_trial(new, name=profile)
         d = Gtk.MessageDialog(transient_for=self.win, modal=True, message_type=Gtk.MessageType.QUESTION,
                               buttons=Gtk.ButtonsType.NONE, text="Keep these controls?")
         d.add_buttons("Undo", Gtk.ResponseType.CANCEL, "Keep", Gtk.ResponseType.OK)
@@ -173,7 +196,7 @@ class App(AdvancedMixin):
         state = {"tid": None}
 
         def tick():
-            left = int(round(until - GLib.get_real_time() / 1e6))
+            left = int(round(store.trial_left(until)))
             if left <= 0:
                 state["tid"] = None
                 d.response(Gtk.ResponseType.CANCEL)
@@ -187,7 +210,7 @@ class App(AdvancedMixin):
             GLib.source_remove(state["tid"])
         d.destroy()
         # Keep counts only before the end time: after it the daemon has already undone the change.
-        if r == Gtk.ResponseType.OK and until > GLib.get_real_time() / 1e6:
+        if r == Gtk.ResponseType.OK and store.trial_left(until) > 0:
             if profile:                    # switching profiles: the profile file holds the values
                 if save:                   # ... unless they are new (Reset everything)
                     store.write_profile(profile, new)
@@ -199,8 +222,6 @@ class App(AdvancedMixin):
                 on_keep()
         else:
             store.cancel()
-        self.busy = False
-        self.refresh()
 
     def _warn(self, probs):
         d = Gtk.MessageDialog(transient_for=self.win, modal=True, message_type=Gtk.MessageType.WARNING,
@@ -267,12 +288,8 @@ class App(AdvancedMixin):
         name = combo.get_active_id()
         if not name or name == store.active():
             return
-        s, b, h = store.read_profile(name)
-        new = store.system_values()
-        new.settings.update(s)
-        new.bindings.update(b)
-        new.hardware.update(h)
-        self.trial(new, profile=name)
+        self.trial(store.profile_values(name), profile=name)
+
 
     # ---- Buttons tab -----------------------------------------------------------------------------
     def _buttons_tab(self):

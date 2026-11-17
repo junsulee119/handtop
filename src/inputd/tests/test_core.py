@@ -792,6 +792,90 @@ def test_config_combos_validated():
                             "a+a = copy\npower+a = copy\nl1+r1 = pointer\n")
     assert b == {"l1+a": "key:KEY_SYSRQ", "f+up": "osk_toggle"}
 
+# ---- Controls audit 2026-11-17 (controls-audit-2026-11-17/REPORT.md): the faults it reproduced
+def test_trial_replaces_the_profile_so_a_removed_combination_is_gone():   # H01
+    cfg = _layers({"profile": "[desktop]\nselect+a = click_right\ny = copy\n",
+                   "trial": "[trial]\nexpires = 1015\n[desktop]\nb = none\n"})
+    assert "select+a" not in cfg.bindings and "y" not in cfg.bindings and cfg.bindings["b"] == "none"
+    cfg = _layers({"profile": "[desktop]\nselect+a = click_right\n",
+                   "trial": "[trial]\nexpires = 1015\n[desktop]\nb = none\n"}, now=1015.0)
+    assert cfg.bindings["select+a"] == "click_right" and cfg.trial_expired     # over: profile again
+
+
+def test_combination_set_to_none_removes_a_lower_layers_one():
+    cfg = _layers({"system": "[desktop]\nselect+start = macro_record\n",
+                   "profile": "[desktop]\nselect+start = none\n"})
+    assert "select+start" not in cfg.bindings
+
+
+def test_trial_far_in_the_future_counts_as_ended():   # M07 (a time from a wrong clock)
+    cfg = _layers({"trial": "[trial]\nexpires = 99999\n[desktop]\nb = none\n"})
+    assert cfg.trial_expired and cfg.trial_until is None and "b" not in cfg.bindings
+
+
+def test_trial_clock_counts_since_boot():   # M07
+    import time
+    from rg35xxh_inputd import config
+    assert abs(config.trial_clock() - time.clock_gettime(time.CLOCK_BOOTTIME)) < 1
+
+
+def test_unknown_key_in_a_combination_binding_is_skipped():   # M08
+    from rg35xxh_inputd import config
+    import configparser
+    real = config._known_key
+    config._known_key = lambda k: k != "KEY_NOT_REAL"
+    try:
+        cp = configparser.ConfigParser()
+        cp.read_string("[desktop]\nselect+a = key:KEY_NOT_REAL\nselect+b = combo:KEY_LEFTCTRL+KEY_NOT_REAL\n"
+                       "select+x = key:KEY_A\n")
+        _, b, _ = config.parse(cp)
+    finally:
+        config._known_key = real
+    assert b == {"select+x": "key:KEY_A"}
+
+
+def test_percent_sign_is_a_bad_value_not_a_crash():   # M09
+    cfg = _layers({"system": "[settings]\nhaptic_strength = 0.6\n",
+                   "profile": "[settings]\nhaptic_strength = 50%\n[desktop]\ny = launch:%(x)s\n"})
+    assert cfg.settings["haptic_strength"] == 0.6 and "y" not in cfg.bindings
+
+
+def test_dpad_as_second_button_of_a_combination_does_not_move_the_pointer():   # M01
+    c = Core(bindings={"select+right": "key:KEY_RIGHT"})
+    c.tick(0)
+    c.button("select", True, 0.01)
+    assert c.button("right", True, 0.02) == [("key", "KEY_RIGHT", True)]
+    assert not [a for a in c.tick(0.10) if a[0] == "rel"]
+    assert c.button("right", False, 0.2) == [("key", "KEY_RIGHT", False)]
+
+
+def test_rebinding_the_second_button_of_a_held_combination_lets_go_of_it():   # M02
+    c = Core(bindings={"select+a": "key:KEY_LEFTCTRL"})
+    c.button("select", True, 0)
+    assert c.button("a", True, 0.1) == [("key", "KEY_LEFTCTRL", True)]
+    out = c.reconfigure(bindings={"select+a": "key:KEY_LEFTCTRL", "a": "click_right"})
+    assert out == [("key", "KEY_LEFTCTRL", False)]
+    assert c.button("a", False, 0.2) == [] and c.button("select", False, 0.3) == []
+    assert not c.combo_active and not c.combo_wait
+
+
+def test_rebinding_a_held_first_button_releases_nothing_it_never_pressed():
+    c = Core(bindings={"select+a": "copy", "select": "key:KEY_TAB"})
+    c.button("select", True, 0)                       # waiting: KEY_TAB was never pressed
+    out = c.reconfigure(bindings={"select+a": "copy", "select": "key:KEY_ESC"})
+    assert ("key", "KEY_TAB", False) not in out
+
+
+def test_volume_repeat_ends_when_vol_is_remapped_while_held():   # M12
+    c = Core()
+    c.button("vol_up", True, 0)
+    c.reconfigure(bindings={"vol_up": "key:KEY_A"})
+    c.button("vol_up", False, 0.1)
+    assert "vol_up" not in c.vol_repeat
+    assert c.button("vol_up", True, 1) == [("key", "KEY_A", True)]
+    assert ("cmd", "volume_up") not in c.tick(1.1) + c.tick(1.6)
+
+
 if __name__ == "__main__":
     failed = 0
     tests = [(n, f) for n, f in sorted(globals().items()) if n.startswith("test_")]

@@ -382,15 +382,15 @@ def test_profile_change_is_applied_without_restart(monkeypatch, tmp_path):
 
 
 def test_expired_trial_is_deleted_and_undone(monkeypatch, tmp_path):
-    import time
     d, config = _config_daemon(monkeypatch, tmp_path)
     with open(config.trial_path(), "w") as f:
-        f.write(f"[trial]\nexpires = {time.time() + 60}\n[desktop]\na = none\n")
+        f.write(f"[trial]\nexpires = {config.trial_clock() + 60}\n[desktop]\na = none\n")
     d._config_reload()
     assert d.core.bind["a"] == "none"
-    later = time.time() + 61                      # the countdown runs out; the file is untouched
-    monkeypatch.setattr(daemon.time, "time", lambda: later)
+    later = config.trial_clock() + 61             # the countdown runs out; the file is untouched
+    monkeypatch.setattr(config, "trial_clock", lambda: later)
     d._config_reload()
+
     assert d.core.bind["a"] == "click_left"
     assert not os.path.exists(config.trial_path())
 
@@ -532,3 +532,101 @@ def test_recording_armed_toggled_and_saved(monkeypatch, tmp_path):
     assert d.rec_state is None
     assert macros.load("Rec 1")[0] == [("click", "left")]          # the move: pointer was off
     assert json.loads((tmp_path / "rg35xxh-macro-rec.status").read_text())["state"] == "saved"
+
+
+# ---- Controls audit 2026-11-17 (controls-audit-2026-11-17/REPORT.md)
+class FakeOut:
+    def __init__(self):
+        self.events = []
+
+    def write(self, etype, code, value):
+        self.events.append((code, value))
+
+    def syn(self):
+        pass
+
+
+def _out_daemon(monkeypatch, tmp_path):
+    d, macros, timers = _macro_daemon(monkeypatch, tmp_path)
+    del d._run, d._type_combo                       # the real ones, down to the virtual devices
+    d.keyboard, d.mouse = FakeOut(), FakeOut()
+    d.layout = daemon.PointerLayout()
+    d.osk_visible = False
+    d.bt = None
+    return d, macros, timers
+
+
+def test_macro_tap_keeps_a_key_a_button_holds(monkeypatch, tmp_path):   # M10
+    d, macros, timers = _out_daemon(monkeypatch, tmp_path)
+    ctrl, c = daemon.E.KEY_LEFTCTRL, daemon.E.KEY_C
+    d.core = daemon.Core(bindings={"l2": "key:KEY_LEFTCTRL"})
+    d._run(d.core.button("l2", True, 0))
+    macros.save("Copy", [("combo", "KEY_LEFTCTRL+KEY_C"), ("wait", 1)])
+    d._macro_toggle("Copy")
+    assert d.keyboard.events == [(ctrl, 1), (c, 1), (c, 0)]      # Ctrl stays down for L2
+    d._run(d.core.button("l2", False, 0.5))
+    assert d.keyboard.events[-1] == (ctrl, 0)
+
+
+def test_copy_while_ctrl_is_held_keeps_it_held(monkeypatch, tmp_path):   # M10, typed combos
+    d, _, _ = _out_daemon(monkeypatch, tmp_path)
+    monkeypatch.setattr(d, "_focused_is_terminal", lambda: False)
+    d._run([("key", "KEY_LEFTCTRL", True), ("clipboard", "copy")])
+    assert (daemon.E.KEY_LEFTCTRL, 0) not in d.keyboard.events
+    d._release_owned()
+    assert d.keyboard.events[-1] == (daemon.E.KEY_LEFTCTRL, 0) and not d.owners
+
+
+def test_unknown_key_is_logged_not_raised(monkeypatch, tmp_path):   # M08, last line of defence
+    d, _, _ = _out_daemon(monkeypatch, tmp_path)
+    d._run([("key", "not_a_key", True), ("key", "KEY_A", True)])
+    assert d.keyboard.events == [(daemon.E.KEY_A, 1)]
+
+
+def test_macro_step_error_stops_it_and_lets_go(monkeypatch, tmp_path):   # M11
+    d, macros, timers = _macro_daemon(monkeypatch, tmp_path)
+    macros.save("Broken", [("down", "KEY_LEFTSHIFT"), ("wait", 0.1), ("text", "A")])
+    d._macro_toggle("Broken")
+
+    def fail(*_):
+        raise OSError("synthetic output failure")
+    d._type_combo = fail
+    assert timers[-1][1]() is False                 # no exception escapes into GLib
+    assert d.macro is None and d.ran[-1] == ("key", "KEY_LEFTSHIFT", False)
+    assert d.notes[-1] == ("macro", "Macro Broken stopped", 2500)
+
+
+def test_macro_volume_steps_do_not_block_and_are_added_up(monkeypatch, tmp_path):   # H03
+    d, macros, timers = _macro_daemon(monkeypatch, tmp_path)
+    del d._run
+    d.bt, d.osk_visible = None, False
+    d._osd = lambda *_: None
+    started, calls = [], []
+    monkeypatch.setattr(daemon.threading, "Thread", lambda target, **kw: types.SimpleNamespace(
+        start=lambda: started.append(target)))
+    monkeypatch.setattr(daemon.subprocess, "run", lambda argv, **kw: calls.append(argv) or
+                        types.SimpleNamespace(stdout="Volume: 0.50", returncode=0))
+    monkeypatch.setattr(daemon.Daemon, "_vol_net", 0)
+    monkeypatch.setattr(daemon.Daemon, "_vol_busy", False)
+    macros.save("Audio", [("do", "volume_up")] * 20)
+    d._macro_toggle("Audio")
+    assert calls == [] and len(started) == 1        # the input loop ran no wpctl itself
+    started[0]()                                    # the worker thread
+    assert calls[0][-1] == "100%+" and len(calls) == 2    # one set-volume, one get-volume
+    assert daemon.Daemon._vol_busy is False
+
+
+def test_broken_active_file_falls_back_to_default_and_rescue_still_works(monkeypatch, tmp_path):   # H02
+    from rg35xxh_inputd import config
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path))
+    os.makedirs(config.controls_dir())
+    monkeypatch.setattr(config, "SYSTEM", str(tmp_path / "system.conf"))
+    monkeypatch.setattr(config, "BOOT", str(tmp_path / "boot.conf"))
+    (tmp_path / "boot.conf").write_text("[rescue]\nuse_app_settings = no\n")
+    for junk in (b"\xff\xfeG\x00a\x00m\x00e\x00s\x00", b"x" * 100000, b"\n\n", b""):
+        with open(config.active_file(), "wb") as f:
+            f.write(junk)
+        assert config.active_profile() == "default"
+        assert config.load_layers().app_settings is False
+        config.stamp()

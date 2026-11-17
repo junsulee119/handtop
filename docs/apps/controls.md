@@ -31,9 +31,9 @@ Sections on the left:
 
 ## Safety: trial, warnings, rescue
 
-- **"Keep these controls?"** with a 15 s countdown after any change to buttons, combinations, how the pointer moves (speed, acceleration, D-pad speed, dead zone, swap sticks, axis inversion), a profile switch or a reset. The change runs as a trial file; without **Keep** it is undone, by the input daemon itself, so it is undone even if the app is gone or the button needed to press Keep was the one mapped away. Tested: A → Nothing, left to run out; Keep saved Y → Ctrl + C.
+- **"Keep these controls?"** with a 15 s countdown after any change to buttons, combinations, how the pointer moves (speed, acceleration, D-pad speed, dead zone, swap sticks, axis inversion), a profile switch or a reset. The change runs as a trial file holding the whole new profile, which replaces the profile while it runs (a combination taken out is gone during the countdown too); without **Keep** it is undone, by the input daemon itself, so it is undone even if the app is gone or the button needed to press Keep was the one mapped away. The countdown runs on the time since boot: setting the clock can't stretch it, and if the handheld sleeps during it the change is undone. If the change can't be written (disk full), the app says so and nothing goes on trial. Tested: A → Nothing, left to run out; Keep saved Y → Ctrl + C.
 - **Minimal controls** (the input daemon's `config.minimal_problems()`): a change that leaves no left click on any button, or a pointer that hardly moves with the stick and the D-pad (all four directions), gets a warning first ("This leaves you without basic controls", Cancel selected), then the countdown.
-- **Boot partition file** (`rg35xxh-input.conf`, editable from Windows): shipped all commented out. A line you uncomment wins over the app; the app shows that setting locked. **Controls broken?** Uncomment `use_app_settings = no` at the top: everything the app saved is ignored (not deleted) until the `#` is back; the app then shows a rescue-mode banner and edits nothing.
+- **Boot partition file** (`rg35xxh-input.conf`, editable from Windows): shipped all commented out. A line you uncomment wins over the app; the app shows that setting locked and never copies it into the profile (comment the line again and the profile's own value is back). **Controls broken?** Uncomment `use_app_settings = no` at the top: everything the app saved is ignored (not deleted) until the `#` is back; the app then shows a rescue-mode banner and edits nothing.
 - **Vibration preview:** the input daemon re-uploads the mode-change buzz at the new strength (motor idle, desktop mode, at most every 0.3 s) and plays it. Low values are below what the motor can spin up (felt from about 40 %), which the preview makes obvious (decision 2026-11-16: no rescaling).
 
 ## Combinations
@@ -46,7 +46,7 @@ Hold the first button, press the second: the combination's action runs instead o
 
 ## Macros
 
-A macro is a text file, `~/.config/rg35xxh/controls/macros/<name>.macro`, shared by every profile. A button or combination set to **Run a macro** plays it; pressing it again stops it. While it runs, a notification says "Running macro <name>" (it stays until the end) and turns into "Macro <name> finished" or "… stopped".
+A macro is a text file, `~/.config/rg35xxh/controls/macros/<name>.macro`, shared by every profile. A button or combination set to **Run a macro** plays it; pressing it again stops it. **Rename** updates the buttons and combinations of every profile; **Delete** refuses while any profile uses the macro (it lists where); both refuse while the boot partition's file runs it. While it runs, a notification says "Running macro <name>" (it stays until the end) and turns into "Macro <name> finished" or "… stopped".
 
 Steps (one per line, `#` starts a comment; the editor writes them, friendly key names such as "Enter" or "Ctrl+C" are accepted there):
 
@@ -62,7 +62,7 @@ Steps (one per line, `#` starts a comment; the editor writes them, friendly key 
 | `launch chromium` | open an app (its `.desktop` file name) |
 | `do copy` | copy, paste, osk_toggle, power_menu, volume_up / _down, brightness_up / _down |
 
-Limits keep a bad file harmless: at most 1000 steps and 300 s of waiting in all; a bad line is skipped (and logged by the input daemon); anything the macro holds down is let go at the end, when stopped, on a switch to gamepad mode and when the daemon exits. A macro can't switch to gamepad mode or start another macro.
+Limits keep a bad file harmless: at most 1000 steps, 300 s of waiting in all and 64 KB; the editor won't save a macro over them and a recording pauses itself at them; a bad line is skipped (and logged by the input daemon); anything the macro holds down is let go at the end, when stopped, on a switch to gamepad mode and when the daemon exits. A macro can't switch to gamepad mode or start another macro. A key a macro taps that a button is holding (Ctrl on L2, say) stays down for the button.
 
 **Recording** (decisions 2026-11-17):
 1. Give a button or combination the action **Record macro (start / pause)** (Select + Start works well).

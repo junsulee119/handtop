@@ -574,16 +574,60 @@ class Daemon:
                 ui.wait()
         log.info("on-screen keyboard process %s (exit %s)", why, ui.returncode)
 
+    # Key and mouse button ownership: a key can be held by more than one thing at once (L2 bound
+    # to Ctrl while a macro taps Ctrl + C, a copy binding pressed while Ctrl is held). Each press
+    # and release is counted per key; the virtual device sees the key go down at the first press
+    # and up at the last release, so a macro's tap never lets go of a key a button still holds.
+    def _owned(self):
+        if "owners" not in self.__dict__:
+            self.owners = {}                       # "KEY_X" / "BTN_LEFT" -> presses not released
+        return self.owners
+
+    def _key_out(self, dev, name, down):
+        """Press / release name on dev (keyboard or mouse) under the ownership count. True if an
+        event was written (the caller sends the syn)."""
+        code = getattr(E, name, None) if name.startswith(("KEY_", "BTN_")) else None
+        if not isinstance(code, int):
+            log.warning("unknown key %r (ignored)", name)
+            return False
+        owners = self._owned()
+        n = owners.get(name, 0)
+        if down:
+            owners[name] = n + 1
+            if n:
+                return False                       # already down for someone else
+        else:
+            if n > 1:
+                owners[name] = n - 1
+                return False                       # someone else still holds it
+            owners.pop(name, None)
+        dev.write(E.EV_KEY, code, 1 if down else 0)
+        return True
+
+    def _release_owned(self):
+        """Let go of every key and button still counted as held (mode switch, exit): nothing may
+        stay down on the virtual devices whatever lost track of it."""
+        owners = self._owned()
+        keys = [k for k in owners if k.startswith("KEY_")]
+        btns = [k for k in owners if k.startswith("BTN_")]
+        owners.clear()
+        if keys and getattr(self, "keyboard", None):
+            for k in keys:
+                self.keyboard.write(E.EV_KEY, getattr(E, k), 0)
+            self.keyboard.syn()
+        if btns and getattr(self, "mouse", None):
+            for b in btns:
+                self.mouse.write(E.EV_KEY, getattr(E, b), 0)
+            self.mouse.syn()
+
     def _type_combo(self, mods, key):
-        codes = [E.ecodes[m] for m in mods]
-        k = E.ecodes[key]
-        for c in codes:
-            self.keyboard.write(E.EV_KEY, c, 1)
-        self.keyboard.write(E.EV_KEY, k, 1)
+        for m in mods:
+            self._key_out(self.keyboard, m, True)
+        self._key_out(self.keyboard, key, True)
         self.keyboard.syn()
-        self.keyboard.write(E.EV_KEY, k, 0)
-        for c in reversed(codes):
-            self.keyboard.write(E.EV_KEY, c, 0)
+        self._key_out(self.keyboard, key, False)
+        for m in reversed(mods):
+            self._key_out(self.keyboard, m, False)
         self.keyboard.syn()
 
     # ------------------------------------------------------------- events
@@ -697,7 +741,8 @@ class Daemon:
         change is undone even if the Controls app is gone."""
         st = config.stamp()
         until = getattr(self, "trial_until", None)
-        if st == self.cfg_stamp and not (until is not None and time.time() >= until):
+        if st == self.cfg_stamp and not (until is not None and config.trial_clock() >= until):
+
             if self.haptic_scale != self.core.s["haptic_strength"]:
                 self._haptics_rescale()
             return
@@ -718,7 +763,9 @@ class Daemon:
         self._run(self.core.reconfigure(cfg.settings, cfg.bindings))
         new = ({"settings." + k: v for k, v in self.core.s.items()}, {"desktop." + k: v for k, v in self.core.bind.items()},
                {"hardware." + k: v for k, v in self.hw.items()})
-        changed = [f"{k} {o.get(k)} -> {n[k]}" for o, n in zip(old, new) for k in n if o.get(k) != n[k]]
+        changed = [f"{k} {o.get(k)} -> {n.get(k)}" for o, n in zip(old, new)
+                   for k in list(n) + [k for k in o if k not in n] if o.get(k) != n.get(k)]
+
         log.info("controls: %s", ", ".join(changed) if changed else "no change")
         if self.core.bind != old_bind and getattr(self, "ui", None):
             self._ui_send("bindings", "set", self.core.bind)   # keyboard badges
@@ -822,13 +869,12 @@ class Daemon:
                     self._wheel_notch(E.REL_HWHEEL, a[2], 1)
                 mouse_dirty = True
             elif kind == "mouse":
-                btn = {"left": E.BTN_LEFT, "right": E.BTN_RIGHT, "middle": E.BTN_MIDDLE,
-                       "back": E.BTN_SIDE, "forward": E.BTN_EXTRA}[a[1]]
-                self.mouse.write(E.EV_KEY, btn, 1 if a[2] else 0)
-                mouse_dirty = True
+                btn = {"left": "BTN_LEFT", "right": "BTN_RIGHT", "middle": "BTN_MIDDLE",
+                       "back": "BTN_SIDE", "forward": "BTN_EXTRA"}[a[1]]
+                mouse_dirty |= self._key_out(self.mouse, btn, a[2])
             elif kind == "key":
-                self.keyboard.write(E.EV_KEY, E.ecodes[a[1]], 1 if a[2] else 0)
-                self.keyboard.syn()
+                if self._key_out(self.keyboard, a[1], a[2]):
+                    self.keyboard.syn()
                 if self.osk_visible:                    # L1 / R1 / R2: show it on the keyboard too
                     self._ui_send("osk", "key_state", a[1], a[2])
             elif kind == "clipboard":
@@ -854,6 +900,7 @@ class Daemon:
             elif kind == "mode":
                 if a[1] == "gamepad":
                     self._macro_stop("gamepad mode")          # nothing a macro holds stays down
+                    self._release_owned()                     # ... nor anything else
                     if self.osk_visible:
                         self._ui_send("osk", "hide")
                         self.osk_visible = False
@@ -948,7 +995,35 @@ class Daemon:
         if name == "power_menu":
             spawn("rg35xxh-power-menu")
         elif name in ("volume_up", "volume_down"):
-            step = "5%+" if name == "volume_up" else "5%-"
+            self._volume(+1 if name == "volume_up" else -1)
+        elif name in ("brightness_up", "brightness_down"):
+            self._brightness(+1 if name == "brightness_up" else -1)
+
+    # Volume: wpctl takes tens of ms (up to its 1 s timeout when PipeWire is busy), too long for
+    # the input loop. Steps are added up here and one worker thread applies them, as one wpctl
+    # call for whatever piled up meanwhile (20 "do volume_up" in a macro: one or two calls).
+    VOLUME_STEP = 5                 # percent per step
+    _vol_lock = threading.Lock()
+    _vol_net = 0                    # steps not applied yet (+ up, - down)
+    _vol_busy = False               # the worker thread is running
+
+    def _volume(self, steps):
+        with self._vol_lock:
+            Daemon._vol_net += steps
+            start = not Daemon._vol_busy
+            Daemon._vol_busy = True
+        if start:
+            threading.Thread(target=self._volume_worker, name="volume", daemon=True).start()
+
+    def _volume_worker(self):
+        while True:
+            with self._vol_lock:
+                n = Daemon._vol_net
+                Daemon._vol_net = 0
+                if n == 0:
+                    Daemon._vol_busy = False
+                    return
+            step = f"{abs(n) * self.VOLUME_STEP}%{'+' if n > 0 else '-'}"
             try:
                 subprocess.run(["wpctl", "set-volume", "-l", "1.0", "@DEFAULT_AUDIO_SINK@", step],
                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=1)
@@ -958,8 +1033,7 @@ class Daemon:
                 self._osd(0 if "MUTED" in out else vol, "volume")
             except (OSError, subprocess.TimeoutExpired, ValueError, IndexError) as e:
                 log.warning("volume: %s", e)
-        elif name in ("brightness_up", "brightness_down"):
-            self._brightness(+1 if name == "brightness_up" else -1)
+
 
     BACKLIGHT = "/sys/class/backlight/backlight"
     BRIGHTNESS_MIN = 0.05      # never fully dark
@@ -1049,13 +1123,28 @@ class Daemon:
                       "text": None}
         self._macro_tick()
 
+    MACRO_BUDGET = 0.008            # seconds of work per tick at most (the input loop shares it)
+
     def _macro_tick(self):
+        """One GLib timer run of the macro. An error in a step stops the macro (letting go of what
+        it holds) instead of escaping: GLib would drop the timer and leave keys down."""
+        try:
+            return self._macro_tick_steps()
+        except Exception:
+            log.exception("macro %r failed", (self.macro or {}).get("name"))
+            if self.macro:
+                self.macro["timer"] = None
+                self._macro_stop("error")
+            return False
+
+    def _macro_tick_steps(self):
         m = self.macro
         if m is None:
             return False
         m["timer"] = None
         done = 0
-        while done < self.MACRO_BATCH:
+        start = time.monotonic()
+        while done < self.MACRO_BATCH and time.monotonic() - start < self.MACRO_BUDGET:
             if m["text"]:                                  # typing a text step, a few letters a tick
                 ch, m["text"] = m["text"][0], m["text"][1:]
                 k = macros.char_key(ch)
@@ -1111,7 +1200,10 @@ class Daemon:
             GLib.source_remove(m["timer"])
         rel = [("key", k, False) for k in m["keys"]] + [("mouse", b, False) for b in m["buttons"]]
         if rel and getattr(self, "keyboard", None):
-            self._run(rel)
+            try:
+                self._run(rel)
+            except Exception:
+                log.exception("macro %r: releasing its keys failed", m["name"])
         if why:
             log.info("macro %r: %s at step %d", m["name"], why, m["i"])
         self._notify("macro", f"Macro {m['name']} " + ("finished" if why is None else "stopped"),
@@ -1707,6 +1799,9 @@ class Daemon:
             pass
         if get("macro"):
             step("macro", self._macro_stop, "daemon exit")      # let go of what it holds
+        if get("owners"):
+            step("held keys", self._release_owned)
+
         if get("ui_retry"):
             step("ui_retry", GLib.source_remove, get("ui_retry"))
             self.ui_retry = None

@@ -123,13 +123,30 @@ def load(name, known_key=lambda k: True):
     return parse(text, known_key)
 
 
+def too_big(steps, text=None):
+    """Why the player would cut these steps short (the limits load() and parse() apply), or None."""
+    if len(steps) > MAX_STEPS:
+        return f"more than {MAX_STEPS} steps"
+    if sum(s[1] for s in steps if s[0] == "wait") > MAX_WAIT:
+        return f"more than {MAX_WAIT:.0f} s of waiting in all"
+    if len((text if text is not None else format_steps(steps)).encode("utf-8")) > MAX_BYTES:
+        return f"larger than {MAX_BYTES // 1024} KB"
+    return None
+
+
 def save(name, steps):
+    """Write the macro. ValueError (nothing written) for a bad name or steps the player would not
+    play in full (too_big())."""
     if not NAME_RE.match(name):
         raise ValueError(f"not a macro name: {name!r}")
+    text = format_steps(steps, name)
+    problem = too_big(steps, text)
+    if problem:
+        raise ValueError(f"the macro is {problem}")
     os.makedirs(macros_dir(), exist_ok=True)
     tmp = path(name) + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:
-        f.write(format_steps(steps, name))
+        f.write(text)
         f.flush()
         os.fsync(f.fileno())
     os.replace(tmp, path(name))
@@ -152,6 +169,7 @@ class Recorder:
         self.pointer = pointer
         self.timing = timing
         self.steps = []
+        self.waited = 0.0           # seconds of wait steps so far (at most MAX_WAIT)
         self.last = None            # time of the last recorded event (None: none yet or just resumed)
         self.mx = self.my = 0       # pointer motion not written yet
         self.mt = None              # when that motion started
@@ -160,9 +178,17 @@ class Recorder:
     def resume(self, t):
         self.last = t if self.steps else None
 
-    def _gap(self, t):
+    def _wait_for(self, t):
+        """The wait step an event at t would add (0: none)."""
         if self.timing and self.last is not None and t - self.last >= 0.03:
-            self.steps.append(("wait", round(min(t - self.last, 10.0), 2)))
+            return round(min(t - self.last, 10.0), 2)
+        return 0
+
+    def _gap(self, t):
+        w = self._wait_for(t)
+        if w:
+            self.steps.append(("wait", w))
+            self.waited += w
         self.last = t
 
     def _flush_move(self):
@@ -174,8 +200,9 @@ class Recorder:
     def event(self, t, step):
         """step: ("down"/"up", KEY), ("press"/"release", button), ("scroll", v, h), ("launch", id),
         ("do", action), ("move", dx, dy)."""
-        if len(self.steps) >= MAX_STEPS - 2:
-            return False                                   # full: the daemon stops recording
+        if len(self.steps) >= MAX_STEPS - 2 or self.waited + self._wait_for(t) > MAX_WAIT:
+            return False                                   # full: the daemon pauses recording
+
         if step[0] == "move":
             if not self.pointer:
                 return True

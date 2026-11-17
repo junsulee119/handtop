@@ -98,3 +98,29 @@ def test_recorder_without_timing_keeps_no_waits():
     r.event(3.0, ("press", "left"))
     r.event(3.5, ("release", "left"))
     assert r.finish() == [("key", "KEY_A"), ("click", "left")]
+
+
+# ---- Controls audit 2026-11-17, M06: what is saved is what plays
+def test_save_refuses_what_the_player_would_cut_short(tmp_path, monkeypatch):
+    import pytest
+    from rg35xxh_inputd import macros
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    for steps, why in (([("text", "a" * 500)] * 140, "KB"), ([("key", "KEY_A")] * 1001, "steps"),
+                       ([("wait", 10)] * 31, "waiting")):
+        with pytest.raises(ValueError, match=why):
+            macros.save("Big", steps)
+        assert not os.path.exists(macros.path("Big")) and not os.path.exists(macros.path("Big") + ".tmp")
+    macros.save("Fits", [("wait", 10)] * 30)
+    assert len(macros.load("Fits")[0]) == 30
+
+
+def test_recorder_stops_at_the_waiting_limit(tmp_path, monkeypatch):
+    from rg35xxh_inputd import macros
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    rec = macros.Recorder(pointer=False, timing=True)
+    ok = [rec.event(i * 10, ("key", "KEY_A")) for i in range(34)]
+    assert ok.index(False) == 31                      # 30 waits of 10 s fit, the 31st doesn't
+    steps = rec.finish()
+    macros.save("Long", steps)
+    loaded, problems = macros.load("Long")
+    assert loaded == steps and not problems

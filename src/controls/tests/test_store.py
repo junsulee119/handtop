@@ -115,3 +115,85 @@ def test_export_import_and_free_name(tmp_path):
     assert store.import_profile(str(out), name) == 1
     assert store.read_profile(name)[1] == {"y": "copy"}
     assert store.free_name("../evil!") == "evil"
+
+
+# ---- Controls audit 2026-11-17 (controls-audit-2026-11-17/REPORT.md)
+def test_removed_combination_is_gone_during_the_trial():   # H01
+    before = store.system_values()
+    before.bindings["select+a"] = "click_right"
+    store.write_profile("default", before)
+    after = before.copy()
+    del after.bindings["select+a"]
+    store.start_trial(after, now=1000)
+    assert "select+a" not in config.load_layers(now=1001).bindings
+    assert config.load_layers(now=1016).bindings["select+a"] == "click_right"   # undone
+
+
+def test_switching_to_a_profile_without_a_combination_previews_it_right():   # H01
+    old = store.system_values()
+    old.bindings["a+b"] = "copy"
+    store.write_profile("default", old)
+    store.write_profile("Clean", store.system_values())
+    store.start_trial(store.profile_values("Clean"), now=1000, name="Clean")
+    assert "a+b" not in config.load_layers(now=1001).bindings
+
+
+def test_saving_keeps_the_profiles_own_value_under_a_boot_lock():   # M03
+    own = store.system_values()
+    own.bindings["y"] = "copy"
+    store.write_profile("default", own)
+    open(config.BOOT, "w").write("[desktop]\ny = paste\n")
+    shown, cfg = store.effective()
+    assert shown.bindings["y"] == "paste" and "desktop.y" in cfg.locked
+    shown.settings["scroll_speed"] = 12
+    store.write_profile(store.active(), shown)
+    store.start_trial(shown, now=1000)
+    assert "y = copy" in open(config.trial_path()).read()
+    os.unlink(config.BOOT)
+    after, _ = store.effective()
+    assert after.bindings["y"] == "copy" and after.settings["scroll_speed"] == 12
+
+
+def test_macro_users_and_rename_cover_every_profile_and_the_boot_file():   # M05
+    from rg35xxh_inputd import macros
+    macros.save("Shared", [("key", "KEY_A")])
+    v = store.system_values()
+    v.bindings["y"] = "macro:Shared"
+    v.bindings["select+a"] = "macro:Shared"
+    store.write_profile("default", v)
+    store.write_profile("Other", v)
+    assert sorted(store.macro_users("Shared")) == [("Other", "select+a"), ("Other", "y"),
+                                                   ("default", "select+a"), ("default", "y")]
+    store.rename_macro_refs("Shared", "Renamed")
+    assert store.macro_users("Shared") == []
+    assert store.read_profile("Other")[1]["select+a"] == "macro:Renamed"
+    open(config.BOOT, "w").write("[desktop]\nx = macro:Renamed\n")
+    assert ("boot file", "x") in store.macro_users("Renamed")
+
+
+def test_failed_trial_write_frees_the_app(monkeypatch):   # M04
+    import ast
+    from types import SimpleNamespace
+    src = os.path.join(HERE, "..", "handtop_controls", "app.py")
+    tree = ast.parse(open(src).read())
+    cls = next(n for n in tree.body if isinstance(n, ast.ClassDef) and n.name == "App")
+    fn = next(n for n in cls.body if isinstance(n, ast.FunctionDef) and n.name == "trial")
+    ns = {"store": store}
+    exec(compile(ast.Module(body=[fn], type_ignores=[]), src, "exec"), ns)
+    errors, cancelled = [], []
+
+    def full(*_):
+        raise OSError(28, "No space left on device")
+    monkeypatch.setattr(store, "cancel", lambda: cancelled.append(1))
+    app = SimpleNamespace(busy=False, _trial_run=full, _error=lambda *a: errors.append(a),
+                          refresh=lambda: None, _warn=lambda p: True)
+    ns["trial"](app, store.system_values())
+    assert app.busy is False and errors and cancelled
+
+
+def test_atomic_write_leaves_no_temp_file_on_failure(monkeypatch, tmp_path):
+    p = str(tmp_path / "x.conf")
+    monkeypatch.setattr(os, "replace", lambda *a: (_ for _ in ()).throw(OSError(28, "full")))
+    with pytest.raises(OSError):
+        store._write_atomic(p, "x")
+    assert not os.path.exists(p + ".tmp")

@@ -172,6 +172,8 @@ class ComboMacroMixin:
             b.connect("clicked", lambda _b, f=fn: f())
             row.add(b)
         inner.pack_start(row, False, False, 0)
+        self.m_note = _lab("", dim=True)                 # right under the buttons it answers
+        inner.pack_start(self.m_note, False, False, 0)
         inner.pack_start(_lab("<b>Record</b>", markup=True), False, False, 0)
         self.rec_key = _lab("", dim=True)
         inner.pack_start(self.rec_key, False, False, 0)
@@ -187,13 +189,14 @@ class ComboMacroMixin:
         inner.pack_start(rb, False, False, 0)
         self.rec_state_lab = _lab("")
         inner.pack_start(self.rec_state_lab, False, False, 0)
-        self.m_note = _lab("", dim=True)
-        inner.pack_start(self.m_note, False, False, 0)
         GLib.timeout_add(500, self._rec_poll)
+
 
     def macros_refresh(self):
         if not hasattr(self, "macro_list"):
             return
+        self.m_note.set_text("")                         # an earlier answer no longer applies
+
         sel = self._m_selected()
         for r in self.macro_list.get_children():
             self.macro_list.remove(r)
@@ -242,22 +245,26 @@ class ComboMacroMixin:
         if not M.NAME_RE.match(name) or name in M.names():
             self.m_note.set_text(f"Can't use the name {name!r}.")
             return
-        os.replace(M.path(old), M.path(name))
-        new = self.values.copy()                          # buttons that ran it follow the new name
-        changed = False
-        for b, a in list(new.bindings.items()):
-            if a == "macro:" + old:
-                new.bindings[b] = "macro:" + name
-                changed = True
-        if changed:
-            store.write_profile(store.active(), new)
+        boot = [A.button_name(b) for p, b in store.macro_users(old) if p == "boot file"]
+        if boot:                # the app never edits the boot partition's file
+            self.m_note.set_text(f"The boot partition's rg35xxh-input.conf runs {old} ({', '.join(boot)}): "
+                                 "change it there first.")
+            return
+        try:
+            os.replace(M.path(old), M.path(name))
+            store.rename_macro_refs(old, name)            # every profile's buttons follow the new name
+        except OSError as e:
+            self.refresh()
+            self.m_note.set_text(f"Could not rename: {e}.")
+            return
         self.refresh()
 
     def _m_delete(self):
         name = self._m_selected()
         if not name:
             return
-        used = [A.button_name(b) for b, a in self.values.bindings.items() if a == "macro:" + name]
+        used = [f"{A.button_name(b)} ({'Default' if p == 'default' else p})"
+                for p, b in store.macro_users(name)]
         if used:
             self.m_note.set_text(f"{name} is used by {', '.join(used)}: give those another action first.")
             return
@@ -429,8 +436,13 @@ class ComboMacroMixin:
             self._s_fill(min(i, len(self.m_steps) - 1))
 
     def _s_save(self):
-        M.save(self.m_name, self.m_steps)
+        try:
+            M.save(self.m_name, self.m_steps)
+        except (OSError, ValueError) as e:
+            self.s_note.set_text(f"Not saved: {e}.")
+            return
         self.s_note.set_text(f"Saved ({len(self.m_steps)} steps).")
+
         self.macros_refresh()
 
     # ---- "Run a macro" for a button ----------------------------------------------------------
