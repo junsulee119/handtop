@@ -183,13 +183,13 @@ BORDERS = (1, 3)                 # line width multiplier (taskbar line, notifica
 # SYSTEM_OK slots may be set to "system" in theme.json "icons": the package's own icon is used.
 INPUT_MODES = ("desktop", "gamepad", "bt", "wired")
 SHAKES = (-2, -1, 1, 2)
-HANDTOP_APPS = ("theme", "external-controller", "display", "enable-ssh", "recenter-sticks")
+HANDTOP_APPS = ("theme", "external-controller", "display", "enable-ssh", "recenter-sticks", "controls")
 DEFAULT_APPS = ("foot", "thunar", "mousepad", "chromium", "htop", "micro", "qpdfview", "xarchiver",
                 "blueman")
 APP_ICON_NAMES = {            # slot -> icon name looked up by GTK / labwc / Waybar
     "theme": "rg35xxh-theme", "external-controller": "rg35xxh-external-controller",
     "display": "rg35xxh-display", "enable-ssh": "rg35xxh-enable-ssh",
-    "recenter-sticks": "rg35xxh-recenter-sticks",
+    "recenter-sticks": "rg35xxh-recenter-sticks", "controls": "rg35xxh-controls",
     "foot": "foot", "thunar": "org.xfce.thunar", "mousepad": "org.xfce.mousepad",
     "chromium": "chromium", "htop": "htop", "micro": "micro", "qpdfview": "qpdfview",
     "xarchiver": "xarchiver", "blueman": "blueman",

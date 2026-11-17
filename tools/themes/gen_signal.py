@@ -198,6 +198,14 @@ def app_glyph(name, w=3.2):
         v.line([(12, 22), (19, 28), (12, 34)], w, WHITE)
         v.line([(30, 28), (40, 28)], w, INK)
         v.rrect(40, 22, 52, 34, 0, fill=RED)
+    elif name == "controls":                                       # D-pad and a button over two sliders
+        v.line([(10, 17), (24, 17)], w, INK)
+        v.line([(17, 10), (17, 24)], w, INK)
+        v.ellipse(34, 11, 46, 23, fill=INK)
+        v.line([(8, 34), (48, 34)], w, INK)
+        v.rrect(14, 29, 22, 39, 0, fill=INK)
+        v.line([(8, 45), (48, 45)], w, INK)
+        v.rrect(32, 40, 40, 50, 0, fill=RED)
     elif name == "recenter-sticks":
         v.ellipse(14, 14, 42, 42, outline=INK, width=w)
         v.ellipse(23.5, 23.5, 32.5, 32.5, fill=RED)

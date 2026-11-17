@@ -9,6 +9,8 @@ sharp in the app drawer).
   (terminal_icon, files_icon, notepad_icon, browser_icon, monitor_icon, code_icon, pdf_icon, archive_icon: default-app icons, written by gen_default_app_icons.py)
   app-recenter.png             Re-center sticks: a stick well seen from above with a crosshair, a faint
                                drifted knob up-right and a blue arrow back to the knob in the centre (no glass).
+  app-controls.png             Controls: a white D-pad and the coloured face-button diamond over two sliders
+                               (filled part accent blue, white knobs), as in the app (no glass).
   All are 27x27 art x2 + 1 px margin = exactly 56x56, the app drawer's icon size.
   Each also gets a -light variant (dark drawing, pastel glass, deeper ring) for the light theme.
 
@@ -518,6 +520,36 @@ def recenter_icon(light=False):
     return _tile(im)
 
 
+# ---- Controls -------------------------------------------------------------------------------
+# No glass: the handheld's controls (a white D-pad, the four coloured face buttons in their diamond)
+# over two sliders with their filled part in the accent blue, as in the app.
+def controls_icon(light=False):
+    colors = dict(COLORS_LIGHT if light else COLORS)
+    colors.update(S=SHADE_LIGHT if light else SHADE, T=COLORS_LIGHT["K"] if light else COLORS["K"],
+                  F=(61, 104, 176) if light else (74, 140, 230))
+    g = {}
+    for i in range(1, 12):                              # D-pad: a cross, arms 3 wide
+        for j in range(5, 8):
+            g[(i, j)] = g[(j + 0, i)] = "W"
+    for x, y in ((6, 11), (5, 11), (7, 11), (11, 7), (11, 6), (11, 5)):   # shaded lower / right ends
+        g[(x, y)] = "S"
+    for (cx, cy), c in (((20, 2), "x"), ((24, 6), "a"), ((20, 10), "b"), ((16, 6), "y")):
+        _disc(g, cx, cy, 2.1, c)                        # X top, A right, B bottom, Y left
+    for ty, knob in ((16, 8), (23, 18)):                # two sliders: track, filled part, knob
+        for x in range(1, 26):
+            g[(x, ty)] = "F" if x < knob else "T"
+            g[(x, ty + 1)] = "F" if x < knob else "T"
+        for y in range(ty - 2, ty + 4):
+            for x in range(knob - 2, knob + 3):
+                edge = y in (ty - 2, ty + 3) or x in (knob - 2, knob + 2)
+                g[(x, y)] = "S" if edge else "W"
+    im = Image.new("RGBA", (EN, EN), (0, 0, 0, 0))
+    for (x, y), c in g.items():
+        if 0 <= x < EN and 0 <= y < EN:
+            im.putpixel((x, y), colors[c] + (255,))
+    return _tile(im)
+
+
 if __name__ == "__main__":
     out = sys.argv[1] if len(sys.argv) > 1 else "."
     for light, sfx in ((False, ""), (True, "-light")):
@@ -526,3 +558,4 @@ if __name__ == "__main__":
         display_icon(light).save(f"{out}/app-display{sfx}.png")
         ssh_icon(light).save(f"{out}/app-ssh{sfx}.png")
         recenter_icon(light).save(f"{out}/app-recenter{sfx}.png")
+        controls_icon(light).save(f"{out}/app-controls{sfx}.png")

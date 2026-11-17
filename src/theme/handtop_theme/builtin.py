@@ -21,7 +21,8 @@ _I = "overlay/usr/local/share/rg35xxh/icons"
 _HI = "src/theme/art/icons/hicolor"
 _HL = "src/theme/art/icons/Handtop-Light"
 _APP_FILES = {"theme": "app-theme", "external-controller": "app-external-controller",
-              "display": "app-display", "enable-ssh": "app-ssh", "recenter-sticks": "app-recenter"}
+              "display": "app-display", "enable-ssh": "app-ssh", "recenter-sticks": "app-recenter",
+              "controls": "app-controls"}
 
 
 def sources(repo, light):

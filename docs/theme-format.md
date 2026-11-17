@@ -310,6 +310,9 @@ PNG only, exact pixel size, at the path shown (relative to the theme folder). Pi
 | `icons/apps/recenter-sticks.png` | 56×56 | base theme's |
 | `icons/apps/recenter-sticks@22.png` | 22×22 | made from `icons/apps/recenter-sticks.png` (smooth downscale; draw it for crisp pixel art) if that one is yours, else the base theme's |
 | `icons/apps/recenter-sticks@20.png` | 20×20 | made from `icons/apps/recenter-sticks.png` (smooth downscale; draw it for crisp pixel art) if that one is yours, else the base theme's |
+| `icons/apps/controls.png` | 56×56 | base theme's |
+| `icons/apps/controls@22.png` | 22×22 | made from `icons/apps/controls.png` (smooth downscale; draw it for crisp pixel art) if that one is yours, else the base theme's |
+| `icons/apps/controls@20.png` | 20×20 | made from `icons/apps/controls.png` (smooth downscale; draw it for crisp pixel art) if that one is yours, else the base theme's |
 | `icons/apps/foot.png` | 56×56 | base theme's, *system ok* |
 | `icons/apps/foot@22.png` | 22×22 | made from `icons/apps/foot.png` (smooth downscale; draw it for crisp pixel art) if that one is yours, else the base theme's, *system ok* |
 | `icons/apps/foot@20.png` | 20×20 | made from `icons/apps/foot.png` (smooth downscale; draw it for crisp pixel art) if that one is yours, else the base theme's, *system ok* |

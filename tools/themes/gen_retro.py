@@ -516,6 +516,29 @@ def app(name):
             ".KKKK.........", "KYYYYK........", "KYKKYKKKKKKKKK", "KYKKYYYYYYYYYK",
             "KYYYYKKKKYKYKK", ".KKKK....K.K..",
         ])
+    elif name == "controls":
+        # the handheld's controls: a grey D-pad, the coloured face-button diamond, and two
+        # Windows-style sliders (sunken track, raised grey knob)
+        a.grid(0, 1, [
+            "....KKKK....",
+            "....KSSK....",
+            "....KSSK....",
+            "....KSSK....",
+            "KKKKKSSKKKKK",
+            "KSSSSSSSSSSK",
+            "KSSSSSSSSSGK",
+            "KKKKKSSKKKKK",
+            "....KSSK....",
+            "....KSSK....",
+            "....KSGK....",
+            "....KKKK....",
+        ])
+        for (x, y), c in (((19, 0), "B"), ((15, 4), "V"), ((23, 4), "R"), ((19, 8), "Y")):
+            a.grid(x, y, [".KKK.", "K" + c * 3 + "K", "K" + c * 3 + "K", "K" + c * 3 + "K", ".KKK."])
+        for ty, k in ((18, 6), (24, 17)):
+            a.hline(0, 27, ty, "G")
+            a.hline(0, 27, ty + 1, "W")
+            a.bevel(k, ty - 3, k + 4, ty + 3)
     elif name == "recenter-sticks":
         a.grid(3, 2, [
             "........KKKKKK........",
