@@ -67,7 +67,16 @@ DEFAULT_BINDINGS = {
     "r3": "paste",
     "start": "mode_gamepad",
     "select": "none",
+    # Advanced (Controls app, with a warning there): what used to be fixed. Desktop mode only; in
+    # gamepad and External Controller modes these keep their usual jobs. Holding Power to shut
+    # down is never remappable (the only way to switch off a frozen session from the handheld).
+    "up": "pointer", "down": "pointer", "left": "pointer", "right": "pointer",
+    "vol_up": "volume_up", "vol_down": "volume_down",
+    "f": "none",                   # a tap of F; F + Vol stays brightness
+    "power": "power_menu",         # a tap of Power
 }
+BINDABLE = BUTTONS + DPAD + ("vol_up", "vol_down", "power")
+LEVEL_CMDS = ("volume_up", "volume_down", "brightness_up", "brightness_down")   # repeat while held
 
 # Gamepad mode: by position, Xbox 360 (xpad) conventions.
 # Physical bottom (label B) -> Xbox A, right (A) -> B, left (Y) -> X, top (X) -> Y.
@@ -111,6 +120,11 @@ class Core:
         self.osk_key_next = None    # next "repeat" while the OSK key (A) is held
         self.osk_shift_button = None  # L2 pressed as Shift on the keyboard (its binding is skipped)
         self.vol_repeat = {}        # vol_up/vol_down -> [cmd, next repeat time]
+        self.level_bound = set()    # Vol held under a binding other than volume / brightness
+        self.dpad_bound = set()     # D-pad directions held under a binding other than the pointer
+        self.combo_wait = set()     # first buttons of combinations, held, own action not run yet
+        self.combo_used = set()     # ... that started a combination (no own action on release)
+        self.combo_active = {}      # second button -> the combination action it is holding
         self.f_used = False         # F was used as a modifier (Vol / Select) since it went down
         self.home_down = False      # Home held on the other device (F held, external modes)
         self.home_release_at = None  # F tap: when to release Home
@@ -125,6 +139,8 @@ class Core:
             self.s["dpad_speed_ratio"] = self.s["dpad_speed"] / max(1.0, self.s["pointer_max_speed"])
         self.bind = dict(DEFAULT_BINDINGS)
         self.bind.update(bindings or {})
+        # combinations: bindings named "first+second"; first buttons wait for their release
+        self.combo_first = {k.split("+")[0] for k in self.bind if "+" in k}
 
     def reconfigure(self, settings=None, bindings=None):
         """New settings and bindings while running (the Controls app, a changed config file).
@@ -133,13 +149,24 @@ class Core:
         here; the daemon touches no device for it."""
         out = []
         if self.mode == "desktop":
-            out = self._release_all_desktop()
-            if self.osk_pressed_button:
+            # Only buttons whose binding changes are let go: a held button must survive an unrelated
+            # change (dragging the Controls app's vibration slider holds A while it saves).
+            new = dict(DEFAULT_BINDINGS)
+            new.update(bindings or {})
+            changed = {n for n in self.held if n in BINDABLE and n not in ("f", "power")
+                       and self.bind.get(n) != new.get(n)}
+            self.dpad_bound -= changed
+            self.level_bound -= changed
+            out = self._release_all_desktop(changed)
+            if self.osk_pressed_button in changed:
                 out.append(("osk", "release"))
-            self.osk_pressed_button = None
-            self.osk_key_next = None
-            self.osk_shift_button = None
-            self.swallowed |= {n for n in self.held if n in BUTTONS and n != "f"}
+                self.osk_pressed_button = None
+                self.osk_key_next = None
+            if self.osk_shift_button in changed:
+                self.osk_shift_button = None
+            self.swallowed |= changed
+            if {k: v for k, v in self.bind.items() if "+" in k} != {k: v for k, v in new.items() if "+" in k}:
+                out += self._release_combos()      # only when the combinations themselves change
         elif (settings or {}).get("pad_layout", "position") != self.s["pad_layout"]:
             # Gamepad mode, layout switched: release the face buttons down under the old layout.
             for n in ("a", "b", "x", "y"):
@@ -182,10 +209,15 @@ class Core:
             self.power_fired = False
             return out
         if name in ("vol_up", "vol_down"):
+            direction = "up" if name == "vol_up" else "down"
             if "f" in self.held:
                 self.f_used = True
-            direction = "up" if name == "vol_up" else "down"
-            cmd = ("brightness_" if "f" in self.held else "volume_") + direction
+                cmd = "brightness_" + direction             # F + Vol: always brightness
+            else:
+                cmd = self.bind.get(name, "volume_" + direction) if self.mode == "desktop" else "volume_" + direction
+                if cmd not in LEVEL_CMDS:                   # remapped to something else
+                    self.level_bound.add(name)
+                    return self._binding(name, True)
             self.vol_repeat[name] = [cmd, t + self.s["vol_repeat_delay"]]
             return [("cmd", cmd)]
         if name == "f":
@@ -208,11 +240,27 @@ class Core:
             return out
 
         # desktop mode
+        if not self.osk_visible:
+            # Button combinations ("l1+a" bindings), hold-modifier style: hold the first button, press
+            # the second, and the combination's action runs instead of the second's. The first
+            # button's own action then runs only when it is tapped alone (on release).
+            for first in [f for f in self.combo_first if f in self.held and f != name]:
+                act = self.bind.get(f"{first}+{name}")
+                if act:
+                    self.combo_used.add(first)
+                    self.combo_active[name] = act
+                    return self._action(act, True)
+            if name in self.combo_first and name != "f":
+                self.combo_wait.add(name)               # its own action waits for the release
+                return out
         if name in DPAD:
             if self.osk_visible:
                 dx, dy = _dpad_vector(name)
                 self.osk_next_repeat[name] = t + self.s["osk_repeat_delay"]
                 return [("osk", "move", dx, dy)]
+            if self.bind.get(name, "pointer") != "pointer":
+                self.dpad_bound.add(name)
+                return self._binding(name, True)
             return out  # pointer motion happens in tick()
         osk_key = next((btn for btn, act in self.bind.items() if act == "click_left"), "a")
         if name == osk_key and self.osk_visible:
@@ -242,12 +290,20 @@ class Core:
             if self.screen_off:
                 return [("screen_wake",)]
             if dur <= self.s["power_tap_max_seconds"]:
-                return [("cmd", "power_menu")]
+                return self._tap("power", "power_menu")
             return []  # held 1-3 s: cancelled
         if name in ("vol_up", "vol_down", "f"):
             self.vol_repeat.pop(name, None)
             if name == "f" and self._external():
                 return self._home_on_f_release(t, dur)
+            if name in self.level_bound:
+                self.level_bound.discard(name)
+                return self._binding(name, False)
+            if name == "f" and "f" in self.combo_used:
+                self.combo_used.discard("f")
+                return []
+            if name == "f" and not self.f_used and dur <= self.s["power_tap_max_seconds"]:
+                return self._tap("f", "none")             # F tapped alone (not as F + Vol)
             return []
 
         if self.mode == "gamepad":
@@ -255,8 +311,19 @@ class Core:
                 return []  # release already sent when switching modes
             return self._pad_button(name, False)
 
+        if name in self.combo_active:                     # the second button of a combination
+            return self._action(self.combo_active.pop(name), False)
+        if name in self.combo_wait:                       # a first button: its own action if alone
+            self.combo_wait.discard(name)
+            if name in self.combo_used:
+                self.combo_used.discard(name)
+                return []
+            return self._binding(name, True) + self._binding(name, False)
         if name in DPAD:
             self.osk_next_repeat.pop(name, None)
+            if name in self.dpad_bound:
+                self.dpad_bound.discard(name)
+                return self._binding(name, False)
             return []
         if self.osk_pressed_button and name == self.osk_pressed_button:
             self.osk_pressed_button = None
@@ -315,7 +382,7 @@ class Core:
         if not self.osk_visible:
             dx, dy = 0, 0
             for d in DPAD:
-                if d in self.held and d not in self.swallowed:
+                if d in self.held and d not in self.swallowed and d not in self.dpad_bound:
                     ddx, ddy = _dpad_vector(d)
                     dx += ddx
                     dy += ddy
@@ -379,8 +446,10 @@ class Core:
         return self.bind.get(name, "none")
 
     def _binding(self, name, pressed):
-        action = self._binding_of(name)
-        if action == "none":
+        return self._action(self._binding_of(name), pressed)
+
+    def _action(self, action, pressed):
+        if action in ("none", "pointer"):
             return []
         if action.startswith("click_"):
             return [("mouse", action[len("click_"):], pressed)]
@@ -393,6 +462,10 @@ class Core:
             return []  # the rest act on press only
         if action.startswith("launch:"):
             return [("launch", action[7:])]
+        if action.startswith("macro:"):
+            return [("macro", action[6:])]          # the daemon plays it (or stops it if running)
+        if action == "macro_record":
+            return [("macro_record",)]              # recording: start / pause (Controls app arms it)
         if action in ("copy", "paste"):
             return [("clipboard", action)]
         if action == "osk_toggle":
@@ -401,12 +474,34 @@ class Core:
             return self._enter_gamepad()
         if action == "power_menu":
             return [("cmd", "power_menu")]
+        if action in LEVEL_CMDS:
+            return [("cmd", action)]
         return []
 
-    def _release_all_desktop(self):
+    def _release_combos(self):
+        """Let go of running combinations and forget waiting first buttons (mode switch, reload)."""
+        out = []
+        for act in self.combo_active.values():
+            out += self._action(act, False)
+        self.swallowed |= set(self.combo_active) | self.combo_wait
+        self.combo_active.clear()
+        self.combo_wait.clear()
+        self.combo_used.clear()
+        return out
+
+    def _tap(self, name, default):
+        """A button acted on only when released quickly (Power, F): its action pressed and let go."""
+        if self.mode != "desktop":
+            return [("cmd", default)] if default != "none" else []
+        action = self.bind.get(name, default)
+        if action == "power_menu" or action in LEVEL_CMDS:
+            return [("cmd", action)]
+        return self._binding(name, True) + self._binding(name, False)
+
+    def _release_all_desktop(self, names=None):
         out = []
         for name in list(self.held):
-            if name in BUTTONS and name not in ("f",):
+            if name in BINDABLE and name not in ("f", "power") and (names is None or name in names):
                 action = self._binding_of(name)
                 if action.startswith("click_"):
                     out.append(("mouse", action[len("click_"):], False))
@@ -418,6 +513,9 @@ class Core:
 
     def _enter_gamepad(self):
         out = self._release_all_desktop()
+        out += self._release_combos()
+        self.dpad_bound.clear()            # released just now; their release comes in gamepad mode
+        self.level_bound.clear()
         self.mode = "gamepad"
         self.start_fired = False
         # The Start press that triggered the switch must not reach the pad.

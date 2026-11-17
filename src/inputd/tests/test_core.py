@@ -523,7 +523,7 @@ def test_reconfigure_releases_osk_key():
     c = Core()
     c.set_osk_visible(True)
     assert c.button("a", True, 0.0) == [("osk", "press")]
-    out = c.reconfigure({}, {})
+    out = c.reconfigure({}, {"a": "key:KEY_ENTER"})            # A's binding changes under it
     assert ("osk", "release") in out
     assert c.button("a", False, 0.1) == []
 
@@ -655,6 +655,142 @@ def test_config_new_options_validated():
                             "r3 = launch:org.xfce.mousepad\nselect = click_back\n")
     assert s == {"natural_scroll": True, "pad_layout": "label"}
     assert b == {"y": "combo:KEY_LEFTCTRL+KEY_C", "r3": "launch:org.xfce.mousepad", "select": "click_back"}
+
+
+def test_reconfigure_keeps_a_held_button_whose_binding_did_not_change():
+    """Dragging the Controls app's vibration slider holds A while the profile is saved: the drag
+    must not be cut (2026-11-17)."""
+    c = Core()
+    assert c.button("a", True, 0.0) == [("mouse", "left", True)]
+    assert c.reconfigure({"haptic_strength": 0.5}, {}) == []
+    assert c.button("a", False, 0.2) == [("mouse", "left", False)]
+
+
+def test_reconfigure_keeps_the_osk_key_when_bindings_stay():
+    c = Core()
+    c.set_osk_visible(True)
+    c.button("a", True, 0.0)
+    assert c.reconfigure({"scroll_speed": 3.0}, {"y": "copy"}) == []
+    assert c.button("a", False, 0.1) == [("osk", "release")]
+
+
+# ---- the formerly fixed controls (Controls app, Advanced)
+def test_dpad_direction_bound_to_a_key_and_others_keep_the_pointer():
+    c = Core(bindings={"up": "key:KEY_UP"})
+    assert c.button("up", True, 0.0) == [("key", "KEY_UP", True)]
+    out, t = run_ticks(c, 0.0, 0.1)
+    assert not any(a[0] == "rel" for a in out)              # no pointer motion from it
+    assert c.button("up", False, t) == [("key", "KEY_UP", False)]
+    c.button("right", True, t)
+    out, _ = run_ticks(c, t, 0.1)
+    assert any(a[0] == "rel" and a[1] > 0 for a in out)
+
+
+def test_dpad_still_moves_the_keyboard_selection():
+    c = Core(bindings={"up": "key:KEY_UP"})
+    c.set_osk_visible(True)
+    assert c.button("up", True, 0.0) == [("osk", "move", 0, -1)]
+
+
+def test_volume_rebound_and_f_plus_volume_still_brightness():
+    c = Core(bindings={"vol_up": "key:KEY_PAGEUP", "vol_down": "brightness_down"})
+    assert c.button("vol_up", True, 0.0) == [("key", "KEY_PAGEUP", True)]
+    assert c.button("vol_up", False, 0.1) == [("key", "KEY_PAGEUP", False)]
+    assert c.button("vol_down", True, 0.2) == [("cmd", "brightness_down")]
+    c.button("vol_down", False, 0.3)
+    c.button("f", True, 0.4)
+    assert c.button("vol_up", True, 0.5) == [("cmd", "brightness_up")]
+
+
+def test_f_tap_and_power_tap_bindings_hold_still_shuts_down():
+    c = Core(bindings={"f": "osk_toggle", "power": "key:KEY_ESC"})
+    c.button("f", True, 0.0)
+    assert c.button("f", False, 0.2) == [("osk", "toggle")]
+    c.button("power", True, 1.0)
+    assert c.button("power", False, 1.2) == [("key", "KEY_ESC", True), ("key", "KEY_ESC", False)]
+    c.button("power", True, 2.0)
+    out, _ = run_ticks(c, 2.0, 3.2)
+    assert ("shutdown",) in out
+
+
+def test_gamepad_mode_keeps_dpad_vol_and_power():
+    c = Core(bindings={"up": "key:KEY_UP", "vol_up": "click_left", "power": "none", "f": "copy"})
+    c.button("start", True, 0.0)
+    c.button("start", False, 0.1)
+    assert c.button("up", True, 0.2)[0][0] == "pad_abs"
+    assert c.button("vol_up", True, 0.3) == [("cmd", "volume_up")]
+    c.button("power", True, 0.4)
+    assert c.button("power", False, 0.5) == [("cmd", "power_menu")]
+    c.button("f", True, 0.6)
+    assert c.button("f", False, 0.7) == []
+
+
+def test_dpad_bound_key_released_on_gamepad_switch_and_pointer_back_after():
+    c = Core(bindings={"up": "key:KEY_UP"})
+    c.button("up", True, 0.0)
+    out = c.button("start", True, 0.1)
+    assert ("key", "KEY_UP", False) in out
+    c.button("start", False, 0.2)
+    c.button("up", False, 0.3)
+    c.reconfigure({}, {})                                     # up back to the pointer
+    c.button("start", True, 0.4)                             # (gamepad: hold Start to leave)
+    run_ticks(c, 0.4, 1.2)
+    c.button("start", False, 1.7)
+    assert c.mode == "desktop"
+    c.button("up", True, 2.0)
+    out, _ = run_ticks(c, 2.0, 0.1)
+    assert any(a[0] == "rel" and a[2] < 0 for a in out)
+
+
+def test_minimal_check_counts_the_dpad_only_with_all_four_on_the_pointer():
+    from rg35xxh_inputd import config
+    assert config.minimal_problems({"deadzone": 0.9}, {}) == []
+    assert len(config.minimal_problems({"deadzone": 0.9}, {"left": "key:KEY_LEFT"})) == 1
+
+
+def test_config_pointer_only_for_dpad():
+    _, b, _, _ = _load_conf("[desktop]\nup = pointer\na = pointer\npower = key:KEY_ESC\nvol_up = brightness_up\n")
+    assert b == {"up": "pointer", "power": "key:KEY_ESC", "vol_up": "brightness_up"}
+
+
+# ---- combinations (hold-modifier style)
+def test_combo_fires_instead_of_the_second_and_first_taps_alone():
+    c = Core(bindings={"l1+a": "key:KEY_SYSRQ"})
+    assert c.button("l1", True, 0.0) == []                     # waits: L1 starts a combination
+    assert c.button("a", True, 0.1) == [("key", "KEY_SYSRQ", True)]
+    assert c.button("a", False, 0.2) == [("key", "KEY_SYSRQ", False)]
+    assert c.button("l1", False, 0.3) == []                    # used by the combination: no Esc
+    c.button("l1", True, 1.0)
+    assert c.button("l1", False, 1.1) == [("key", "KEY_ESC", True), ("key", "KEY_ESC", False)]
+    assert c.button("a", True, 2.0) == [("mouse", "left", True)]  # A alone: unchanged
+
+
+def test_combo_with_f_as_the_first_and_f_plus_volume_still_brightness():
+    c = Core(bindings={"f+x": "osk_toggle", "f": "copy"})
+    c.button("f", True, 0.0)
+    assert c.button("x", True, 0.1) == [("osk", "toggle")]
+    c.button("x", False, 0.2)
+    assert c.button("f", False, 0.3) == []                     # no F-tap copy after the combination
+    c.button("f", True, 1.0)
+    assert c.button("vol_up", True, 1.1) == [("cmd", "brightness_up")]
+
+
+def test_combos_off_while_the_keyboard_is_open_and_in_gamepad_mode():
+    c = Core(bindings={"l1+a": "key:KEY_SYSRQ"})
+    c.set_osk_visible(True)
+    c.button("l1", True, 0.0)
+    assert c.button("a", True, 0.1) == [("osk", "press")]
+    d = Core(bindings={"l1+a": "key:KEY_SYSRQ"})
+    d.button("start", True, 0.0)
+    d.button("start", False, 0.1)
+    d.button("l1", True, 0.2)
+    assert d.button("a", True, 0.3) == [("pad_key", "BTN_B", 1)]
+
+
+def test_config_combos_validated():
+    _, b, _, _ = _load_conf("[desktop]\nl1+a = key:KEY_SYSRQ\nf+up = osk_toggle\nvol_up+a = copy\n"
+                            "a+a = copy\npower+a = copy\nl1+r1 = pointer\n")
+    assert b == {"l1+a": "key:KEY_SYSRQ", "f+up": "osk_toggle"}
 
 if __name__ == "__main__":
     failed = 0

@@ -437,3 +437,98 @@ def test_haptic_preview_waits_for_the_new_strength_and_skips_gamepad_mode(monkey
     open(daemon.runtime_flag("rg35xxh-haptic-preview"), "w").close()
     d._haptic_preview()
     assert played == [0.5] and not d.preview_pending
+
+
+def test_stick_feed_only_while_the_app_asks(monkeypatch, tmp_path):
+    import json
+    import time
+    monkeypatch.setattr(daemon, "runtime_flag", lambda name: str(tmp_path / name))
+    d = daemon.Daemon.__new__(daemon.Daemon)
+    d.core = daemon.Core()
+    d.stick_feed = False
+    d._stick_feed_check()
+    assert not d.stick_feed
+    (tmp_path / daemon.STICK_WANT).touch()
+    d._stick_feed_check()
+    assert d.stick_feed
+    d.core.axes["lx"] = 0.5
+    d._stick_feed_write()
+    data = json.loads((tmp_path / daemon.STICK_FEED).read_text())
+    assert data["lx"] == 0.5 and data["deadzone"] == 0.12 and data["mode"] == "desktop"
+    old = time.time() - 5                               # the app stopped refreshing it
+    os.utime(tmp_path / daemon.STICK_WANT, (old, old))
+    d._stick_feed_check()
+    assert not d.stick_feed and not (tmp_path / daemon.STICK_FEED).exists()
+
+
+def _macro_daemon(monkeypatch, tmp_path):
+    from rg35xxh_inputd import macros
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    d = daemon.Daemon.__new__(daemon.Daemon)
+    d.core = daemon.Core()
+    d.macro = None
+    d.rec_state = None
+    d.keyboard = object()
+    d.notes = []
+    d._notify = lambda key, title, body, ms: d.notes.append((key, title, ms))
+    d.ran, d.typed, timers = [], [], []
+    d._run = d.ran.extend
+    d._type_combo = lambda mods, key: d.typed.append((tuple(mods), key))
+    monkeypatch.setattr(daemon.GLib, "timeout_add", lambda ms, fn, *a: timers.append((ms, fn)) or len(timers),
+                        raising=False)
+    monkeypatch.setattr(daemon.GLib, "source_remove", lambda tid: None, raising=False)
+    return d, macros, timers
+
+
+def test_macro_plays_steps_waits_and_text(monkeypatch, tmp_path):
+    d, macros, timers = _macro_daemon(monkeypatch, tmp_path)
+    macros.save("m", [("key", "KEY_A"), ("wait", 0.5), ("text", "Hi"), ("down", "KEY_LEFTSHIFT")])
+    d._macro_toggle("m")
+    assert d.ran == [("key", "KEY_A", True), ("key", "KEY_A", False)]
+    assert timers[-1][0] == 500                     # the wait
+    timers[-1][1]()                                 # after the wait: the text, then the held key
+    assert d.typed == [(("KEY_LEFTSHIFT",), "KEY_H"), ((), "KEY_I")]
+    assert d.macro is None                          # ended ...
+    assert d.notes == [("macro", "Running macro m", 0), ("macro", "Macro m finished", 2500)]
+    assert d.ran[-1] == ("key", "KEY_LEFTSHIFT", False)   # ... letting go of what it held
+
+
+def test_macro_same_button_again_stops_it(monkeypatch, tmp_path):
+    d, macros, timers = _macro_daemon(monkeypatch, tmp_path)
+    macros.save("m", [("press", "left"), ("wait", 5)])
+    d._macro_toggle("m")
+    assert d.macro is not None
+    d._macro_toggle("m")
+    assert d.macro is None and d.ran[-1] == ("mouse", "left", False)
+    assert d.notes[-1] == ("macro", "Macro m stopped", 2500)
+
+
+def test_recording_armed_toggled_and_saved(monkeypatch, tmp_path):
+    import json
+    import time as _t
+    d, macros, _ = _macro_daemon(monkeypatch, tmp_path)
+    monkeypatch.setattr(daemon, "runtime_flag", lambda name: str(tmp_path / name))
+    monkeypatch.setattr(daemon, "spawn", lambda *a: None)
+    d.rec, d.rec_req, d.rec_mtime = None, None, None
+    del d._run                                       # the real _run, to see what it records
+    d.mouse = type("M", (), {"write": lambda *a: None, "syn": lambda *a: None})()
+    d.keyboard = type("K", (), {"write": lambda *a: None, "syn": lambda *a: None})()
+    d.layout = daemon.PointerLayout()
+    d.osk_visible = False
+    req = tmp_path / "rg35xxh-macro-rec.json"
+    req.write_text(json.dumps({"cmd": "arm", "name": "Rec 1", "pointer": False}))
+    d._rec_check()
+    assert d.rec_state == "armed"
+    d._rec_toggle()
+    assert d.rec_state == "recording"
+    d._run([("mouse", "left", True), ("mouse", "left", False), ("rel", 5, 5)])
+    d._rec_toggle()
+    assert d.rec_state == "paused"
+    d._run([("mouse", "right", True), ("mouse", "right", False)])   # paused: not recorded
+    _t.sleep(0.01)
+    req.write_text(json.dumps({"cmd": "stop"}))
+    os.utime(req, ns=(_t.time_ns(), _t.time_ns() + 10**6))
+    d._rec_check()
+    assert d.rec_state is None
+    assert macros.load("Rec 1")[0] == [("click", "left")]          # the move: pointer was off
+    assert json.loads((tmp_path / "rg35xxh-macro-rec.status").read_text())["state"] == "saved"

@@ -30,6 +30,7 @@ from evdev import ff
 from gi.repository import GLib
 
 from . import config
+from . import macros
 from .core import PAD_AXES, Core, PointerLayout
 
 log = logging.getLogger("rg35xxh-inputd")
@@ -85,7 +86,10 @@ SPRING_FREQ, SPRING_DECAY, SPRING_AMP_PX = 8.33, 3.85, 2.6    # Hz, 1/s, px
 SPRING_SWINGS, SPRING_STEP_MS = 6, 60                         # 60 ms = half a period
 SPRING_PULSE_MS, SPRING_FLOOR = 40, 0.4                       # pulse length; weakest strength
 HAPTIC_LAG_MS = 70
-HAPTIC_RESCALE_MIN_S = 0.3     # haptic_strength changes: re-upload the pulses at most this often
+HAPTIC_RESCALE_MIN_S = 0.3
+STICK_WANT, STICK_FEED = "rg35xxh-controls-sticks.want", "rg35xxh-controls-sticks"
+STICK_WANT_MAX_AGE = 2.0       # s: the app refreshes the want flag every second
+STICK_FEED_TICKS = 3           # write every 3rd 10 ms tick: ~30 times a second     # haptic_strength changes: re-upload the pulses at most this often
 
 
 def _spring(t):
@@ -215,6 +219,12 @@ class Daemon:
         self.ui_retry = None        # respawn timer after the UI process ended
         self.ui_backoff = 2         # s, doubled per failed start (no display after a log-out)
         self.osk_visible = False
+        self.stick_feed = False     # Controls app's stick view open (_stick_feed_check)
+        self.macro = None           # the macro being played (_macro_*)
+        self.rec_state = None       # macro recording: None | "armed" | "recording" | "paused"
+        self.rec = None
+        self.rec_req = None         # (name, pointer) from the Controls app
+        self.rec_mtime = None
         self.ticks = 0
         for flag in ("rg35xxh-gamepad-mode", "rg35xxh-bt-mode", "rg35xxh-wired-mode", INPUTMODE_FRAME):
             set_flag(flag, False)
@@ -526,6 +536,13 @@ class Daemon:
                     self.core.set_osk_visible(self.osk_visible)
                 elif kind == "type":
                     self._type_combo(args[0], args[1])
+                    if self.rec_state == "recording":     # typed on the on-screen keyboard
+                        now = time.monotonic()
+                        for m in args[0]:
+                            self._rec_event(now, ("down", m))
+                        self._rec_event(now, ("key", args[1]))
+                        for m in reversed(args[0]):
+                            self._rec_event(now, ("up", m))
             except Exception as e:          # bad line or unknown key: ignore it
                 log.warning("on-screen keyboard process: %r: %s", line[:80], e)
         return True
@@ -665,7 +682,11 @@ class Daemon:
             self._config_reload()          # before the requests: a preview plays the new strength
             self._haptic_requests()
             self._haptic_preview()
+            self._stick_feed_check()
+            self._rec_check()
             self.core.set_osk_visible(self.osk_visible)
+        if self.stick_feed and self.ticks % STICK_FEED_TICKS == 0:
+            self._stick_feed_write()
         self._run(self.core.tick(now))
         return True
 
@@ -784,6 +805,8 @@ class Daemon:
         mouse_dirty = False
         for a in actions:
             kind = a[0]
+            if self.rec_state == "recording":
+                self._rec_from_action(a)
             if kind == "rel":
                 self.mouse.write(E.EV_REL, E.REL_X, a[1])
                 self.mouse.write(E.EV_REL, E.REL_Y, a[2])
@@ -812,6 +835,10 @@ class Daemon:
                 self._clipboard(a[1])
             elif kind == "launch":
                 self._launch(a[1])
+            elif kind == "macro":
+                self._macro_toggle(a[1])
+            elif kind == "macro_record":
+                self._rec_toggle()
             elif kind == "osk" and not self.ui:
                 log.warning("on-screen keyboard requested but unavailable")
             elif kind == "osk":
@@ -826,6 +853,7 @@ class Daemon:
                     self._ui_send("osk", a[1])
             elif kind == "mode":
                 if a[1] == "gamepad":
+                    self._macro_stop("gamepad mode")          # nothing a macro holds stays down
                     if self.osk_visible:
                         self._ui_send("osk", "hide")
                         self.osk_visible = False
@@ -990,6 +1018,253 @@ class Daemon:
             return
         log.info("haptic requested")
         self._haptic()
+
+    # --------------------------------------------------------------- macros
+    # Play: a "macro:<name>" binding (macros.py). Steps run from GLib timers, a few per 10 ms, and
+    # go through _run like any button's actions; whatever the macro holds down is tracked and let
+    # go at the end, on a stop (the same button again), on gamepad mode and on exit.
+    MACRO_BATCH = 20                # steps (or typed characters) per 10 ms at most
+
+    def _macro_toggle(self, name):
+        if self.macro:
+            was = self.macro["name"]
+            self._macro_stop("stopped")
+            if was == name:
+                return
+        if not macros.NAME_RE.match(name):
+            return
+        try:
+            steps, problems = macros.load(name, config._known_key)
+        except OSError:
+            spawn("notify-send", "-t", "3000", "Controls", f"No macro named {name}")
+            log.warning("macro %r: not found", name)
+            return
+        for p in problems:
+            log.warning("macro %r: %s", name, p)
+        if not steps:
+            return
+        log.info("macro %r: %d steps", name, len(steps))
+        self._notify("macro", f"Running macro {name}", "Press its button again to stop it", 0)
+        self.macro = {"name": name, "steps": steps, "i": 0, "keys": set(), "buttons": set(), "timer": None,
+                      "text": None}
+        self._macro_tick()
+
+    def _macro_tick(self):
+        m = self.macro
+        if m is None:
+            return False
+        m["timer"] = None
+        done = 0
+        while done < self.MACRO_BATCH:
+            if m["text"]:                                  # typing a text step, a few letters a tick
+                ch, m["text"] = m["text"][0], m["text"][1:]
+                k = macros.char_key(ch)
+                if k:
+                    self._type_combo(*k)
+                done += 1
+                continue
+            if m["i"] >= len(m["steps"]):
+                self._macro_stop(None)
+                return False
+            st = m["steps"][m["i"]]
+            m["i"] += 1
+            if st[0] == "wait":
+                m["timer"] = GLib.timeout_add(max(10, int(st[1] * 1000)), self._macro_tick)
+                return False
+            self._macro_step(st)
+            done += 1
+        m["timer"] = GLib.timeout_add(10, self._macro_tick)
+        return False
+
+    def _macro_step(self, st):
+        m, w = self.macro, st[0]
+        if w == "key":
+            self._run([("key", st[1], True), ("key", st[1], False)])
+        elif w == "combo":
+            ks = st[1].split("+")
+            self._run([("key", k, True) for k in ks] + [("key", k, False) for k in reversed(ks)])
+        elif w in ("down", "up"):
+            (m["keys"].add if w == "down" else m["keys"].discard)(st[1])
+            self._run([("key", st[1], w == "down")])
+        elif w == "click":
+            self._run([("mouse", st[1], True), ("mouse", st[1], False)])
+        elif w in ("press", "release"):
+            (m["buttons"].add if w == "press" else m["buttons"].discard)(st[1])
+            self._run([("mouse", st[1], w == "press")])
+        elif w == "text":
+            m["text"] = st[1]
+        elif w == "move":
+            self._run([("rel", st[1], st[2])])
+        elif w == "scroll":
+            self._run([("wheel", st[1], st[2])])
+        elif w == "launch":
+            self._run([("launch", st[1])])
+        elif w == "do":
+            self._run(self.core._action(st[1], True))
+
+    def _macro_stop(self, why):
+        m = self.macro
+        if m is None:
+            return
+        self.macro = None
+        if m["timer"]:
+            GLib.source_remove(m["timer"])
+        rel = [("key", k, False) for k in m["keys"]] + [("mouse", b, False) for b in m["buttons"]]
+        if rel and getattr(self, "keyboard", None):
+            self._run(rel)
+        if why:
+            log.info("macro %r: %s at step %d", m["name"], why, m["i"])
+        self._notify("macro", f"Macro {m['name']} " + ("finished" if why is None else "stopped"),
+                     "" if why is None else ("by its button" if why == "stopped" else why), 2500)
+
+    # Record: the Controls app arms a recording ($XDG_RUNTIME_DIR/rg35xxh-macro-rec.json, {"cmd":
+    # "arm", "name", "pointer"}), the "macro_record" button starts / pauses it from any app, and the
+    # app's Stop ({"cmd": "stop"}) saves it as macros/<name>.macro ({"cmd": "cancel"}: discard).
+    # The state is written to rg35xxh-macro-rec.status for the app.
+    # Notifications that replace each other ("macro": running -> finished; "rec": its states). One
+    # worker thread sends them in order with notify-send -p / -r, so a notification sent while the
+    # previous one's id is not known yet still replaces it, and the main loop never waits.
+    def _notify(self, key, title, body, ms):
+        q = getattr(self, "note_q", None)
+        if q is None:
+            import queue
+            q = self.note_q = queue.Queue()
+            ids = {}
+
+            def work():
+                while True:
+                    k, t, b, ms_ = q.get()
+                    argv = ["notify-send", "-p", "-t", str(ms_)] + (["-r", str(ids[k])] if k in ids else []) + [t, b]
+                    try:
+                        out = subprocess.run(argv, capture_output=True, text=True, timeout=5,
+                                             stdin=subprocess.DEVNULL).stdout.strip()
+                        if out.isdigit():
+                            ids[k] = int(out)
+                    except (OSError, subprocess.SubprocessError) as e:
+                        log.warning("notification: %s", e)
+            threading.Thread(target=work, name="notify", daemon=True).start()
+        q.put((key, title, body, ms))
+
+    def _rec_check(self):
+        path = runtime_flag("rg35xxh-macro-rec.json")
+        try:
+            mtime = os.stat(path).st_mtime_ns
+        except OSError:
+            mtime = None
+        if mtime == self.rec_mtime:
+            return
+        self.rec_mtime = mtime
+        if mtime is None:
+            return
+        try:
+            with open(path) as f:
+                req = json.load(f)
+        except (OSError, ValueError):
+            return
+        cmd = req.get("cmd")
+        if cmd == "arm" and macros.NAME_RE.match(str(req.get("name", ""))):
+            self.rec_req = (req["name"], bool(req.get("pointer")))
+            self.rec = macros.Recorder(self.rec_req[1], timing=bool(req.get("timing", True)))
+            self.rec_state = "armed"
+            log.info("macro recording armed: %r (pointer %s)", *self.rec_req)
+        elif cmd in ("stop", "cancel") and self.rec_state:
+            steps = self.rec.finish()
+            name = self.rec_req[0]
+            self.rec_state, self.rec = None, None
+            if cmd == "stop" and steps:
+                try:
+                    macros.save(name, steps)
+                    self._rec_status("saved", len(steps), name)
+                    log.info("macro recording saved: %r, %d steps", name, len(steps))
+                    return
+                except (OSError, ValueError) as e:
+                    log.warning("macro recording: %s", e)
+            self._rec_status("empty" if cmd == "stop" else "cancelled", 0, name)
+            return
+        self._rec_status(self.rec_state, 0)
+
+    def _rec_status(self, state, steps=None, name=None):
+        data = {"state": state, "steps": len(self.rec.steps) if self.rec else (steps or 0),
+                "name": name or (self.rec_req[0] if self.rec_req else None)}
+        try:
+            with open(runtime_flag("rg35xxh-macro-rec.status.tmp"), "w") as f:
+                json.dump(data, f)
+            os.replace(runtime_flag("rg35xxh-macro-rec.status.tmp"), runtime_flag("rg35xxh-macro-rec.status"))
+        except OSError as e:
+            log.warning("macro recording status: %s", e)
+
+    def _rec_toggle(self):
+        if self.rec_state is None:
+            spawn("notify-send", "-t", "4000", "Macro recording",
+                  "Start a recording in Controls > Advanced > Macros first")
+            return
+        if self.rec_state in ("armed", "paused"):
+            self.rec.resume(time.monotonic())
+            self.rec_state = "recording"
+            self._notify("rec", "Recording macro", "Tap the record button to pause", 2500)
+        else:
+            self.rec_state = "paused"
+            self._notify("rec", "Macro recording paused", "Tap again to go on, or stop it in Controls", 2500)
+        log.info("macro recording: %s", self.rec_state)
+        self._rec_status(self.rec_state)
+
+    def _rec_event(self, t, step):
+        if not self.rec.event(t, step):              # full
+            self.rec_state = "paused"
+            spawn("notify-send", "-t", "4000", "Macro recording paused", "Longest macro reached: stop it in Controls")
+            self._rec_status("full")
+
+    def _rec_from_action(self, a):
+        t, kind = time.monotonic(), a[0]
+        if kind == "key":
+            self._rec_event(t, ("down" if a[2] else "up", a[1]))
+        elif kind == "mouse":
+            self._rec_event(t, ("press" if a[2] else "release", a[1]))
+        elif kind == "rel":
+            self._rec_event(t, ("move", a[1], a[2]))
+        elif kind == "wheel":
+            self._rec_event(t, ("scroll", a[1], a[2]))
+        elif kind == "launch":
+            self._rec_event(t, ("launch", a[1]))
+        elif kind == "clipboard":
+            self._rec_event(t, ("do", a[1]))
+        elif kind == "cmd" and a[1] in macros.DO:
+            self._rec_event(t, ("do", a[1]))
+        elif kind == "osk" and a[1] == "toggle":
+            self._rec_event(t, ("do", "osk_toggle"))
+
+    def _stick_feed_check(self):
+        """The Controls app's live stick view: while $XDG_RUNTIME_DIR/rg35xxh-controls-sticks.want
+        is fresh (the app touches it every second; older than 2 s = the app is gone), write the
+        sticks to rg35xxh-controls-sticks about 30 times a second. Nothing is written otherwise."""
+        try:
+            fresh = time.time() - os.stat(runtime_flag(STICK_WANT)).st_mtime < STICK_WANT_MAX_AGE
+        except OSError:
+            fresh = False
+        if fresh != self.stick_feed:
+            self.stick_feed = fresh
+            log.info("stick view %s", "on" if fresh else "off")
+            if not fresh:
+                try:
+                    os.unlink(runtime_flag(STICK_FEED))
+                except OSError:
+                    pass
+
+    def _stick_feed_write(self):
+        """One JSON line: the sticks as the pointer and scroll logic see them (-1..1 after the
+        re-centre offset and axis inversion, y down = +), the dead zone and the mode. Written to a
+        temporary file and renamed, so the app never reads half a line."""
+        c = self.core
+        data = {k: round(v, 3) for k, v in c.axes.items()}
+        data.update(deadzone=c.s["deadzone"], mode=c.mode)
+        path = runtime_flag(STICK_FEED)
+        try:
+            with open(path + ".tmp", "w") as f:
+                f.write(json.dumps(data) + "\n")
+            os.replace(path + ".tmp", path)
+        except OSError as e:
+            log.warning("stick view: %s", e)
+            self.stick_feed = False
 
     def _haptic_preview(self):
         """The Controls app's vibration slider: $XDG_RUNTIME_DIR/rg35xxh-haptic-preview asks for the
@@ -1430,6 +1705,8 @@ class Daemon:
             os.unlink(HEARTBEAT)                    # disarm the watchdog: exiting, not hung
         except FileNotFoundError:                   # (not armed yet: stopped during start-up)
             pass
+        if get("macro"):
+            step("macro", self._macro_stop, "daemon exit")      # let go of what it holds
         if get("ui_retry"):
             step("ui_retry", GLib.source_remove, get("ui_retry"))
             self.ui_retry = None

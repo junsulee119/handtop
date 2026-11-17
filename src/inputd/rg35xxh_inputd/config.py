@@ -35,7 +35,14 @@ BUTTON_NAMES = tuple(DEFAULT_BINDINGS)
 HARDWARE_KEYS = ("invert_lx", "invert_ly", "invert_rx", "invert_ry")
 _ACTION_RE = re.compile(r"^(none|click_(left|right|middle|back|forward)|key:KEY_[A-Z0-9_]+"
                         r"|combo:KEY_[A-Z0-9_]+(\+KEY_[A-Z0-9_]+){1,3}|launch:[A-Za-z0-9][A-Za-z0-9._-]{0,99}"
-                        r"|copy|paste|osk_toggle|mode_gamepad|power_menu)$")
+                        r"|copy|paste|osk_toggle|mode_gamepad|power_menu|pointer"
+                        r"|volume_up|volume_down|brightness_up|brightness_down"
+                        r"|macro:[A-Za-z0-9][A-Za-z0-9 _.-]{0,39}|macro_record)$")
+DPAD_NAMES = ("up", "down", "left", "right")
+# Combinations: the first button is held like a modifier (face, shoulder, stick press, Select,
+# Start, F), the second is any button but Power and Volume (F + Volume stays brightness).
+COMBO_FIRST = ("a", "b", "x", "y", "l1", "r1", "l2", "r2", "l3", "r3", "select", "start", "f")
+COMBO_SECOND = COMBO_FIRST[:-1] + DPAD_NAMES
 BOOL_SETTINGS = ("natural_scroll", "swap_sticks")
 CHOICE_SETTINGS = {"pad_layout": ("position", "label")}
 
@@ -85,14 +92,16 @@ MAX_USABLE_DEADZONE = 0.6      # beyond this the stick hardly moves the pointer
 
 def minimal_problems(settings=None, bindings=None):
     """What a configuration takes away of the minimal controls: a list of short sentences, empty
-    when the pointer still moves (stick or D-pad) and some button still gives a left click."""
+    when the pointer still moves (stick, or the D-pad with all four directions on the pointer) and
+    some button still gives a left click."""
     s = dict(DEFAULT_SETTINGS)
     s.update(settings or {})
     b = dict(DEFAULT_BINDINGS)
     b.update(bindings or {})
     out = []
     stick = s["deadzone"] <= MAX_USABLE_DEADZONE and s["pointer_max_speed"] >= MIN_POINTER_SPEED
-    dpad = s["dpad_speed_ratio"] * s["pointer_max_speed"] >= MIN_POINTER_SPEED
+    dpad = (s["dpad_speed_ratio"] * s["pointer_max_speed"] >= MIN_POINTER_SPEED
+            and all(b[d] == "pointer" for d in DPAD_NAMES))
     if not (stick or dpad):
         out.append("The pointer would hardly move, with the stick or the D-pad.")
     if "click_left" not in b.values():
@@ -200,12 +209,22 @@ def parse(cp, label="config"):
     if cp.has_section("desktop"):
         for k, v in cp.items("desktop"):
             v = v.strip()
-            if k not in BUTTON_NAMES:
+            if "+" in k:                                  # a combination: first+second
+                first, _, second = k.partition("+")
+                if first not in COMBO_FIRST or second not in COMBO_SECOND or first == second:
+                    log.warning("%s: desktop.%s: not a combination of two buttons (ignored)", label, k)
+                elif not _ACTION_RE.match(v) or v == "pointer":
+                    log.warning("%s: desktop.%s: unknown action %r", label, k, v)
+                else:
+                    bindings[k] = v
+            elif k not in BUTTON_NAMES:
                 log.warning("%s: desktop.%s: unknown button (valid: %s)", label, k, ", ".join(BUTTON_NAMES))
             elif not _ACTION_RE.match(v):
                 log.warning("%s: desktop.%s: unknown action %r", label, k, v)
             elif v.startswith("key:") and not _known_key(v[4:]):
                 log.warning("%s: desktop.%s: unknown key %r (ignored)", label, k, v[4:])
+            elif v == "pointer" and k not in DPAD_NAMES:
+                log.warning("%s: desktop.%s: pointer is for the D-pad directions only (ignored)", label, k)
             elif v.startswith("combo:") and not all(_known_key(x) for x in v[6:].split("+")):
                 log.warning("%s: desktop.%s: unknown key in %r (ignored)", label, k, v)
             else:
