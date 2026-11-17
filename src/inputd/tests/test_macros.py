@@ -60,7 +60,7 @@ def test_recorder_taps_waits_moves_and_pause():
     r = M.Recorder(pointer=True)
     r.resume(0.0)
     r.event(0.00, ("down", "KEY_A"))
-    r.event(0.05, ("up", "KEY_A"))                  # 50 ms later: a wait stays between them
+    r.event(0.05, ("up", "KEY_A"))                  # let go within 0.3 s: one tap
     r.event(0.50, ("press", "left"))
     r.event(0.50, ("release", "left"))              # nothing between: one click
     for i in range(5):
@@ -69,7 +69,7 @@ def test_recorder_taps_waits_moves_and_pause():
     r.event(1.31, ("scroll", -120, 0))
     r.resume(5.0)                                   # paused 1.31 .. 5.0: not a wait
     r.event(5.0, ("do", "copy"))
-    assert r.finish() == [("down", "KEY_A"), ("wait", 0.05), ("up", "KEY_A"), ("wait", 0.45),
+    assert r.finish() == [("key", "KEY_A"), ("wait", 0.5),        # the hold time joins the wait
                           ("click", "left"), ("wait", 0.5), ("move", 10, -5), ("wait", 0.26),
                           ("scroll", -240, 0), ("do", "copy")]
 
@@ -124,3 +124,23 @@ def test_recorder_stops_at_the_waiting_limit(tmp_path, monkeypatch):
     macros.save("Long", steps)
     loaded, problems = macros.load("Long")
     assert loaded == steps and not problems
+
+
+def test_recorder_quick_press_is_a_tap_a_long_one_stays_held():
+    r = M.Recorder(pointer=False)
+    r.resume(0.0)
+    r.event(0.0, ("down", "KEY_ESC"))
+    r.event(0.15, ("up", "KEY_ESC"))                 # a real tap, as recorded on the device
+    r.event(0.36, ("down", "KEY_ESC"))
+    r.event(0.52, ("up", "KEY_ESC"))
+    r.event(1.0, ("down", "KEY_LEFTSHIFT"))
+    r.event(2.0, ("up", "KEY_LEFTSHIFT"))            # held 1 s: kept as a hold
+    r.event(2.1, ("press", "left"))
+    r.event(2.2, ("down", "KEY_A"))                  # something between: no merging
+    r.event(2.25, ("release", "left"))
+    r.event(2.3, ("up", "KEY_A"))
+    assert r.finish() == [("key", "KEY_ESC"), ("wait", 0.36), ("key", "KEY_ESC"), ("wait", 0.64),
+                          ("down", "KEY_LEFTSHIFT"), ("wait", 1.0), ("up", "KEY_LEFTSHIFT"),
+                          ("wait", 0.1), ("press", "left"), ("wait", 0.1), ("down", "KEY_A"),
+                          ("wait", 0.05), ("release", "left"), ("wait", 0.05), ("up", "KEY_A")]
+    assert abs(r.waited - sum(s[1] for s in r.steps if s[0] == "wait")) < 1e-9

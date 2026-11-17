@@ -89,7 +89,8 @@ class AdvancedMixin(ComboMacroMixin):
             lock = self.is_locked("desktop", button)
             lab.set_text(A.describe(self.values.bindings[button], self.app_names)
                          + ("  (boot partition file)" if lock else ""))
-            btn.set_sensitive(not lock)
+            self.lock_mark(btn, "desktop", button)
+
         self._fill_profile_list()
         self.combos_refresh()
         self.macros_refresh()
@@ -104,6 +105,7 @@ class AdvancedMixin(ComboMacroMixin):
         g = self._grid(inner)
         for i, (sec, key, text, made) in enumerate(rows):
             widget, get, put = made
+            self.ctl_names[(sec, key)] = text
             widget.set_hexpand(True)
             g.attach(_lab(text), 0, i, 1, 1)
             g.attach(getattr(widget, "rg_box", widget), 1, i, 1, 1)
@@ -216,6 +218,8 @@ class AdvancedMixin(ComboMacroMixin):
             cb = Gtk.CheckButton(label=text)
             g.attach(cb, 1 + i, 0, 1, 1)
             self.ctl.setdefault(("hardware", k), []).append((cb, cb.get_active, cb.set_active))
+            self.ctl_names[("hardware", k)] = "Invert " + text
+
             cb.connect("toggled", lambda b, key=k: None if self._filling_settings else
                        self._user("hardware", key, b.get_active(), b))
         rc = Gtk.Button(label="Re-center sticks", halign=Gtk.Align.START)

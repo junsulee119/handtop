@@ -122,9 +122,9 @@ class ComboMacroMixin:
             ch.connect("clicked", lambda _b, k=key: self.open_action(k, origin="advanced"))
             de = Gtk.Button(label="Delete")
             de.connect("clicked", lambda _b, k=key: self._combo_delete(k))
-            locked = self.is_locked("desktop", key)
-            ch.set_sensitive(not locked)
-            de.set_sensitive(not locked)
+            self.lock_mark(ch, "desktop", key)
+            self.lock_mark(de, "desktop", key)
+
             row.pack_start(ch, False, False, 0)
             row.pack_start(de, False, False, 0)
             self.combo_box.add(row)

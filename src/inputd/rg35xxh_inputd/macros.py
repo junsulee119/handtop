@@ -20,6 +20,8 @@ import re
 MAX_STEPS = 1000
 MAX_WAIT = 300.0
 MAX_BYTES = 65536
+TAP_MAX = 0.3       # recording: a key or button let go within this is one tap (longer: held)
+
 NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 _.-]{0,39}$")
 _KEY = re.compile(r"^KEY_[A-Z0-9_]+$")
 BUTTONS = ("left", "right", "middle", "back", "forward")
@@ -218,6 +220,13 @@ class Recorder:
             return True
         self._flush_move()
         self._gap(t)
+        tap = self._tap_of(step)
+        if tap:                                            # a quick press: one tap step
+            w = self.steps.pop()[1]
+            self.waited -= w
+            self.steps[-1] = tap
+            self.last = t - w                              # the hold time counts toward the next wait
+            return True
         prev = self.steps[-1] if self.steps else None
         if prev and ((prev[0], step[0]) in (("down", "up"), ("press", "release"))) and prev[1] == step[1]:
             self.steps[-1] = ("key" if step[0] == "up" else "click", step[1])
@@ -228,6 +237,17 @@ class Recorder:
             self.steps.append(step)
             self.st = t
         return True
+
+    def _tap_of(self, step):
+        """For a release that ends a press shorter than TAP_MAX (down, wait, up with nothing else
+        between): the tap step that replaces them; else None. A real press always lasts longer
+        than a wait step's 0.03 s, so without this every tap was recorded as a held key."""
+        if step[0] not in ("up", "release") or len(self.steps) < 2:
+            return None
+        down = ("down" if step[0] == "up" else "press", step[1])
+        if self.steps[-1][0] == "wait" and self.steps[-1][1] < TAP_MAX and self.steps[-2] == down:
+            return ("key" if step[0] == "up" else "click", step[1])
+        return None
 
     def finish(self):
         self._flush_move()

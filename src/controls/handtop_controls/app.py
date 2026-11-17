@@ -33,6 +33,7 @@ CW, CH = art.BW + 8, art.BH + 15
 ACCEL = [(1.0, "Off"), (2.0, "Normal"), (3.0, "Precise")]
 CSS = b"""
 .rg-banner { border: 1px solid alpha(@theme_fg_color, 0.6); border-radius: 4px; padding: 6px 8px; }
+.rg-flash { background-color: alpha(@theme_selected_bg_color, 0.6); }
 .rg-dim { opacity: 0.75; }
 .rg-mapping { border: 1px solid alpha(@theme_fg_color, 0.35); border-radius: 4px; padding: 4px 8px; }
 """
@@ -106,8 +107,19 @@ class App(AdvancedMixin):
         self.win.set_default_size(640, 440)
         self.win.connect("destroy", lambda *a: self.loop.quit())
         self.win.connect("key-press-event", self._key)
+        self.lock_widgets = {}             # greyed by the boot file: widget -> (section, key)
+        self.flash_ids = []
+        self.banner_hide = None
+        outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        outer.pack_start(self._banner(), False, False, 0)
         self.stack = Gtk.Stack()
-        self.win.add(self.stack)
+        outer.pack_start(self.stack, True, True, 0)
+        self.win.add(outer)
+        # A click on something greyed out (locked by the boot file, or everything in rescue mode)
+        # never reaches it; this sees it first and flashes the banner that says why.
+        self.press = Gtk.GestureMultiPress(widget=self.win)
+        self.press.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
+        self.press.connect("pressed", self._press_check)
         self.stack.add_named(self._main_page(), "main")
         self.stack.add_named(self._action_page(), "action")
         self.stack.add_named(self._keys_page(), "keys")
@@ -129,11 +141,15 @@ class App(AdvancedMixin):
         self.values, self.cfg = store.effective()
         self.locked = self.cfg.locked
         off = not self.cfg.app_settings
+        if self.banner_hide:
+            GLib.source_remove(self.banner_hide)
+            self.banner_hide = None
         self.rescue.set_visible(off)
         self.rescue_text.set_text("Controls are in rescue mode: the boot partition's rg35xxh-input.conf "
                                   "says use_app_settings = no, so nothing set here is used. Put the # back "
                                   "in front of that line to use this app again.")
         self.tabs.set_sensitive(not off)
+        self.shield.set_above_child(off)
         self._fill_profiles()
         self._fill_settings()
         self.area.queue_draw()
@@ -142,6 +158,81 @@ class App(AdvancedMixin):
 
     def is_locked(self, sec, key):
         return f"{sec}.{key}" in self.locked
+
+    def lock_mark(self, widget, sec, key):
+        """Grey widget out if the boot file locks sec.key; a click on it then flashes the banner."""
+        locked = self.is_locked(sec, key)
+        widget.set_sensitive(not locked)
+        if locked:
+            self.lock_widgets[widget] = (sec, key)
+        else:
+            self.lock_widgets.pop(widget, None)
+
+    # ---- the banner: rescue mode (always shown), or why a setting is locked (on a click) ----------
+    def _banner(self):
+        self.rescue = Gtk.Box(no_show_all=True, margin=6, margin_bottom=0)
+        self.rescue.get_style_context().add_class("rg-banner")
+        self.rescue_text = _label()
+        self.rescue_text.show()
+        self.rescue.pack_start(self.rescue_text, True, True, 0)
+        return self.rescue
+
+    def _inside(self, widget, x, y):
+        r = widget.translate_coordinates(self.win, 0, 0)
+        if not r or not widget.is_drawable():
+            return False
+        wx, wy = r[-2:]
+        a = widget.get_allocation()
+        return wx <= x < wx + a.width and wy <= y < wy + a.height
+
+    def _press_check(self, _gesture, _n, x, y):
+        if not self.cfg.app_settings:
+            return                                   # rescue mode: the shield over the tabs says it
+        for w, (sec, key) in list(self.lock_widgets.items()):
+
+            if w.get_toplevel() is not self.win:
+                self.lock_widgets.pop(w, None)       # a row that was rebuilt
+            elif not w.get_sensitive() and self._inside(w, x, y):
+                self.show_lock(sec, key)
+                return
+
+    def show_lock(self, sec, key=None):
+        """Flash the banner: the rescue text in rescue mode, else why sec.key can't be changed
+        (shown for 8 s)."""
+        if self.cfg.app_settings and sec:
+            what = A.button_name(key) if sec == "desktop" else self.ctl_names.get((sec, key), key)
+
+            self.rescue_text.set_text(
+                f"{what} is locked: the boot partition's rg35xxh-input.conf sets it ({key} = …), and that "
+                "file wins over this app. Put a # in front of that line to change it here.")
+            self.rescue.show()
+            if self.banner_hide:
+                GLib.source_remove(self.banner_hide)
+            self.banner_hide = GLib.timeout_add(8000, self._banner_off)
+        for i in self.flash_ids:
+            GLib.source_remove(i)
+        ctx = self.rescue.get_style_context()
+        ctx.remove_class("rg-flash")
+        self.flash_ids = []
+
+        def toggle(on):
+            (ctx.add_class if on else ctx.remove_class)("rg-flash")
+            return False
+        for n in range(6):                           # three blinks
+            self.flash_ids.append(GLib.timeout_add(130 * n, toggle, n % 2 == 0))
+
+    def _shield_press(self, *_):
+        if not self.cfg.app_settings:
+            self.show_lock(None)
+            return True
+        return False
+
+    def _banner_off(self):
+
+        self.banner_hide = None
+        if self.cfg.app_settings:
+            self.rescue.hide()
+        return False
 
     def change(self, sec, key, value, preview=False):
         """One setting changed by the user: save it (trial first where needed)."""
@@ -250,12 +341,6 @@ class App(AdvancedMixin):
     # ---- main page -------------------------------------------------------------------------------
     def _main_page(self):
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, margin=6)
-        self.rescue = Gtk.Box(no_show_all=True)
-        self.rescue.get_style_context().add_class("rg-banner")
-        self.rescue_text = _label()
-        self.rescue_text.show()
-        self.rescue.pack_start(self.rescue_text, True, True, 0)
-        box.pack_start(self.rescue, False, False, 0)
         # The profile picker sits at the end of the tab row: 640x480 has no room for its own row.
         head = Gtk.Box(spacing=6, margin_end=4)
         head.pack_start(_label("Profile"), False, False, 0)
@@ -270,8 +355,17 @@ class App(AdvancedMixin):
         self.tabs.append_page(self._buttons_tab(), Gtk.Label(label="Buttons"))
         self.tabs.append_page(self._pointer_tab(), Gtk.Label(label="Pointer & more"))
         self.tabs.set_action_widget(head, Gtk.PackType.END)
-        box.pack_start(self.tabs, True, True, 0)
-        return box
+        # Rescue mode greys the tabs out, and GTK drops clicks on greyed widgets with their own input
+        # window (the picture, the tab row) before anything sees them: this catches them on top.
+        self.shield = Gtk.EventBox(visible_window=False)
+        self.shield.add(self.tabs)
+        self.shield.connect("button-press-event", self._shield_press)
+        box.pack_start(self.shield, True, True, 0)
+        # Scrolls when the banner above makes the window too short for it (normally it fits).
+        sw = Gtk.ScrolledWindow(hscrollbar_policy=Gtk.PolicyType.NEVER)
+        sw.add(box)
+        return sw
+
 
     def _fill_profiles(self):
         self._filling = True
@@ -394,7 +488,7 @@ class App(AdvancedMixin):
         lock = "   (set by the boot partition file)" if self.is_locked("desktop", b) else ""
         self.map_label.set_markup(f"<b>{GLib.markup_escape_text(name)}</b>   {GLib.markup_escape_text(act)}"
                                   f"<small>{lock}</small>")
-        self.change_btn.set_sensitive(not self.is_locked("desktop", self.sel))
+        self.lock_mark(self.change_btn, "desktop", self.sel)
 
     # ---- action list -----------------------------------------------------------------------------
     def _page(self, title_attr):
@@ -436,7 +530,9 @@ class App(AdvancedMixin):
 
     def open_action(self, button, origin="main"):
         if self.is_locked("desktop", button) or not self.cfg.app_settings:
+            self.show_lock("desktop", button)              # says why (rescue mode: flashes that)
             return
+
         self.hh.hover = None                   # back on the picture, nothing stays lit
         self.action_from = origin
         self._fill_actions(button)
@@ -533,6 +629,7 @@ class App(AdvancedMixin):
         g = Gtk.Grid(column_spacing=12, row_spacing=8, margin=8)
         sw.add(g)
         self.ctl = {}
+        self.ctl_names = {}             # (sec, key) -> its label, for the "locked" banner
         rows = [
             ("settings", "pointer_max_speed", "Pointer speed", self._scale(50, 1500, 10, 0, "px/s")),
             ("settings", "pointer_curve", "Acceleration", self._choice([c for c, _ in ACCEL], [n for _, n in ACCEL])),
@@ -542,6 +639,7 @@ class App(AdvancedMixin):
             ("settings", "haptic_strength", "Vibration", self._scale(0, 100, 10, 0, "%", 100)),
         ]
         for i, (sec, key, text, (widget, get, put)) in enumerate(rows):
+            self.ctl_names[(sec, key)] = text
             g.attach(_label(text), 0, i, 1, 1)
             g.attach(getattr(widget, "rg_box", widget), 1, i, 1, 1)
             widget.set_hexpand(True)
@@ -717,8 +815,9 @@ class App(AdvancedMixin):
                 else:
                     put(v)
                 shown_w = getattr(widget, "rg_box", widget)
-                shown_w.set_sensitive(not locked)
+                self.lock_mark(shown_w, sec, key)
                 shown_w.set_tooltip_text("Set by the boot partition file (rg35xxh-input.conf)" if locked else None)
+
         self._filling_settings = False
 
 
