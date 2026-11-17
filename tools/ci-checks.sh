@@ -61,6 +61,7 @@ python3 -m pytest -q tests || bad "pytest (tests/: External Controller services)
 # (CI installs them), and is skipped otherwise.
 step "theme tests"
 python3 -m pytest -q -p no:cacheprovider src/theme/tests || bad "pytest (src/theme)"
+python3 -m pytest -q -p no:cacheprovider src/controls/tests || bad "pytest (src/controls)"
 if /usr/bin/python3 -c 'import gi; gi.require_version("GdkPixbuf", "2.0"); import pytest' 2>/dev/null; then
   /usr/bin/python3 -m pytest -q -p no:cacheprovider src/theme/tests/test_gdk.py || bad "pytest (src/theme, GdkPixbuf)"
 else

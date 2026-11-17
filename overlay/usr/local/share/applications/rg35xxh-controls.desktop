@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Controls
+Comment=Buttons, pointer, scrolling and vibration
+Exec=rg35xxh-controls
+Icon=rg35xxh-controls
+Terminal=false
+Categories=Settings;

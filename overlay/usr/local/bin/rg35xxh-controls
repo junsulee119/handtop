@@ -1,0 +1,19 @@
+#!/usr/bin/python3
+"""Handtop's Controls app: buttons, pointer, scrolling, vibration and profiles for the input daemon
+(docs/apps/controls.md). The code is the handtop_controls package (src/controls)."""
+import fcntl
+import os
+import sys
+
+sys.path.insert(0, "/usr/local/lib/rg35xxh-controls")
+
+# One window at a time: a second start just ends (two apps writing one profile would race).
+lock = open(os.path.join(os.environ.get("XDG_RUNTIME_DIR", "/tmp"), "rg35xxh-controls.lock"), "w")
+try:
+    fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+except OSError:
+    sys.exit("rg35xxh-controls: already open")
+
+from handtop_controls import app  # noqa: E402
+
+app.run()

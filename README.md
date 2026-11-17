@@ -29,6 +29,7 @@ Status: **v0.4.0**, developed and tested on the RG35XX H.
 ## Features
 
 - **Themes** (new in v0.4.0): nine looks built in, your own copies, shareable theme files (see [Themes](#themes))
+- **Controls app**: remap every button (also D-pad, Volume, F, Power), button combinations, macros you build or record, pointer / scroll / stick / vibration settings with live previews, profiles; every risky change runs 15 s on trial and undoes itself
 - Desktop mode by default: stick / D-pad pointer, A/B clicks, right-stick scrolling, L1/R1/R2 = Esc/Enter/Backspace, L3/R3 = copy/paste
 - On-screen keyboard (X), navigable with the D-pad
 - Gamepad mode (tap Start) presents an Xbox 360 pad, e.g. for Moonlight; hold Start 1 s to go back

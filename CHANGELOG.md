@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **New: Controls app** (Apps → Controls). Everything about the controls in one place, applied at once:
+  - **Buttons:** click a button on a picture of the handheld and pick what it does: a click, a key, a key combination, an app, a macro and more.
+  - **Pointer & more:** pointer speed and acceleration, scroll speed with a scroll test page (an article and a map to try it on), natural scrolling, gamepad buttons by position or by label, vibration that buzzes as you set it.
+  - **Advanced:** the D-pad, Volume, F and Power can be remapped too (with a warning; holding Power to shut down always works); **button combinations** (hold one button, press another); **macros**, built step by step or **recorded** from any app with a record button; a live view of both sticks with the dead zone; D-pad and monitor pointer speed; timing; profiles you can export and import; reset.
+  - **Can't lock you out:** changes to buttons or the pointer run 15 s on trial ("Keep these controls?") and undo themselves unless kept, even if the app is closed; a change that leaves no left click or no pointer movement warns first. Every slider also takes a typed value.
 - **Controls apply at once.** Changes to the control settings no longer need a re-login; the input daemon picks them up within a second. Groundwork for the Controls app.
 - **Change: the boot partition's `rg35xxh-input.conf` is now a rescue file, all commented out.** A line you uncomment wins over everything else; if the controls are ever broken, uncomment `use_app_settings = no` at the top to ignore what the Controls app saved. Cards flashed before keep their old file, which still works but fixes every setting it lists.
 
