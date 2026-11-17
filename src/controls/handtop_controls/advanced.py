@@ -11,7 +11,8 @@ on the left.
                  Re-center sticks
   Scrolling      the scroll curve; the scroll test page
   Timing         hold Start to leave gamepad mode, Power hold / tap times, Volume repeat
-  Profiles       use, new, duplicate, rename, delete, export, import
+  Profiles       use, new, duplicate, rename, delete, export, import; Apps… links apps to a profile
+                 (auto-switch per app, links.py)
   Reset          this profile, or everything
 
 Mixed into app.App (it uses App's change(), trial(), _register(), _scale() ...)."""
@@ -27,6 +28,7 @@ from gi.repository import Gdk, GLib, Gtk  # noqa: E402
 from . import actions as A  # noqa: E402
 from . import store  # noqa: E402
 from .combos_macros import ComboMacroMixin  # noqa: E402
+from .links import LinksMixin  # noqa: E402
 
 RUNTIME = os.environ.get("XDG_RUNTIME_DIR", "/tmp")
 STICK_WANT = os.path.join(RUNTIME, "rg35xxh-controls-sticks.want")
@@ -45,7 +47,7 @@ def _lab(text, dim=False, markup=False, **kw):
     return lab
 
 
-class AdvancedMixin(ComboMacroMixin):
+class AdvancedMixin(ComboMacroMixin, LinksMixin):
     # ---- page --------------------------------------------------------------------------------
     def _advanced_page(self):
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, margin=6)
@@ -346,9 +348,9 @@ class AdvancedMixin(ComboMacroMixin):
         frame.add(self.profile_list)
         inner.pack_start(frame, False, False, 0)
         row = Gtk.FlowBox(selection_mode=Gtk.SelectionMode.NONE, max_children_per_line=4, homogeneous=True)
-        for text, fn in (("Use", self._p_use), ("New", self._p_new), ("Duplicate", self._p_dup),
-                         ("Rename", self._p_rename), ("Delete", self._p_delete), ("Export…", self._p_export),
-                         ("Import…", self._p_import)):
+        for text, fn in (("Use", self._p_use), ("Apps…", self._p_apps), ("New", self._p_new),
+                         ("Duplicate", self._p_dup), ("Rename", self._p_rename), ("Delete", self._p_delete),
+                         ("Export…", self._p_export), ("Import…", self._p_import)):
             b = Gtk.Button(label=text)
             b.connect("clicked", lambda _b, f=fn: f())
             row.add(b)
@@ -362,11 +364,15 @@ class AdvancedMixin(ComboMacroMixin):
         sel = self._p_selected() or store.active()
         for r in self.profile_list.get_children():
             self.profile_list.remove(r)
+        counts = {}
+        for p in store.links().values():
+            counts[p] = counts.get(p, 0) + 1
         for n in store.profiles():
             r = Gtk.ListBoxRow()
             r.name = n
-            r.add(_lab(("Default" if n == "default" else n) + ("   (in use)" if n == store.active() else ""),
-                       margin=6))
+            apps = counts.get(n, 0)
+            r.add(_lab(("Default" if n == "default" else n) + ("   (in use)" if n == store.active() else "")
+                       + (f"   · {apps} app{'s' if apps != 1 else ''}" if apps else ""), margin=6))
             self.profile_list.add(r)
             if n == sel:
                 self.profile_list.select_row(r)
@@ -397,6 +403,9 @@ class AdvancedMixin(ComboMacroMixin):
         name = self._p_selected()
         if name and name != store.active():
             self.profile_combo.set_active_id(name)        # same path as the picker: trial first
+
+    def _p_apps(self):
+        self.open_links(self._p_selected() or store.active())
 
     def _p_new(self):
         name = self._ask_name("New profile", store.free_name("Profile"))

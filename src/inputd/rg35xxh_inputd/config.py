@@ -5,7 +5,10 @@ Settings come in layers; per key, the last layer that sets it wins (docs/service
   1. built-in defaults (core.py)
   2. /etc/rg35xxh/input.conf                  system
   3. ~/.config/rg35xxh/controls/<profile>.conf the active profile (Controls app); <profile> is named
-                                               in ~/.config/rg35xxh/controls/active, "default" if none
+                                               in ~/.config/rg35xxh/controls/active, "default" if none,
+                                               unless the focused app is linked to a profile in
+                                               ~/.config/rg35xxh/controls/apps.json (auto-switch: the
+                                               daemon passes that name as profile=)
   4. $XDG_RUNTIME_DIR/rg35xxh-controls-trial.conf
                                                a change on trial ("Keep these controls?"): the whole
                                                candidate profile, so while it runs it REPLACES layer 3
@@ -20,6 +23,7 @@ Settings come in layers; per key, the last layer that sets it wins (docs/service
 load() is the older single-file reader (first existing file wins), kept for the tests.
 """
 import configparser
+import json
 import logging
 import math
 import os
@@ -33,6 +37,9 @@ BOOT = "/boot/firmware/rg35xxh-input.conf"
 PATHS = (BOOT, SYSTEM)
 TRIAL_NAME = "rg35xxh-controls-trial.conf"
 DEFAULT_PROFILE = "default"
+APPS_NAME = "apps.json"     # auto-switch links: {"<app_id>": "<profile>"}; not a profile (.conf) name
+MAX_LINKS = 500
+MAX_LINKS_BYTES = 64 * 1024
 PROFILE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 _.-]{0,39}$")
 BUTTON_NAMES = tuple(DEFAULT_BINDINGS)
 HARDWARE_KEYS = ("invert_lx", "invert_ly", "invert_rx", "invert_ry")
@@ -171,18 +178,65 @@ def profile_path(name):
     return os.path.join(controls_dir(), name + ".conf")
 
 
-def layer_paths():
-    """(kind, path) from lowest to highest priority."""
-    return [("system", SYSTEM), ("profile", profile_path(active_profile())),
+def apps_file():
+    return os.path.join(controls_dir(), APPS_NAME)
+
+
+def read_links(path=None):
+    """Auto-switch links: {app_id: profile name}, from apps.json. Entries that are not a string
+    app_id with a valid profile name are left out; an unreadable or broken file means no links
+    (the hand-picked profile is used everywhere), never an error."""
+    path = apps_file() if path is None else path
+    try:
+        with open(path, "rb") as f:
+            raw = f.read(MAX_LINKS_BYTES + 1)
+    except OSError:
+        return {}
+    if len(raw) > MAX_LINKS_BYTES:
+        log.warning("%s: larger than %d bytes, ignored", path, MAX_LINKS_BYTES)
+        return {}
+    try:
+        data = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, ValueError):
+        log.warning("%s: not valid JSON, ignored", path)
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    out = {}
+    for app, prof in list(data.items())[:MAX_LINKS]:
+        if isinstance(app, str) and 0 < len(app) <= 200 and isinstance(prof, str) and PROFILE_RE.match(prof):
+            out[app] = prof
+    return out
+
+
+def linked_profile(links, app_id):
+    """The profile linked to app_id (compared without case: a link made from the app menu holds the
+    desktop id, e.g. "thunar", while the window says "Thunar"), or None. A link to a profile whose
+    file is gone counts as no link ("default" needs no file)."""
+    if not app_id:
+        return None
+    prof = links.get(app_id)
+    if prof is None:
+        low = app_id.lower()
+        prof = next((p for a, p in links.items() if a.lower() == low), None)
+    if prof is None or not (prof == DEFAULT_PROFILE or os.path.exists(profile_path(prof))):
+        return None
+    return prof
+
+
+def layer_paths(profile=None):
+    """(kind, path) from lowest to highest priority. profile: the profile to use instead of the
+    hand-picked one (auto-switch)."""
+    return [("system", SYSTEM), ("profile", profile_path(profile or active_profile())),
             ("trial", trial_path()), ("boot", BOOT)]
 
 
-def stamp():
+def stamp(profile=None):
     """Cheap change detector for the daemon's housekeeping: (path, inode, mtime_ns, size) of every
     layer file and the active-profile pointer (the inode catches an atomic replace within one
     timestamp tick); None for a missing file."""
     out = []
-    for p in [active_file()] + [p for _, p in layer_paths()]:
+    for p in [active_file()] + [p for _, p in layer_paths(profile)]:
         try:
             st = os.stat(p)
             out.append((p, st.st_ino, st.st_mtime_ns, st.st_size))
@@ -341,10 +395,10 @@ class Layered:
         self.app_settings = True     # False: the boot file's [rescue] switch is on
 
 
-def load_layers(layers=None, now=None):
+def load_layers(layers=None, now=None, profile=None):
     now = trial_clock() if now is None else now
     out = Layered()
-    layers = layer_paths() if layers is None else layers
+    layers = layer_paths(profile) if layers is None else layers
     files = {path: _read(path) for _, path in layers}
     boot = next((files[p] for k, p in layers if k == "boot" and files[p] is not None), None)
     if boot is not None and not app_settings_allowed(boot):

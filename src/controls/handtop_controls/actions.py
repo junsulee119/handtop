@@ -65,6 +65,17 @@ def key_name(k):
 
 def apps():
     """Visible apps: [(desktop id, name)], first .desktop file per id wins (as the daemon's launch)."""
+    return [(i, n) for i, n, _ in _entries()]
+
+
+def window_ids():
+    """Visible apps for auto-switch links: [(app id their windows most likely report, name)]. That
+    is StartupWMClass when the file sets one, else the desktop id (the daemon compares without
+    case, so "thunar" matches Thunar's "Thunar" window)."""
+    return [(w or i, n) for i, n, w in _entries()]
+
+
+def _entries():
     seen = {}
     for d in APP_DIRS:
         try:
@@ -81,8 +92,8 @@ def apps():
             except (configparser.Error, KeyError, UnicodeDecodeError):
                 continue
             seen[f[:-8]] = None if e.get("NoDisplay", "").lower() == "true" or e.get("Type") != "Application" \
-                else e.get("Name", f[:-8])
-    return sorted(((i, n) for i, n in seen.items() if n), key=lambda x: x[1].lower())
+                else (e.get("Name", f[:-8]), e.get("StartupWMClass", "").strip() or None)
+    return sorted(((i, v[0], v[1]) for i, v in seen.items() if v), key=lambda x: x[1].lower())
 
 
 def button_name(b):

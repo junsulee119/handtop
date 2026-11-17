@@ -652,3 +652,98 @@ def test_idle_nudge_moves_there_and_back():
                                     syn=lambda: writes.append("syn"))
     d._idle_nudge()
     assert writes == [(daemon.E.REL_X, 1), "syn", (daemon.E.REL_X, -1), "syn"]
+
+
+# ---------------------------------------------------------------- auto-switch per app
+def _auto_daemon(monkeypatch, tmp_path):
+    d, config = _config_daemon(monkeypatch, tmp_path)
+    d.focus, d.focus_watch, d.focus_app, d.auto_profile = None, None, None, None
+    d.links, d.links_stamp = {}, None
+    d.bt, d.macro, d.trial_until = None, None, None
+    d.notes = []
+    d._notify = lambda key, title, body, ms: d.notes.append(body)
+    for name, speed in (("games", 20), ("reading", 3)):
+        with open(config.profile_path(name), "w") as f:
+            f.write(f"[settings]\nscroll_speed = {speed}\n")
+    with open(config.apps_file(), "w") as f:
+        f.write('{"retroarch": "games", "Thunar": "reading", "old": "gone", "../x": "games", "bad": "../etc"}')
+    return d, config
+
+
+def test_linked_app_in_front_uses_its_profile_and_back(monkeypatch, tmp_path):
+    d, config = _auto_daemon(monkeypatch, tmp_path)
+    default_speed = d.core.s["scroll_speed"]
+    d.focus_app = "retroarch"
+    d._auto_check()
+    assert d.auto_profile == "games" and d.core.s["scroll_speed"] == 20
+    assert d.notes == ["Profile: games"]
+    d.focus_app = "thunar"                       # a link made from the app menu: case is ignored
+    d._auto_check()
+    assert d.core.s["scroll_speed"] == 3
+    d.focus_app = "foot"                         # not linked: the hand-picked profile again
+    d._auto_check()
+    assert d.auto_profile is None and d.core.s["scroll_speed"] == default_speed
+    assert d.notes == ["Profile: games", "Profile: reading", "Profile: Default"]
+    import json
+    with open(os.path.join(str(tmp_path / "run"), d.WINDOWS_FILE)) as f:
+        assert json.load(f)["auto"] is None
+
+
+def test_link_to_the_hand_picked_profile_switches_quietly(monkeypatch, tmp_path):
+    d, config = _auto_daemon(monkeypatch, tmp_path)
+    with open(config.active_file(), "w") as f:
+        f.write("games\n")
+    d._config_reload()
+    d.focus_app = "retroarch"
+    d._auto_check()
+    assert d.auto_profile == "games" and d.notes == []
+
+
+def test_link_to_a_missing_profile_is_no_link(monkeypatch, tmp_path):
+    d, config = _auto_daemon(monkeypatch, tmp_path)
+    d.focus_app = "old"
+    d._auto_check()
+    assert d.auto_profile is None and d.notes == []
+    assert "bad" not in config.read_links()        # not a profile name: dropped when read
+
+
+def test_switch_waits_for_buttons_macros_and_external_controller(monkeypatch, tmp_path):
+    d, config = _auto_daemon(monkeypatch, tmp_path)
+    d.focus_app = "retroarch"
+    d.core.held["a"] = 0.0                       # a drag in progress
+    d._auto_check()
+    assert d.auto_profile is None
+    del d.core.held["a"]
+    d.macro = {"name": "m"}
+    d._auto_check()
+    assert d.auto_profile is None
+    d.macro = None
+    d.bt = object()                              # External Controller session: frozen
+    d._auto_check()
+    assert d.auto_profile is None
+    d.bt = None                                  # the session ended: the switch happens now
+    d._auto_check()
+    assert d.auto_profile == "games"
+
+
+def test_links_file_is_reread_only_when_it_changes_and_garbage_means_none(monkeypatch, tmp_path):
+    d, config = _auto_daemon(monkeypatch, tmp_path)
+    d.focus_app = "retroarch"
+    d._auto_check()
+    assert d.auto_profile == "games"
+    with open(config.apps_file(), "wb") as f:
+        f.write(b"\xff not json")
+    d._auto_check()
+    assert d.auto_profile is None
+    with open(config.apps_file(), "w") as f:
+        f.write('["a list"]')
+    assert config.read_links() == {}
+
+
+def test_terminal_check_uses_the_focus_watcher_when_connected(monkeypatch, tmp_path):
+    d, config = _auto_daemon(monkeypatch, tmp_path)
+    d.focus = object()
+    d.focus_app = "foot"
+    assert d._focused_is_terminal()
+    d.focus_app = "Thunar"
+    assert not d._focused_is_terminal()

@@ -26,7 +26,7 @@ Sections on the left:
 | Sticks | both sticks live (the input daemon's stick feed, only while this section is shown): the dead zone drawn hatched with its size, the dot grey while inside it; dead zone, swap sticks, invert each axis, Re-center |
 | Scrolling | scroll curve (higher: a small push already scrolls quickly; 0: even), the scroll test page |
 | Timing | hold Start to leave gamepad mode; Power: hold to shut down and the longest tap (a tap is kept at least 0.5 s shorter than the hold, so the power menu stays reachable); Volume repeat delay and speed |
-| Profiles | Use (on trial, below), New, Duplicate, Rename (the on-screen keyboard comes up for names), Delete (not the profile in use), Export / Import as a `.conf` file |
+| Profiles | Use (on trial, below), **Apps…** (auto-switch, below), New, Duplicate, Rename (the on-screen keyboard comes up for names; links follow), Delete (not the profile in use; its links go too), Export / Import as a `.conf` file. Profiles with linked apps show "· N apps" |
 | Reset | this profile, or everything (the other profiles are deleted once the reset is kept) |
 
 ## Safety: trial, warnings, rescue
@@ -72,12 +72,23 @@ Limits keep a bad file harmless: at most 1000 steps, 300 s of waiting in all and
 
 Captured: keys and key combinations (including what is typed on the on-screen keyboard), mouse buttons, scrolling, opened apps, copy / paste and the other actions above, and the waits between them (paused time is not a wait). A key or button let go within 0.3 s, with nothing else between, becomes one tap (held longer, it stays a hold of that length); a hold of Power (shut down) is never recorded, a tap of Power (the power menu) is; pointer motion and scrolling are merged per 0.1 s. How it works: the app writes `$XDG_RUNTIME_DIR/rg35xxh-macro-rec.json` (arm / stop / cancel), the input daemon records what it sends while recording and reports in `rg35xxh-macro-rec.status`.
 
+## Auto-switch per app
+
+A profile can be linked to apps (Advanced → Profiles → **Apps…** → **Add an app…**). While a linked app is in front, the input daemon uses its profile instead of the one picked by hand; anything else in front (an app without a link, the bare desktop, Controls itself) uses the picked one. A 2 s notification says "Profile: <name>" when the profile in use changes.
+
+- The picker lists the windows **open now** first (the exact app id the window reports, from the input daemon) and then the **installed apps** (their `StartupWMClass`, else the desktop id). Matching ignores letter case, so File Manager (`thunar`) matches its window (`Thunar`). An app already linked elsewhere shows "now: <profile>"; linking it again moves it (one profile per app). Controls itself can't be linked: it edits the picked profile.
+- The switch **waits** while a button is held or a macro runs (a drag, Alt held through Alt+Tab), and during the whole **External Controller** session (the PC must not see the handheld change mid-game); it happens right after.
+- An overlay that takes the keyboard (app drawer, power menu, on-screen keyboard, the External Controller status screen) doesn't count as a switch: the app behind it stays the app in front.
+- The boot file's rescue switch and locked lines win over a linked profile as over any profile. During a trial ("Keep these controls?") the trial is used, whatever is in front.
+
 ## Files
 
 | Path | What |
 |---|---|
 | `~/.config/rg35xxh/controls/<profile>.conf` | a profile: only what differs from `/etc/rg35xxh/input.conf` (INI, same keys) |
 | `~/.config/rg35xxh/controls/active` | the profile in use (one line; `default` if missing) |
+| `~/.config/rg35xxh/controls/apps.json` | auto-switch links, `{"<app id>": "<profile>"}` |
+| `$XDG_RUNTIME_DIR/rg35xxh-controls-windows.json` | open windows, the app in front and the linked profile in use (written by the input daemon, for the picker) |
 | `~/.config/rg35xxh/controls/macros/<name>.macro` | macros |
 | `$XDG_RUNTIME_DIR/rg35xxh-controls-trial.conf` | a change on trial (deleted by the daemon when its time is up) |
 | `$XDG_RUNTIME_DIR/rg35xxh-controls-sticks(.want)` | the live stick feed (Sticks section) |
@@ -92,4 +103,4 @@ Follows the current theme like every Handtop app (GTK widgets; the handheld draw
 
 ## Tests
 
-`src/controls/tests` (profiles, trials, export / import, action names) and the input daemon's `src/inputd/tests` (layers, live reload, trial expiry, the new bindings, combinations, macros, recording), both run by CI and the image build.
+`src/controls/tests` (profiles, trials, export / import, action names, app links) and the input daemon's `src/inputd/tests` (layers, live reload, trial expiry, the new bindings, combinations, macros, recording, auto-switch, the focus watcher's protocol handling), both run by CI and the image build.

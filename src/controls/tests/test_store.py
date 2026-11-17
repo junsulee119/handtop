@@ -197,3 +197,52 @@ def test_atomic_write_leaves_no_temp_file_on_failure(monkeypatch, tmp_path):
     with pytest.raises(OSError):
         store._write_atomic(p, "x")
     assert not os.path.exists(p + ".tmp")
+
+
+# ---------------------------------------------------------------- auto-switch per app
+def test_link_moves_an_app_and_the_daemon_reads_it():
+    store.new_profile("games")
+    store.link_app("retroarch", "games")
+    store.link_app("Thunar", "default")
+    store.link_app("RetroArch", "default")         # same app in another letter case: moved, not doubled
+    assert store.links() == {"Thunar": "default", "RetroArch": "default"}
+    assert store.apps_of("default") == ["RetroArch", "Thunar"] and store.linked_to("thunar") == "default"
+    assert config.linked_profile(config.read_links(), "retroarch") == "default"
+    store.unlink_app("Thunar")
+    assert store.links() == {"RetroArch": "default"}
+    with pytest.raises(ValueError):
+        store.link_app("rg35xxh-controls", "games")    # Controls edits the hand-picked profile
+    with pytest.raises(ValueError):
+        store.link_app("foot", "../x")
+
+
+def test_rename_and_delete_carry_the_links():
+    store.new_profile("games")
+    store.link_app("retroarch", "games")
+    store.link_app("foot", "default")
+    assert store.rename_profile("games", "retro")
+    assert store.links() == {"retroarch": "retro", "foot": "default"}
+    assert store.delete_profile("retro")
+    assert store.links() == {"foot": "default"}
+
+
+def test_open_windows_from_the_daemon(dirs):
+    assert store.open_windows() == (False, [])
+    (dirs / "run" / store.WINDOWS_FILE).write_text(
+        '{"windows": [["foot", "foot"], ["Thunar", "Home"], ["foot", "second"], ["rg35xxh-controls", "Controls"],'
+        ' [3, "bad"], "bad"], "focused": "foot", "auto": null, "connected": true}')
+    assert store.open_windows() == (True, [("foot", "foot"), ("Thunar", "Home")])
+    (dirs / "run" / store.WINDOWS_FILE).write_text("not json")
+    assert store.open_windows() == (False, [])
+
+
+def test_window_ids_prefer_startup_wm_class(monkeypatch, tmp_path):
+    from handtop_controls import actions as A
+    apps = tmp_path / "apps"
+    apps.mkdir()
+    (apps / "thunar.desktop").write_text("[Desktop Entry]\nType=Application\nName=File Manager\n")
+    (apps / "game.desktop").write_text("[Desktop Entry]\nType=Application\nName=Game\nStartupWMClass=GameWin\n")
+    (apps / "hidden.desktop").write_text("[Desktop Entry]\nType=Application\nName=H\nNoDisplay=true\n")
+    monkeypatch.setattr(A, "APP_DIRS", [str(apps)])
+    assert A.window_ids() == [("thunar", "File Manager"), ("GameWin", "Game")]
+    assert A.apps() == [("thunar", "File Manager"), ("game", "Game")]

@@ -128,6 +128,8 @@ class App(AdvancedMixin):
         self.stack.add_named(self._advanced_page(), "advanced")
         self.stack.add_named(self._macro_page(), "macro")
         self.stack.add_named(self._macro_pick_page(), "macropick")
+        self.stack.add_named(self._links_page(), "links")
+        self.stack.add_named(self._link_pick_page(), "linkpick")
         self.refresh()
 
     def run(self):
@@ -325,7 +327,8 @@ class App(AdvancedMixin):
         d.destroy()
         return r == Gtk.ResponseType.OK
 
-    PARENT = {"keys": "action", "apps": "action", "macropick": "action", "advanced": "main", "macro": "advanced"}
+    PARENT = {"keys": "action", "apps": "action", "macropick": "action", "advanced": "main", "macro": "advanced",
+              "links": "advanced", "linkpick": "links"}
 
     def back(self):
         page = self.stack.get_visible_child_name()

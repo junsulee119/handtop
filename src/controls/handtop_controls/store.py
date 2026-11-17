@@ -11,6 +11,7 @@ with an end time. keep() saves them into the profile; without it the daemon dele
 time is up (so a crashed app or an unreachable Keep button still undoes it).
 """
 import io
+import json
 import os
 import sys
 
@@ -226,6 +227,9 @@ def rename_profile(old, new):
     os.replace(config.profile_path(old), config.profile_path(new))
     if active() == old:
         set_active(new)
+    ln = links()
+    if old in ln.values():
+        _write_links({a: (new if p == old else p) for a, p in ln.items()})
     return True
 
 
@@ -238,7 +242,72 @@ def delete_profile(name):
         os.unlink(config.profile_path(name))
     except FileNotFoundError:
         pass
+    ln = links()
+    if name in ln.values():
+        _write_links({a: p for a, p in ln.items() if p != name})
     return True
+
+
+# ---------------------------------------------------------------- auto-switch per app
+# ~/.config/rg35xxh/controls/apps.json links app ids (what a window reports, e.g. "Thunar") to
+# profiles; while a linked app is in front the input daemon uses its profile instead of the
+# hand-picked one. One profile per app: linking an app again moves it. The daemon publishes the
+# open windows in $XDG_RUNTIME_DIR/rg35xxh-controls-windows.json for the picker.
+APP_SELF = "rg35xxh-controls"            # Controls itself is never linked: it edits the hand-picked profile
+WINDOWS_FILE = "rg35xxh-controls-windows.json"
+
+
+def links():
+    return config.read_links()
+
+
+def _write_links(ln):
+    _write_atomic(config.apps_file(), json.dumps(ln, indent=1, sort_keys=True, ensure_ascii=False) + "\n")
+
+
+def link_app(app_id, profile):
+    """Link app_id to profile (replacing a link of the same app in any letter case)."""
+    if not app_id or len(app_id) > 200 or app_id.lower() == APP_SELF or not config.PROFILE_RE.match(profile):
+        raise ValueError(f"can't link {app_id!r} to {profile!r}")
+    ln = {a: p for a, p in links().items() if a.lower() != app_id.lower()}
+    ln[app_id] = profile
+    _write_links(ln)
+
+
+def unlink_app(app_id):
+    ln = links()
+    if app_id in ln:
+        del ln[app_id]
+        _write_links(ln)
+
+
+def apps_of(profile):
+    return sorted((a for a, p in links().items() if p == profile), key=str.lower)
+
+
+def linked_to(app_id):
+    """The profile app_id is linked to (any letter case), or None."""
+    low = app_id.lower()
+    return next((p for a, p in links().items() if a.lower() == low), None)
+
+
+def open_windows():
+    """(the daemon watches windows, [(app_id, title)] open now, one per app, Controls left out)."""
+    try:
+        with open(os.path.join(os.environ.get("XDG_RUNTIME_DIR", "/tmp"), WINDOWS_FILE), encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, ValueError):
+        return False, []
+    out, seen = [], set()
+    for item in data.get("windows") or [] if isinstance(data, dict) else []:
+        if not (isinstance(item, list) and len(item) == 2 and isinstance(item[0], str)):
+            continue
+        app_id, title = item[0], item[1] if isinstance(item[1], str) else ""
+        if app_id.lower() in seen or app_id.lower() == APP_SELF:
+            continue
+        seen.add(app_id.lower())
+        out.append((app_id, title))
+    return bool(data.get("connected")) if isinstance(data, dict) else False, out
 
 
 # ------------------------------------------------------------------------- trials

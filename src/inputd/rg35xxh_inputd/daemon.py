@@ -30,6 +30,7 @@ from evdev import ff
 from gi.repository import GLib
 
 from . import config
+from . import focus
 from . import macros
 from .core import PAD_AXES, Core, PointerLayout
 
@@ -226,6 +227,14 @@ class Daemon:
         self.rec_req = None         # (name, pointer) from the Controls app
         self.rec_mtime = None
         self.ticks = 0
+        # Auto-switch per app (_focus_*, _auto_check): the focused window from labwc, and the
+        # profile linked to it (None = the hand-picked one)
+        self.focus = None           # focus.FocusWatcher while connected
+        self.focus_watch = None
+        self.focus_retry_at = 0.0
+        self.focus_app = None       # app_id of the focused window
+        self.auto_profile = None
+        self.links, self.links_stamp = {}, None
         for flag in ("rg35xxh-gamepad-mode", "rg35xxh-bt-mode", "rg35xxh-wired-mode", INPUTMODE_FRAME):
             set_flag(flag, False)
         self._open_devices()
@@ -740,6 +749,7 @@ class Daemon:
             self._stick_feed_check()
             self._rec_check()
             self.core.set_osk_visible(self.osk_visible)
+            self._focus_check(now)
         if self.stick_feed and self.ticks % STICK_FEED_TICKS == 0:
             self._stick_feed_write()
         self._run(self.core.tick(now))
@@ -750,7 +760,8 @@ class Daemon:
         the 100 ms housekeeping; costs a few stat() calls when nothing changed. An expired trial
         file ("Keep these controls?" not answered in time) is deleted here, by the daemon, so the
         change is undone even if the Controls app is gone."""
-        st = config.stamp()
+        auto = getattr(self, "auto_profile", None)
+        st = config.stamp(auto)
         until = getattr(self, "trial_until", None)
         if st == self.cfg_stamp and not (until is not None and config.trial_clock() >= until):
 
@@ -758,15 +769,16 @@ class Daemon:
                 self._haptics_rescale()
             return
         self.cfg_stamp = st
-        cfg = config.load_layers()
+        cfg = config.load_layers(profile=auto)
         self.trial_until = cfg.trial_until
+        self.app_settings = cfg.app_settings
         if cfg.trial_expired:
             try:
                 os.unlink(config.trial_path())
                 log.info("controls: trial ended without Keep, change undone")
             except OSError:
                 pass
-            self.cfg_stamp = config.stamp()
+            self.cfg_stamp = config.stamp(auto)
         old = ({"settings." + k: v for k, v in self.core.s.items()}, {"desktop." + k: v for k, v in self.core.bind.items()},
                {"hardware." + k: v for k, v in self.hw.items()})
         self.hw = cfg.hardware
@@ -783,6 +795,99 @@ class Daemon:
         self.core.pointer_scale = self.layout.scale(self.core.s["display_speed_scale"])
         if self.haptic_scale != self.core.s["haptic_strength"]:
             self._haptics_rescale()
+
+    # ------------------------------------------------ auto-switch per app
+    # labwc reports every window and which one has the focus (focus.py). A profile linked to the
+    # focused app in apps.json (Controls app) replaces the hand-picked one while that app is in
+    # front. The switch waits while a button is held or a macro runs (a drag, Alt held through
+    # Alt+Tab), and for the whole External Controller session (the PC must not see the handheld
+    # change mid-game); both are retried every 100 ms housekeeping.
+    FOCUS_RETRY_S = 5.0
+    WINDOWS_FILE = "rg35xxh-controls-windows.json"   # open windows, for the Controls app's picker
+
+    def _focus_check(self, now):
+        if self.focus is None and now >= self.focus_retry_at:
+            self._focus_connect(now)
+        self._auto_check()
+
+    def _focus_connect(self, now):
+        try:
+            self.focus = focus.FocusWatcher()
+        except OSError as e:
+            if not self.focus_retry_at:
+                log.info("focus watcher: no display yet (%s), retrying every %.0f s", e, self.FOCUS_RETRY_S)
+            self.focus_retry_at = now + self.FOCUS_RETRY_S
+            return
+        self.focus_watch = GLib.io_add_watch(self.focus.fileno(), GLib.IO_IN | GLib.IO_HUP | GLib.IO_ERR,
+                                             self._on_focus)
+        log.info("focus watcher: connected")
+
+    def _focus_lost(self, why):
+        log.warning("focus watcher: %s; reconnecting in %.0f s", why, self.FOCUS_RETRY_S)
+        if self.focus_watch:
+            GLib.source_remove(self.focus_watch)
+        self.focus_watch = None
+        if self.focus is not None:
+            self.focus.close()
+        self.focus = None
+        self.focus_app = None
+        self.focus_retry_at = time.monotonic() + self.FOCUS_RETRY_S
+        self._focus_publish()
+
+    def _on_focus(self, _fd, _cond):
+        try:
+            changed = self.focus.read()
+        except (OSError, focus.ProtocolError) as e:
+            self._focus_lost(e)
+            return False
+        if changed:
+            self.focus_app = self.focus.focused()
+            self._auto_check()
+            self._focus_publish()
+        return True
+
+    def _focus_publish(self):
+        """Open windows + the focused app + the auto-switched profile, for the Controls app."""
+        fw = getattr(self, "focus", None)
+        data = {"windows": fw.open_windows() if fw else [], "focused": self.focus_app,
+                "auto": self.auto_profile, "connected": fw is not None}
+        path = runtime_flag(self.WINDOWS_FILE)
+        try:
+            with open(path + ".tmp", "w", encoding="utf-8") as f:
+                json.dump(data, f)
+            os.replace(path + ".tmp", path)
+        except OSError as e:
+            log.debug("windows file: %s", e)
+
+    def _links_now(self):
+        """apps.json, read again only when it changed (stat per housekeeping)."""
+        path = config.apps_file()
+        try:
+            st = os.stat(path)
+            key = (st.st_ino, st.st_mtime_ns, st.st_size)
+        except OSError:
+            key = None
+        if key != self.links_stamp:
+            self.links_stamp = key
+            self.links = config.read_links(path) if key else {}
+        return self.links
+
+    def _auto_check(self):
+        wanted = config.linked_profile(self._links_now(), self.focus_app)
+        if wanted == self.auto_profile:
+            return
+        if self.bt or self.core.held or self.macro:
+            return                          # retried at the next housekeeping
+        before = self.auto_profile or config.active_profile()
+        self.auto_profile = wanted
+        after = wanted or config.active_profile()
+        log.info("controls: %s in front: profile %s%s", self.focus_app or "no window", after,
+                 "" if wanted else " (hand-picked)")
+        self._config_reload()
+        self._focus_publish()
+        if after != before and getattr(self, "app_settings", True) and getattr(self, "trial_until", None) is None:
+            self._notify("profile", "Controls", "Profile: " + ("Default" if after == config.DEFAULT_PROFILE else after),
+                         2000)
 
     def _haptics_rescale(self):
         """haptic_strength changed: the mode-change pulses (step_ids) were uploaded at the old
@@ -995,6 +1100,8 @@ class Daemon:
         self._type_combo(mods, letter)
 
     def _focused_is_terminal(self):
+        if getattr(self, "focus", None) is not None:      # the focus watcher already knows
+            return (self.focus_app or "") in TERMINALS
         # One query: repeated app_id matches are OR-ed by wlrctl; state:active = focused window.
         if not shutil.which("wlrctl"):
             return False
@@ -1825,6 +1932,8 @@ class Daemon:
         if get("owners"):
             step("held keys", self._release_owned)
 
+        if get("focus") is not None:
+            step("focus watcher", get("focus").close)
         if get("ui_retry"):
             step("ui_retry", GLib.source_remove, get("ui_retry"))
             self.ui_retry = None
