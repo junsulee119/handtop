@@ -249,6 +249,19 @@ def app_glyph(name, w=3.2):
         v.line([(cx - q, cy - q), (cx + q, cy + q), (cx, cy + h / 2), (cx, cy - h / 2), (cx + q, cy - q),
                 (cx - q, cy + q)], w, INK)
         v.ellipse(38, 36, 46, 44, fill=RED)
+    elif name == "ristretto":                                      # a picture: a red sun over a hill
+        v.rrect(8, 12, 48, 44, 0, outline=INK, width=w)
+        v.ellipse(32, 18, 42, 28, fill=RED)
+        v.poly([(10, 42), (22, 26), (34, 42)], fill=INK)
+    elif name == "videos":                                         # a black frame with a red play
+        v.rrect(8, 12, 48, 44, 0, fill=INK)
+        v.poly([(23, 20), (23, 36), (37, 28)], fill=RED)
+    elif name == "music":                                          # two notes on one beam, one red head
+        v.rrect(12, 33, 22, 42, 0, fill=INK)
+        v.rrect(32, 29, 42, 38, 0, fill=RED)
+        v.line([(20.4, 42), (20.4, 14)], w, INK)
+        v.line([(40.4, 38), (40.4, 10)], w, INK)
+        v.poly([(18.8, 12), (42, 8), (42, 15), (18.8, 19)], fill=INK)
     return v.final()
 
 

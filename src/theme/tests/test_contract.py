@@ -14,7 +14,7 @@ def test_slot_counts():
         kinds[k] = kinds.get(k, 0) + 1
     assert sum(1 for s in S.IMAGE_SLOTS if s.startswith("taskbar/battery")) == 48
     assert len(S.WIFI) == 46 and all(S.IMAGE_SLOTS[f"tray/{w}"][2] == "optional" for w in S.WIFI)
-    assert kinds["generated"] == 16 + 2 * 15          # shake frames + @22/@20 of 15 apps
+    assert kinds["generated"] == 16 + 2 * 18          # shake frames + @22/@20 of 18 apps
     assert len(S.COLORS) == 115
 
 

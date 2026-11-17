@@ -183,16 +183,18 @@ BORDERS = (1, 3)                 # line width multiplier (taskbar line, notifica
 # SYSTEM_OK slots may be set to "system" in theme.json "icons": the package's own icon is used.
 INPUT_MODES = ("desktop", "gamepad", "bt", "wired")
 SHAKES = (-2, -1, 1, 2)
-HANDTOP_APPS = ("theme", "external-controller", "display", "enable-ssh", "recenter-sticks", "controls")
+HANDTOP_APPS = ("theme", "external-controller", "display", "enable-ssh", "recenter-sticks", "controls",
+                "videos", "music")
 DEFAULT_APPS = ("foot", "thunar", "mousepad", "chromium", "htop", "micro", "qpdfview", "xarchiver",
-                "blueman")
+                "blueman", "ristretto")
 APP_ICON_NAMES = {            # slot -> icon name looked up by GTK / labwc / Waybar
     "theme": "rg35xxh-theme", "external-controller": "rg35xxh-external-controller",
     "display": "rg35xxh-display", "enable-ssh": "rg35xxh-enable-ssh",
     "recenter-sticks": "rg35xxh-recenter-sticks", "controls": "rg35xxh-controls",
+    "videos": "rg35xxh-videos", "music": "rg35xxh-music",
     "foot": "foot", "thunar": "org.xfce.thunar", "mousepad": "org.xfce.mousepad",
     "chromium": "chromium", "htop": "htop", "micro": "micro", "qpdfview": "qpdfview",
-    "xarchiver": "xarchiver", "blueman": "blueman",
+    "xarchiver": "xarchiver", "blueman": "blueman", "ristretto": "org.xfce.ristretto",
 }
 WIFI = (["nm-device-wired", "nm-device-wired-secure", "nm-no-connection"]
         + [f"nm-signal-{n}{s}" for n in ("00", "25", "50", "75", "100") for s in ("", "-secure")]
@@ -308,6 +310,7 @@ NAMEABLE = OrderedDict([          # names key -> .desktop file
     ("foot", "foot.desktop"), ("thunar", "thunar.desktop"), ("mousepad", "org.xfce.mousepad.desktop"),
     ("chromium", "chromium.desktop"), ("htop", "htop.desktop"), ("micro", "micro.desktop"),
     ("qpdfview", "qpdfview.desktop"), ("xarchiver", "xarchiver.desktop"),
+    ("ristretto", "org.xfce.ristretto.desktop"),
 ])
 APP_NAME_MAX = 24
 

@@ -717,11 +717,22 @@ class Daemon:
         except Exception:
             return self._input_failed("input loop")
 
+    def _screen_off_flag(self):
+        """(screen off, from the Music app): the flag rg35xxh-screen-off writes; its first line is
+        "music" when music keeps playing (Vol then still sets the volume)."""
+        try:
+            with open(runtime_flag("rg35xxh-screen-off"), "rb") as f:
+                return True, f.read(16).split(b"\n", 1)[0].strip() == b"music"
+        except FileNotFoundError:
+            return False, False
+        except OSError:
+            return True, False
+
     def _tick_body(self):
         self.ticks += 1
         now = time.monotonic()
         if self.ticks % 10 == 0:
-            self.core.set_screen_off(os.path.exists(runtime_flag("rg35xxh-screen-off")))
+            self.core.set_screen_off(*self._screen_off_flag())
             self._layout_reload()
             self._config_reload()          # before the requests: a preview plays the new strength
             self._haptic_requests()
@@ -935,10 +946,22 @@ class Daemon:
                 self._command(a[1])
             elif kind == "screen_wake":
                 spawn("rg35xxh-screen-on")
+                self._idle_nudge()
             elif kind == "shutdown":
                 self._shutdown()
         if mouse_dirty:
             self.mouse.syn()
+
+    def _idle_nudge(self):
+        """The press that wakes the screen is swallowed, so the compositor sees no input and
+        swayidle's timers (auto-sleep, the Music app's screen off) would not start again until
+        the next one. One pixel there and back is input to it, and invisible."""
+        try:
+            for dx in (1, -1):
+                self.mouse.write(E.EV_REL, E.REL_X, dx)
+                self.mouse.syn()
+        except (OSError, AttributeError):
+            pass
 
     def _wheel_notch(self, code, hires, idx):
         # Legacy wheel events for apps without hi-res support: one per 120 units.

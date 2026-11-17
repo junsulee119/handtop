@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Music
+Comment=Play the songs in your Music folder
+Exec=rg35xxh-music
+Icon=rg35xxh-music
+Terminal=false
+Categories=AudioVideo;Audio;Player;

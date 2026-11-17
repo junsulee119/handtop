@@ -109,6 +109,7 @@ class Core:
         self.f_buttons = False      # F gives Home / Capture (Switch Controller mode)
         self.osk_visible = False
         self.screen_off = False
+        self.screen_off_music = False   # Screen off from the Music app: Vol still sets the volume
         self.axes = {"lx": 0.0, "ly": 0.0, "rx": 0.0, "ry": 0.0}
         self.pointer_scale = 1.0    # speed factor of the screen the pointer is on (set by the daemon)
         self.held = {}              # name -> press time
@@ -186,8 +187,9 @@ class Core:
     def set_osk_visible(self, visible):
         self.osk_visible = bool(visible)
 
-    def set_screen_off(self, off):
+    def set_screen_off(self, off, music=False):
         self.screen_off = bool(off)
+        self.screen_off_music = bool(off) and bool(music)
 
     def axis(self, name, value, t):
         value = max(-1.0, min(1.0, float(value)))
@@ -206,6 +208,12 @@ class Core:
         self.held[name] = t
         out = []
 
+        if (self.screen_off_music and name in ("vol_up", "vol_down") and "f" not in self.held):
+            # Music playing with the screen off: Vol changes the volume (always the volume, whatever
+            # Vol is bound to) and the screen stays off; repeats while held like on the desktop.
+            cmd = "volume_up" if name == "vol_up" else "volume_down"
+            self.vol_repeat[name] = [cmd, t + self.s["vol_repeat_delay"]]
+            return [("cmd", cmd)]
         if self.screen_off and name != "power":
             # Any button wakes the screen; the press itself is not acted on.
             self.swallowed.add(name)

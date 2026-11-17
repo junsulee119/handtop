@@ -630,3 +630,25 @@ def test_broken_active_file_falls_back_to_default_and_rescue_still_works(monkeyp
         assert config.active_profile() == "default"
         assert config.load_layers().app_settings is False
         config.stamp()
+
+
+def test_screen_off_flag_music(monkeypatch, tmp_path):
+    flag = tmp_path / "rg35xxh-screen-off"
+    monkeypatch.setattr(daemon, "runtime_flag", lambda name: str(tmp_path / name))
+    d = object.__new__(daemon.Daemon)
+    assert d._screen_off_flag() == (False, False)
+    flag.write_bytes(b"")                       # rg35xxh-screen-off (plain)
+    assert d._screen_off_flag() == (True, False)
+    flag.write_bytes(b"music\n")                # rg35xxh-screen-off --music
+    assert d._screen_off_flag() == (True, True)
+    flag.write_bytes(b"something else\n")
+    assert d._screen_off_flag() == (True, False)
+
+
+def test_idle_nudge_moves_there_and_back():
+    d = object.__new__(daemon.Daemon)
+    writes = []
+    d.mouse = types.SimpleNamespace(write=lambda *a: writes.append(a[1:]),
+                                    syn=lambda: writes.append("syn"))
+    d._idle_nudge()
+    assert writes == [(daemon.E.REL_X, 1), "syn", (daemon.E.REL_X, -1), "syn"]

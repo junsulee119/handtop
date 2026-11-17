@@ -52,9 +52,16 @@ rg35xxh-dim off >>"$L/autosleep.log" 2>&1
 # The screen dims AUTOSLEEP_DIM_SECONDS before auto-sleep as a warning (rg35xxh-dim); any input,
 # or waking from the sleep, restores it.
 T=$((${AUTOSLEEP_MINUTES:-0} * 60)); D=${AUTOSLEEP_DIM_SECONDS:-0}
+# While the Music app plays, auto-sleep is skipped; after MUSIC_SCREEN_OFF_MINUTES without input
+# the screen turns off and the music goes on (rg35xxh-music-idle). 0 = the screen stays on.
+M=$((${MUSIC_SCREEN_OFF_MINUTES:-0} * 60))
+set --
+[ "$M" -gt 0 ] && set -- timeout "$M" rg35xxh-music-idle
+rm -f "$R/rg35xxh-music-playing"      # left by a crashed Music app of the previous session
 if [ "$T" -gt 0 ] && [ "$D" -gt 0 ] && [ "$D" -lt "$T" ]; then
   swayidle -w timeout $((T - D)) 'rg35xxh-dim on' resume 'rg35xxh-dim off' \
-    timeout "$T" rg35xxh-autosleep after-resume 'rg35xxh-dim off' >>"$L/autosleep.log" 2>&1 &
-elif [ "$T" -gt 0 ]; then
-  swayidle -w timeout "$T" rg35xxh-autosleep >>"$L/autosleep.log" 2>&1 &
+    timeout "$T" rg35xxh-autosleep after-resume 'rg35xxh-dim off' "$@" >>"$L/autosleep.log" 2>&1 &
+elif [ "$T" -gt 0 ] || [ "$M" -gt 0 ]; then
+  [ "$T" -gt 0 ] && set -- timeout "$T" rg35xxh-autosleep "$@"
+  swayidle -w "$@" >>"$L/autosleep.log" 2>&1 &
 fi

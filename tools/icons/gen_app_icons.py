@@ -11,6 +11,9 @@ sharp in the app drawer).
                                drifted knob up-right and a blue arrow back to the knob in the centre (no glass).
   app-controls.png             Controls: a white D-pad and the coloured face-button diamond over two sliders
                                (filled part accent blue, white knobs), as in the app (no glass).
+  app-videos.png               Videos: a film strip whose frame is a blue screen with a white play button (no glass).
+  app-music.png                Music: two beamed eighth notes in the accent blue (no glass).
+  (image_icon: Image Viewer, a default-app icon written by gen_default_app_icons.py)
   All are 27x27 art x2 + 1 px margin = exactly 56x56, the app drawer's icon size.
   Each also gets a -light variant (dark drawing, pastel glass, deeper ring) for the light theme.
 
@@ -549,6 +552,101 @@ def controls_icon(light=False):
             im.putpixel((x, y), colors[c] + (255,))
     return _tile(im)
 
+# ---- Image Viewer (default app: Ristretto) --------------------------------------------------
+# A landscape photo in a white frame: sky, a sun, two green hills. The light version outlines the
+# frame so it stands out on the light background. Written under the icon name
+# "org.xfce.ristretto" by gen_default_app_icons.py.
+IMG_COLORS = {"F": (236, 239, 244), "f": (190, 198, 212), "S": (110, 170, 235), "s": (150, 196, 245),
+              "Y": (250, 210, 80), "G": (70, 160, 90), "g": (50, 125, 70), "O": (138, 147, 163)}
+
+
+def image_icon(light=False):
+    g = {}
+    x0, y0, w, h = 1, 3, 25, 21                           # frame, 2 px wide
+    for y in range(h):
+        for x in range(w):
+            inside = 2 <= x < w - 2 and 2 <= y < h - 2
+            g[(x0 + x, y0 + y)] = ("s" if y < 8 else "S") if inside else \
+                ("f" if y == h - 1 or x == w - 1 else "F")
+    _disc(g, 18, 9, 2.2, "Y")                             # the sun
+    for x in range(3, 24):                                # two hills: back (dark), front (light)
+        top_b = 12 + abs(x - 9) * 0.8
+        top_f = 15 + abs(x - 18) * 0.6
+        for y in range(5, 22):
+            if y >= top_f:
+                g[(x, y)] = "G"
+            elif y >= top_b:
+                g[(x, y)] = "g"
+    if light:
+        frame = {xy for xy in g}
+        for (x, y) in list(frame):
+            for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+                n = (x + dx, y + dy)
+                if n not in frame and 0 <= n[0] < EN and 0 <= n[1] < EN:
+                    g[n] = "O"
+    im = Image.new("RGBA", (EN, EN), (0, 0, 0, 0))
+    for xy, c in g.items():
+        im.putpixel(xy, IMG_COLORS[c] + (255,))
+    return _tile(im)
+
+
+# ---- Videos ---------------------------------------------------------------------------------
+# A strip of film (sprocket holes along the top and bottom) whose frame is a blue screen with a
+# white play button. No glass.
+def videos_icon(light=False):
+    colors = dict(COLORS_LIGHT if light else COLORS)
+    colors.update(P=(255, 255, 255), B=(61, 104, 176) if light else (74, 140, 230),
+                  H=(22, 26, 34) if not light else (236, 239, 244), R=SHADE_LIGHT if light else (60, 67, 80))
+    g = {}
+    for y in range(3, 24):                                # the strip
+        for x in range(1, 26):
+            g[(x, y)] = "R" if x in (1, 25) or y in (3, 23) else "K"
+    for x in range(3, 24, 4):                             # sprocket holes
+        for dx in (0, 1):
+            g[(x + dx, 5)] = g[(x + dx, 21)] = "H"
+    for y in range(8, 19):                                # the frame: a blue screen
+        for x in range(3, 24):
+            g[(x, y)] = "B"
+    for i in range(7):                                    # play button, pointing right
+        for y in range(10 + i // 2, 17 - i // 2):
+            g[(11 + i, y)] = "P"
+    im = Image.new("RGBA", (EN, EN), (0, 0, 0, 0))
+    for xy, c in g.items():
+        im.putpixel(xy, colors[c] + (255,))
+    return _tile(im)
+
+
+# ---- Music ----------------------------------------------------------------------------------
+# Two beamed eighth notes in the accent blue, with a light glint on each head. No glass.
+def music_icon(light=False):
+    colors = {"N": (61, 104, 176) if light else (96, 160, 250),
+              "n": (36, 70, 128) if light else (52, 104, 180),
+              "h": (190, 214, 255) if light else (180, 208, 255)}
+    g = {}
+
+    def head(cx, cy):
+        for y in range(EN):
+            for x in range(EN):
+                if ((x - cx) / 3.6) ** 2 + ((y - cy) / 2.7) ** 2 <= 1.0:
+                    g[(x, y)] = "N"
+        g[(int(cx) - 1, int(cy) - 1)] = "h"
+
+    head(6.5, 20)                                         # left head, lower
+    head(19.5, 17)                                        # right head
+    for x0, y0, y1 in ((9, 5, 20), (22, 2, 17)):          # stems, 2 px wide, on the heads' right
+        for y in range(y0, y1):
+            g[(x0, y)] = g[(x0 + 1, y)] = "N"
+            g[(x0 + 1, y)] = "n"
+    for x in range(9, 24):                                # the beam, slanted, 3 px thick
+        top = 5 - round((x - 9) * 3 / 14)
+        for y in range(top, top + 3):
+            g[(x, y)] = "N"
+    im = Image.new("RGBA", (EN, EN), (0, 0, 0, 0))
+    for (x, y), c in g.items():                           # one row down: centred in the tile
+        if 0 <= x < EN and 0 <= y + 1 < EN:
+            im.putpixel((x, y + 1), colors[c] + (255,))
+    return _tile(im)
+
 
 if __name__ == "__main__":
     out = sys.argv[1] if len(sys.argv) > 1 else "."
@@ -559,3 +657,5 @@ if __name__ == "__main__":
         ssh_icon(light).save(f"{out}/app-ssh{sfx}.png")
         recenter_icon(light).save(f"{out}/app-recenter{sfx}.png")
         controls_icon(light).save(f"{out}/app-controls{sfx}.png")
+        videos_icon(light).save(f"{out}/app-videos{sfx}.png")
+        music_icon(light).save(f"{out}/app-music{sfx}.png")

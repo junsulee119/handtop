@@ -1,5 +1,15 @@
 #!/bin/sh
-# "Screen off" (power menu): outputs off + low-power state. Any button wakes (input daemon).
-: > "${XDG_RUNTIME_DIR:-/tmp}/rg35xxh-screen-off"
+# "Screen off": outputs off + low-power state. Any button wakes (input daemon).
+#   rg35xxh-screen-off           everything quiet (from a terminal; was in the power menu)
+#   rg35xxh-screen-off --music   music keeps playing (Music app, rg35xxh-music-idle): the audio
+#                                stays on, and Vol still sets the volume without waking the screen
+#                                (the flag's first line "music" tells the input daemon)
+R="${XDG_RUNTIME_DIR:-/tmp}"
+if [ "${1:-}" = --music ]; then
+  echo music > "$R/rg35xxh-screen-off"
+  wlopm --off '*'
+  exec sudo -n /usr/local/sbin/rg35xxh-lowpower on-audio
+fi
+: > "$R/rg35xxh-screen-off"
 wlopm --off '*'
 exec sudo -n /usr/local/sbin/rg35xxh-lowpower on

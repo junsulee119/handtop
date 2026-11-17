@@ -539,6 +539,42 @@ def app(name):
             a.hline(0, 27, ty, "G")
             a.hline(0, 27, ty + 1, "W")
             a.bevel(k, ty - 3, k + 4, ty + 3)
+    elif name == "ristretto":
+        # a framed painting: wooden frame, sky, a yellow sun, green hills
+        a.rect(1, 4, 26, 23, "Z")
+        a.box(1, 4, 26, 23, "K")
+        a.hline(2, 25, 5, "Y"); a.vline(2, 5, 22, "Y")             # light edge of the wood
+        a.hline(2, 25, 22, "z"); a.vline(25, 5, 22, "z")
+        a.rect(4, 7, 23, 20, "A")
+        a.box(4, 7, 23, 20, "K")
+        a.grid(17, 8, [".KKK.", "KYYYK", "KYYYK", "KYYYK", ".KKK."])
+        for x in range(5, 23):
+            top = 13 + abs(x - 10) // 2
+            a.vline(x, min(top, 19), 19, "E")
+            top2 = 16 + abs(x - 18) // 2
+            if top2 <= 19:
+                a.vline(x, top2, 19, "V")
+    elif name == "videos":
+        # a strip of film: black with white holes, a teal frame with a white play sign
+        a.rect(1, 3, 26, 24, "K")
+        for x in range(3, 26, 4):
+            a.rect(x, 5, x + 1, 6, "W")
+            a.rect(x, 21, x + 1, 22, "W")
+        a.rect(3, 9, 24, 18, "T")
+        for i in range(6):
+            a.vline(11 + i, 10 + i // 2, 17 - i // 2, "W")
+    elif name == "music":
+        # two beamed notes, navy with a black outline
+        n = Art(28, 28)
+        for cx, cy in ((7, 20), (19, 17)):
+            n.rect(cx - 3, cy - 1, cx + 2, cy + 1, "N")
+            n.hline(cx - 2, cx + 1, cy - 2, "N"); n.hline(cx - 2, cx + 1, cy + 2, "N")
+            n.px(cx - 2, cy - 1, "B")
+        n.rect(9, 6, 10, 20, "N"); n.rect(21, 3, 22, 17, "N")
+        for x in range(9, 23):
+            top = 6 - (x - 9) * 3 // 13
+            n.rect(x, top, x, top + 2, "N")
+        a = n.outlined("K")
     elif name == "recenter-sticks":
         a.grid(3, 2, [
             "........KKKKKK........",

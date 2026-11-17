@@ -1,0 +1,14 @@
+#!/usr/bin/python3
+"""Handtop's Music app: the songs in ~/Music, folder by folder (docs/apps/music.md).
+The code is the handtop_media package (src/media)."""
+import sys
+
+sys.path.insert(0, "/usr/local/lib/rg35xxh-media")
+
+from handtop_media import ui  # noqa: E402
+
+_lock = ui.single_instance("rg35xxh-music")
+
+from handtop_media import music  # noqa: E402
+
+music.run()

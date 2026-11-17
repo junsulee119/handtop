@@ -22,7 +22,7 @@ _HI = "src/theme/art/icons/hicolor"
 _HL = "src/theme/art/icons/Handtop-Light"
 _APP_FILES = {"theme": "app-theme", "external-controller": "app-external-controller",
               "display": "app-display", "enable-ssh": "app-ssh", "recenter-sticks": "app-recenter",
-              "controls": "app-controls"}
+              "controls": "app-controls", "videos": "app-videos", "music": "app-music"}
 
 
 def sources(repo, light):

@@ -1,13 +1,16 @@
 #!/bin/bash
-# Low-power state used by "Screen off": rg35xxh-lowpower on|off   (root; allowed via sudoers)
-# on : backlight off, CPU1-3 offline, powersave governors, audio DAC off, Wi-Fi power save (or off)
-# off: restore everything (Wi-Fi power save back off).
+# Low-power state used by "Screen off": rg35xxh-lowpower on|on-audio|off   (root; allowed via sudoers)
+# on      : backlight off, CPU1-3 offline, powersave governors, audio DAC off, Wi-Fi power save (or off)
+# on-audio: the same with the audio DAC left on (the Music app's Screen off: one core at the
+#           powersave governor plays 320 kbit/s MP3 and FLAC at ~12 % of it with no underruns,
+#           measured 2026-11-17)
+# off     : restore everything (Wi-Fi power save back off).
 set -uo pipefail
 . /etc/rg35xxh/lowpower.conf 2>/dev/null || true
 GPU=/sys/devices/platform/soc/1800000.gpu/devfreq/1800000.gpu
 STATE=/run/rg35xxh-lowpower
 case "${1:-}" in
-  on)
+  on|on-audio)
     [ -e "$STATE" ] && exit 0
     mkdir -p "$STATE"
     cat /sys/devices/system/cpu/cpufreq/policy0/scaling_governor > "$STATE/cpu-gov" 2>/dev/null
@@ -16,7 +19,7 @@ case "${1:-}" in
     for c in 1 2 3; do echo 0 > /sys/devices/system/cpu/cpu$c/online; done
     echo powersave > /sys/devices/system/cpu/cpufreq/policy0/scaling_governor
     echo powersave > "$GPU/governor" 2>/dev/null
-    amixer -q -c0 sset DAC off 2>/dev/null
+    [ "$1" = on ] && amixer -q -c0 sset DAC off 2>/dev/null
     if [ "${WIFI_OFF:-no}" = yes ]; then nmcli radio wifi off
     else for w in /sys/class/net/wl*; do iw dev "$(basename "$w")" set power_save on 2>/dev/null; done; fi
     ;;
@@ -31,5 +34,5 @@ case "${1:-}" in
     for b in /sys/class/backlight/*/bl_power; do echo 0 > "$b"; done
     rm -rf "$STATE"
     ;;
-  *) echo "usage: $0 on|off" >&2; exit 2 ;;
+  *) echo "usage: $0 on|on-audio|off" >&2; exit 2 ;;
 esac

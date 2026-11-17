@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Videos
+Comment=Play the videos in your Videos folder
+Exec=rg35xxh-videos
+Icon=rg35xxh-videos
+Terminal=false
+Categories=AudioVideo;Video;Player;

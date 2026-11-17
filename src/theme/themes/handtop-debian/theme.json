@@ -70,6 +70,7 @@
     "apps/qpdfview": "system",
     "apps/xarchiver": "system",
     "apps/blueman": "system",
+    "apps/ristretto": "system",
     "tray/nm-device-wired": "system",
     "tray/nm-device-wired-secure": "system",
     "tray/nm-no-connection": "system",

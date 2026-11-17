@@ -1,0 +1,47 @@
+#!/bin/sh
+# Music playing and no input for MUSIC_SCREEN_OFF_MINUTES (swayidle, labwc autostart): turn the
+# screen off and keep the music going (rg35xxh-screen-off --music), instead of the auto-sleep that
+# would stop it (rg35xxh-autosleep skips while the Music app plays). docs/apps/music.md.
+#
+# Then it stays in the background until one of these:
+#   - a button turns the screen back on (the input daemon removes the flag): nothing more to do;
+#     swayidle counts from that input again;
+#   - the music has stopped for MUSIC_STOPPED_SECONDS with the screen still off: the screen comes
+#     back on first (sleeping in the low-power state, with CPU cores 1-3 offline, was never tested:
+#     docs/hardware-safety.md rule 6), then rg35xxh-autosleep sleeps, unless it skips for its usual
+#     reasons (charging, HDMI, a controller mode). Without this the screen would stay off with
+#     nothing playing until the battery warning, because swayidle does not fire again without input.
+# One at a time (flock); the low-battery watcher handles Screen off as before (screen back on at
+# SCREEN_OFF_WARN_PCT, shutdown at SCREEN_OFF_SHUTDOWN_PCT).
+[ -r /etc/rg35xxh/power.conf ] && . /etc/rg35xxh/power.conf
+R="${XDG_RUNTIME_DIR:-/tmp}"
+FLAG="$R/rg35xxh-screen-off"
+STOPPED=${MUSIC_STOPPED_SECONDS:-60}
+case "$STOPPED" in ''|*[!0-9]*) STOPPED=60 ;; esac
+log() { echo "$(date '+%F %T') rg35xxh-music-idle: $*"; }
+
+rg35xxh-autosleep --music-playing || exit 0              # not playing: the normal auto-sleep
+[ -e "$FLAG" ] && exit 0                                 # the screen is already off
+for s in /sys/class/drm/card*-HDMI-*/status; do
+  [ "$(cat "$s" 2>/dev/null)" = connected ] && { log "HDMI connected, screen stays on"; exit 0; }
+done
+# swayidle -w waits for its commands: the watch below runs in the background, so this returns
+# at once and swayidle keeps seeing input.
+watch() {
+  exec 9>"$R/rg35xxh-music-idle.lock"
+  flock -n 9 || exit 0
+  log "music playing, no input: screen off"
+  rg35xxh-screen-off --music >>"${HOME}/.local/state/session/lowpower.log" 2>&1
+  quiet=0
+  while [ -e "$FLAG" ]; do
+    sleep 10
+    if rg35xxh-autosleep --music-playing; then quiet=0; else quiet=$((quiet + 10)); fi
+    if [ "$quiet" -ge "$STOPPED" ] && [ -e "$FLAG" ]; then
+      log "music stopped ${quiet} s ago with the screen off: screen on, then auto-sleep"
+      rg35xxh-screen-on
+      exec rg35xxh-autosleep
+    fi
+  done
+  log "screen back on"
+}
+watch </dev/null &

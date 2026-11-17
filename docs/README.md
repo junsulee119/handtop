@@ -24,6 +24,8 @@ How Handtop works on the RG35XX H. One document per app or background service; g
 | [apps/controls.md](apps/controls.md) | Controls: buttons, pointer, scrolling, sticks, vibration, timing, combinations, macros (with recording), profiles; the trial countdown and the boot-partition rescue |
 | [apps/external-controller.md](apps/external-controller.md) | External Controller: the handheld as a Bluetooth (Xbox), USB (Xbox 360) or Nintendo Switch game controller, status screen |
 | [apps/display.md](apps/display.md) | External display (mini HDMI) and the Display app: layouts, resolution, refresh rate |
+| [apps/videos.md](apps/videos.md) | Videos app and the video player (mpv): themed controls, buttons, resume, thumbnails |
+| [apps/music.md](apps/music.md) | Music app: folders, Now playing, no auto-sleep while playing, screen off with the music on |
 | [apps/files.md](apps/files.md) | Files: click-to-mount for the TF2 card and USB sticks, drive toasts |
 | [apps/theme.md](apps/theme.md) | Theme app and theme system: how themes are checked, rendered and applied |
 | [apps/power-menu.md](apps/power-menu.md) | Power button, power menu, sleep and auto-sleep, shutdown |

@@ -1,2 +1,2 @@
 # Desktop user may switch the low-power "Screen off" state without a password.
-%sudo ALL=(root) NOPASSWD: /usr/local/sbin/rg35xxh-lowpower on, /usr/local/sbin/rg35xxh-lowpower off
+%sudo ALL=(root) NOPASSWD: /usr/local/sbin/rg35xxh-lowpower on, /usr/local/sbin/rg35xxh-lowpower on-audio, /usr/local/sbin/rg35xxh-lowpower off

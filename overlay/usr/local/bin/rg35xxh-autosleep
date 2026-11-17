@@ -1,12 +1,20 @@
 #!/bin/sh
 # Called by swayidle after AUTOSLEEP_MINUTES without input (labwc autostart).
 # Skips sleeping while charging, in gamepad or external controller mode (controller input is not seen by the
-# compositor) or with an HDMI monitor connected. Apps that play video or stream
+# compositor), with an HDMI monitor connected or while the Music app plays. Apps that play video or stream
 # (Moonlight, Chromium, mpv) block idle themselves through the idle-inhibit protocol.
+#   rg35xxh-autosleep --music-playing   exit 0 if the Music app is playing (rg35xxh-music-idle)
 #   rg35xxh-autosleep           sleep, unless one of the cases above applies
 #   rg35xxh-autosleep --check   exit 0 if it would sleep now, 1 if not (silent; rg35xxh-dim uses it
 #                               so the screen never dims before a sleep that is not going to happen)
 [ -r /etc/rg35xxh/power.conf ] && . /etc/rg35xxh/power.conf
+# The Music app writes its PID to this file while it plays and removes it when it stops; a file
+# left by a crashed app names a dead process (or one that is not the Music app) and is ignored.
+music_playing() {
+  pid=$(head -c 16 "${XDG_RUNTIME_DIR:-/tmp}/rg35xxh-music-playing" 2>/dev/null | tr -cd 0-9)
+  [ -n "$pid" ] && { tr '\0' ' ' < "/proc/$pid/cmdline"; } 2>/dev/null | grep -q 'rg35xxh-music'
+}
+if [ "${1:-}" = --music-playing ]; then music_playing; exit; fi
 CHECK=; [ "${1:-}" = --check ] && CHECK=1
 log() { [ -n "$CHECK" ] || echo "$(date '+%F %T') rg35xxh-autosleep: $*"; }
 skip() { log "$*"; [ -n "$CHECK" ] && exit 1; exit 0; }
@@ -17,6 +25,9 @@ fi
 # the screen back on at low battery and shuts down cleanly before the battery runs flat.
 if [ -e "$XDG_RUNTIME_DIR/rg35xxh-screen-off" ]; then
   skip "Screen off, not sleeping"
+fi
+if music_playing; then
+  skip "music playing, not sleeping"
 fi
 if [ -e "$XDG_RUNTIME_DIR/rg35xxh-gamepad-mode" ] || [ -e "$XDG_RUNTIME_DIR/rg35xxh-bt-mode" ] ||
    [ -e "$XDG_RUNTIME_DIR/rg35xxh-wired-mode" ]; then

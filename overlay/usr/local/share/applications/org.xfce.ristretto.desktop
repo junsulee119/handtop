@@ -1,0 +1,16 @@
+# Handtop: Ristretto's own entry (/usr/share/applications/org.xfce.ristretto.desktop) under the
+# name "Image Viewer" in the app drawer. Same desktop id, so this copy replaces the package's one;
+# translations dropped, everything else unchanged. The default for images (/etc/xdg/mimeapps.list);
+# imv stays installed, hidden, as a second choice.
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Image Viewer
+GenericName=Image Viewer
+Comment=Look at your images
+Exec=ristretto %U
+Icon=org.xfce.ristretto
+Terminal=false
+StartupNotify=true
+Categories=GTK;Graphics;2DGraphics;Viewer;
+MimeType=image/png;image/gif;image/jpeg;image/bmp;image/x-pixmap;image/tiff;image/svg+xml;image/x-xpixmap;image/webp;

@@ -1,0 +1,14 @@
+#!/usr/bin/python3
+"""Handtop's Videos app: the videos in ~/Videos, played full screen in mpv (docs/apps/videos.md).
+The code is the handtop_media package (src/media)."""
+import sys
+
+sys.path.insert(0, "/usr/local/lib/rg35xxh-media")
+
+from handtop_media import ui  # noqa: E402
+
+_lock = ui.single_instance("rg35xxh-videos")
+
+from handtop_media import videos  # noqa: E402
+
+videos.run()

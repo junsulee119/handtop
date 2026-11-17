@@ -45,9 +45,11 @@ dosfstools
 eject                    # udisks ejects USB sticks with it (SD cards: /usr/local/sbin/eject wrapper)
 mousepad
 chromium                  # browser: about half Firefox's CPU when scrolling on this device (docs/desktop.md)
+ristretto                 # Image Viewer (GTK3, follows the theme); imv stays as a hidden second choice
 imv
 qpdfview
 mpv
+python3-mpv               # libmpv for the Music app (src/media)
 libva2                    # VA-API client library: Chromium and VLC decode on the VPU through it
 libva-drm2                # vaGetDisplayDRM(), for clients that hand the driver a render node
 xarchiver

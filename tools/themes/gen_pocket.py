@@ -439,6 +439,15 @@ MINI = {
     "xarchiver": ["__dddddddd__", "_dbbbbbbbbd_", "dbbbbbbbbbbd", "dddddddddddd", "dbbbbddbbbbd",
                   "dbbbdbbdbbbd", "dbbbbddbbbbd", "dbbbbbbbbbbd", "dbbbbbbbbbbd", "dccccccccccd",
                   "dddddddddddd", "____________"],
+    "ristretto": ["____________", "dddddddddddd", "dbbbbbbbbbbd", "dbbbbbbbddbd", "dbbbbbbbddbd",
+                  "dbbbdbbbbbbd", "dbbdcdbbbbbd", "dbdcccdbdbbd", "ddcccccdcdbd", "dcccccccccdd",
+                  "dddddddddddd", "____________"],   # a picture: a sun over two hills
+    "videos": ["dddddddddddd", "d_dd_dd_dd_d", "dddddddddddd", "dbbbbbbbbbbd", "dbbbbdbbbbbd",
+               "dbbbbddbbbbd", "dbbbbdddbbbd", "dbbbbddbbbbd", "dbbbbdbbbbbd", "dddddddddddd",
+               "d_dd_dd_dd_d", "dddddddddddd"],      # a film strip with a play sign
+    "music": ["____________", "____dddddddd", "____dddddddd", "____d______d", "____d______d",
+              "____d______d", "____d______d", "_dddd___dddd", "ddddd__ddddd", "_ddd____ddd_",
+              "____________", "____________"],       # two beamed notes
     "blueman": ["_____d______", "_____dd_____", "_____d_d____", "__d__d__d___", "___d_d_d____",
                 "____ddd_____", "_____d______", "____ddd_____", "___d_d_d____", "__d__d__d___",
                 "_____d_d____", "_____dd_____"],

@@ -37,7 +37,8 @@ chmod -R u=rwX,go=rX "$THEMES"
 H="$ROOTFS/usr/local/share/icons/hicolor/scalable/apps"
 mkdir -p "$H"
 for a in theme:app-theme external-controller:app-external-controller display:app-display \
-         enable-ssh:app-ssh recenter-sticks:app-recenter controls:app-controls; do
+         enable-ssh:app-ssh recenter-sticks:app-recenter controls:app-controls \
+         videos:app-videos music:app-music; do
   install -m644 "$TOP/overlay/usr/local/share/rg35xxh/icons/${a#*:}.png" "$H/rg35xxh-${a%%:*}.png"
 done
 # micro's package names its icon by path (/usr/share/micro/micro-logo-mark.svg); Handtop's

@@ -108,7 +108,8 @@ Selection rule: light apps for 1 GB RAM; Qt apps preferred where equal, since mo
 | Clipboard | `wl-clipboard` | Required by L3/R3 copy/paste |
 | Brightness / volume | `brightnessctl`, `wireplumber` (`wpctl`) | Used by F + Vol and Vol keys; the pop-up bar is Handtop's own `rg35xxh-osd`, see [services/osd.md](services/osd.md) |
 | Screenshots | `grim`, `slurp` | |
-| Viewers | `imv` (images), `qpdfview` (PDF), `mpv` (video, VPU decode — see [video-decode.md](video-decode.md)) | |
+| Viewers | `ristretto` (images, "Image Viewer"), `qpdfview` (PDF), `mpv` (video, VPU decode — see [video-decode.md](video-decode.md); Handtop controls and buttons in [apps/videos.md](apps/videos.md)), `imv` (hidden second choice for images) | Ristretto since 2026-11-17: GTK3, so it follows the theme, has a thumbnail strip and big toolbar buttons; imv has no interface to browse with |
+| Media apps | Handtop's **Videos** and **Music** (`src/media`, libmpv through `python3-mpv`) | [apps/videos.md](apps/videos.md), [apps/music.md](apps/music.md) |
 | Archives | `xarchiver` | |
 | System | `htop`, `git`, `zram-tools`, `systemd-timesyncd` | zram = compressed RAM swap |
 | Fonts | `fonts-noto-core`, `fonts-noto-cjk`, `fonts-noto-color-emoji` | CJK and emoji rendering |
@@ -118,6 +119,9 @@ Locale `en_US.UTF-8`, timezone UTC (change with `sudo timedatectl set-timezone A
 Heavy web browsing is the expected weak point (1 GB RAM).
 
 ### File associations
+
+Images open in Ristretto: `/etc/xdg/mimeapps.list` makes it the default for the image types, with
+imv second (both are installed and both list the types, and without the list GIO picked imv).
 
 `/usr/local/share/applications/mpv.desktop` is a full entry — `Exec=mpv -- %U`,
 an icon, and the video and audio types it handles — with `NoDisplay=true`: it

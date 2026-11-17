@@ -440,6 +440,23 @@ def app_glyph(name, c=INK, w=3):
         v.line([(24, 29), (32, 29)], w, c)
     elif name == "blueman":
         g_bt(v, cx, cy, 26, w, c)
+    elif name == "ristretto":
+        # a picture: frame, a sun, two hills
+        v.rrect(12, 15, 44, 41, 0, outline=c, width=w)
+        v.ellipse(33, 20, 39, 26, fill=c)
+        v.line([(14, 38), (23, 27), (30, 34), (34, 30), (42, 38)], w, c)
+    elif name == "videos":
+        # a screen with a play triangle, a short stand under it
+        v.rrect(11, 15, 45, 39, 0, outline=c, width=w)
+        v.poly([(24, 21), (24, 33), (34, 27)], fill=c)
+        v.line([(21, 44), (35, 44)], w, c)
+    elif name == "music":
+        # two beamed eighth notes
+        v.ellipse(14, 34, 24, 42, fill=c)
+        v.ellipse(32, 30, 42, 38, fill=c)
+        v.line([(22.5, 38), (22.5, 17)], w, c)
+        v.line([(40.5, 34), (40.5, 13)], w, c)
+        v.poly([(21, 15), (42, 11), (42, 17), (21, 21)], fill=c)
     return v.final()
 
 

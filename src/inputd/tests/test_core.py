@@ -876,6 +876,38 @@ def test_volume_repeat_ends_when_vol_is_remapped_while_held():   # M12
     assert ("cmd", "volume_up") not in c.tick(1.1) + c.tick(1.6)
 
 
+def test_screen_off_music_volume_keys_work():
+    c = Core()
+    c.set_screen_off(True, music=True)
+    assert c.button("vol_up", True, 0.0) == [("cmd", "volume_up")]
+    assert c.button("vol_up", False, 0.1) == []
+    assert c.button("vol_down", True, 0.2) == [("cmd", "volume_down")]
+    # Held: repeats like on the desktop, and the screen stays off.
+    out = c.tick(0.2 + c.s["vol_repeat_delay"] + 0.01)
+    assert ("cmd", "volume_down") in out and ("screen_wake",) not in out
+    c.button("vol_down", False, 2.0)
+    # Any other button still wakes and is swallowed.
+    assert c.button("a", True, 3.0) == [("screen_wake",)]
+    assert c.button("a", False, 3.1) == []
+
+
+def test_screen_off_music_volume_ignores_vol_binding():
+    c = Core()
+    c.bind["vol_up"] = "key:KEY_A"
+    c.set_screen_off(True, music=True)
+    assert c.button("vol_up", True, 0.0) == [("cmd", "volume_up")]
+    assert c.button("vol_up", False, 0.1) == []
+
+
+def test_screen_off_plain_volume_wakes():
+    c = Core()
+    c.set_screen_off(True)
+    assert c.button("vol_up", True, 0.0) == [("screen_wake",)]
+    assert c.button("vol_up", False, 0.1) == []
+    c.set_screen_off(False, music=True)
+    assert not c.screen_off_music
+
+
 if __name__ == "__main__":
     failed = 0
     tests = [(n, f) for n, f in sorted(globals().items()) if n.startswith("test_")]

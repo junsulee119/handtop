@@ -313,6 +313,12 @@ PNG only, exact pixel size, at the path shown (relative to the theme folder). Pi
 | `icons/apps/controls.png` | 56×56 | base theme's |
 | `icons/apps/controls@22.png` | 22×22 | made from `icons/apps/controls.png` (smooth downscale; draw it for crisp pixel art) if that one is yours, else the base theme's |
 | `icons/apps/controls@20.png` | 20×20 | made from `icons/apps/controls.png` (smooth downscale; draw it for crisp pixel art) if that one is yours, else the base theme's |
+| `icons/apps/videos.png` | 56×56 | base theme's |
+| `icons/apps/videos@22.png` | 22×22 | made from `icons/apps/videos.png` (smooth downscale; draw it for crisp pixel art) if that one is yours, else the base theme's |
+| `icons/apps/videos@20.png` | 20×20 | made from `icons/apps/videos.png` (smooth downscale; draw it for crisp pixel art) if that one is yours, else the base theme's |
+| `icons/apps/music.png` | 56×56 | base theme's |
+| `icons/apps/music@22.png` | 22×22 | made from `icons/apps/music.png` (smooth downscale; draw it for crisp pixel art) if that one is yours, else the base theme's |
+| `icons/apps/music@20.png` | 20×20 | made from `icons/apps/music.png` (smooth downscale; draw it for crisp pixel art) if that one is yours, else the base theme's |
 | `icons/apps/foot.png` | 56×56 | base theme's, *system ok* |
 | `icons/apps/foot@22.png` | 22×22 | made from `icons/apps/foot.png` (smooth downscale; draw it for crisp pixel art) if that one is yours, else the base theme's, *system ok* |
 | `icons/apps/foot@20.png` | 20×20 | made from `icons/apps/foot.png` (smooth downscale; draw it for crisp pixel art) if that one is yours, else the base theme's, *system ok* |
@@ -340,6 +346,9 @@ PNG only, exact pixel size, at the path shown (relative to the theme folder). Pi
 | `icons/apps/blueman.png` | 56×56 | base theme's, *system ok* |
 | `icons/apps/blueman@22.png` | 22×22 | made from `icons/apps/blueman.png` (smooth downscale; draw it for crisp pixel art) if that one is yours, else the base theme's, *system ok* |
 | `icons/apps/blueman@20.png` | 20×20 | made from `icons/apps/blueman.png` (smooth downscale; draw it for crisp pixel art) if that one is yours, else the base theme's, *system ok* |
+| `icons/apps/ristretto.png` | 56×56 | base theme's, *system ok* |
+| `icons/apps/ristretto@22.png` | 22×22 | made from `icons/apps/ristretto.png` (smooth downscale; draw it for crisp pixel art) if that one is yours, else the base theme's, *system ok* |
+| `icons/apps/ristretto@20.png` | 20×20 | made from `icons/apps/ristretto.png` (smooth downscale; draw it for crisp pixel art) if that one is yours, else the base theme's, *system ok* |
 | `icons/power-menu/sleep.png` | 72×72 | base theme's |
 | `icons/power-menu/sleep-focus.png` | 72×72 | base theme's |
 | `icons/power-menu/reboot.png` | 72×72 | base theme's |
@@ -398,7 +407,7 @@ Handtop places every image by its full size, never by what is drawn in it, so th
 
 ## App names
 
-Default apps only: `foot`, `thunar`, `mousepad`, `chromium`, `htop`, `micro`, `qpdfview`, `xarchiver`. Handtop's own apps keep their names.
+Default apps only: `foot`, `thunar`, `mousepad`, `chromium`, `htop`, `micro`, `qpdfview`, `xarchiver`, `ristretto`. Handtop's own apps keep their names.
 
 ## Limits
 
