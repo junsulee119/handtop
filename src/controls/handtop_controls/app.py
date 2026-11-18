@@ -223,6 +223,15 @@ class App(AdvancedMixin):
         for n in range(6):                           # three blinks
             self.flash_ids.append(GLib.timeout_add(130 * n, toggle, n % 2 == 0))
 
+    def _shield_mapped(self, _w):
+        # Showing the shield's input window raises it, and the notebook shows its own tab window
+        # without raising it: each time the main page comes back (after Change…, Advanced …) the
+        # shield ended up above the tab row and swallowed every tab click. Lower it again unless it
+        # is meant to be on top (rescue mode). Toggling above_child is the public way to restack it.
+        if not self.shield.get_above_child():
+            self.shield.set_above_child(True)
+            self.shield.set_above_child(False)
+
     def _shield_press(self, *_):
         if not self.cfg.app_settings:
             self.show_lock(None)
@@ -363,6 +372,7 @@ class App(AdvancedMixin):
         self.shield = Gtk.EventBox(visible_window=False)
         self.shield.add(self.tabs)
         self.shield.connect("button-press-event", self._shield_press)
+        self.shield.connect_after("map", self._shield_mapped)
         box.pack_start(self.shield, True, True, 0)
         # Scrolls when the banner above makes the window too short for it (normally it fits).
         sw = Gtk.ScrolledWindow(hscrollbar_policy=Gtk.PolicyType.NEVER)
