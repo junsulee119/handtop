@@ -26,7 +26,9 @@ Then after every step (it asks for your password; it reads only):
 ssh -t rg@192.168.200.155 "sudo sh /tmp/usb-otg-readings.sh"
 ```
 
-Write down for each step: the ID-detect pin value, the `mode` line, whether `usb0-vbus` is enabled, what `lsusb -t` shows, and the new kernel lines.
+Without `sudo` it shows everything except the ID pin. Write down for each step: the ID-detect pin value, the `mode` line, whether `usb0-vbus` is enabled, what `lsusb -t` shows, and the new kernel lines.
+
+Easier in practice (used on 2026-11-18): copy `usb-otg-watch.sh` too and run `sudo sh /tmp/usb-otg-watch.sh` during all steps; it prints a line whenever the ID pin, mode, 5 V supply, charger or USB device list changes. `usb-otg-snapshot.sh` (root) adds the 5 V enable pin and the host controller's port registers while a device is plugged in.
 
 ## Steps
 
@@ -46,4 +48,4 @@ Write down for each step: the ID-detect pin value, the `mode` line, whether `usb
 - **ID goes low and the keyboard works:** the kernel path (switching, 5 V on and off, the outside-power cut) is proven on this SoC; what is left per model is only the board wiring.
 - **Anything in between** (ID low but no keyboard, 5 V stays on after unplugging, a hang): stop, keep the logs, and we look at it before anything else.
 
-Record the result in `ports/testing/reports/` (date, image, unit DDR4 / DDR3, readings per step).
+Record the result in `ports/testing/reports/` (date, image, unit DDR4 / DDR3, readings per step). First run: [reports/2026-11-18-usb-otg-host-rg35xx-h.md](reports/2026-11-18-usb-otg-host-rg35xx-h.md).
