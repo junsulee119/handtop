@@ -1,0 +1,10 @@
+# Files Debian packages own (registered conffiles) that Handtop replaces. Each is moved aside with
+# dpkg-divert --rename by the package below before Handtop's copy is unpacked, so Debian's later
+# updates write to <path>.debian instead of over Handtop's file (project doc update-system.md).
+# package          path                                Debian owner
+handtop-core       /etc/default/zramswap               zram-tools
+handtop-desktop    /etc/wlogout/layout                 wlogout
+handtop-desktop    /etc/wlogout/style.css              wlogout
+handtop-desktop    /etc/xdg/foot/foot.ini              foot
+handtop-desktop    /etc/xdg/waybar/config.jsonc        waybar
+handtop-desktop    /etc/xdg/waybar/style.css           waybar
