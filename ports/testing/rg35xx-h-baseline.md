@@ -7,7 +7,7 @@ The reference is **v0.4.1** (`93ea1bc`, 2026-11-18): everything below worked the
 ## Without the device
 
 - [ ] `tools/ci-checks.sh` passes (shell syntax, shellcheck errors, py_compile, input daemon and External Controller tests).
-- [ ] **Image diff:** the RG35XX H image built from the branch has the same files, modes and contents as one built from `main` at the same base, except the profile and files the change meant to touch. Every other difference is explained in the PR. (The diff tool is part of phase P2; until it exists, compare file lists and checksums of both root filesystems by hand.)
+- [ ] **Image diff:** the RG35XX H image built from the branch has the same files, modes and contents as one built from `main` at the same base, except the model ID and files the change meant to touch. Every other difference is explained in the PR. (The diff tool is part of phase P2; until it exists, compare file lists and checksums of both root filesystems by hand.)
 - [ ] Boot partition: `dtb.img` = `dtb-regular.img`, `dtb-rev6.img` and `dtb-rocknix.img` present, `extlinux.conf` unchanged, `panel.txt` / `wifi.txt` / input rescue file unchanged.
 - [ ] Headless screenshots (`tools/headless-test.sh`, `tools/waybar-test.sh`, `tools/osk-test.sh`) at 640×480 match the reference in all nine themes.
 

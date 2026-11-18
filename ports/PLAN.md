@@ -1,6 +1,6 @@
 # Handtop on more handhelds: plan
 
-**Status (2026-11-18):** direction agreed with Jason (maintainer); P0 written, waiting for review; nothing implemented in code yet. All work happens on the `device-support` branch. The phases below are all open; tick them off with the commits and tests that closed them.
+**Status (2026-11-18):** direction agreed with Jason (maintainer); P0 done (`2716888`); nothing implemented in code yet. Next: P1, then "Updates without reflashing" on `main`, then P2 onward (see "Order with the update system"). Work for this plan happens on the `device-support` branch. The phases below are all open; tick them off with the commits and tests that closed them.
 
 This file is the working plan for running Handtop on handhelds other than the Anbernic RG35XX H. Profiles, evidence and test status for each model live next to it in `ports/`, so anyone can see from the repository where things stand.
 
@@ -14,15 +14,16 @@ This file is the working plan for running Handtop on handhelds other than the An
 6. **"Test required" images.** New models are released once their image builds and passes the build checks, before anyone has run it on that hardware. Community testing moves each model on (see "Status and test reports").
 7. **Every component follows the real screen size**: no 640×480 area centred on a bigger screen. Checked first on a virtual test platform made from the model's profile, then on hardware.
 8. **On-device reporter app** (problem reports and feature suggestions to GitHub Issues, through ChatGPT Sites) ships before the first "Test required" release.
-9. **A card moved to a different model is not supported** (it carries the wrong device tree). Later: a Handtop transfer app that moves a user's data from one device to another.
-10. **Everything about this work is in `ports/`, in English.** An earlier Korean draft of this plan is kept locally and ignored by git.
+9. **Updates without reflashing come before P2** (Jason, 2026-11-18), so the first "Test required" testers get fixes as updates instead of reflashing. See "Order with the update system".
+10. **A card moved to a different model is not supported** (it carries the wrong device tree). Later: a Handtop transfer app that moves a user's data from one device to another.
+11. **Everything about this work is in `ports/`, in English.** An earlier Korean draft of this plan is kept locally and ignored by git.
 
 ## Layers
 
 | Layer | Examples | Decided when |
 |---|---|---|
 | Global | Desktop, input logic, themes, apps, External Controller modes | Shared code, the same in every image |
-| Model | Screen size and rotation, which input devices to take and how their buttons map, LEDs, sticks (0 / 1 / 2), Wi-Fi present, lid, USB port roles, which variant checks exist | Build time: the model's profile, installed into its image |
+| Model | Screen size and rotation, which input devices to take and how their buttons map, LEDs, sticks (0 / 1 / 2), Wi-Fi present, lid, USB port roles, which variant checks exist | Build time: the image records which model it is; the model's profile comes from a package, so updates can fix it |
 | Variant the user can tell (and the bootloader needs) | DDR3 / DDR4 | Build time: a separate image |
 | Variant the user can't tell | RG35XX H regular / rev6 panel | Every boot: a check for that model, enabled by its profile |
 
@@ -33,17 +34,19 @@ Rules:
 
 ### Where model values come from
 
-- **The profile** is installed into the image at build time (proposed: `/etc/handtop/device.json`, plus a copy on the boot partition for reports and recovery). The exact format is decided in P2.
+- **The model ID** (for example `rgcubexx`, plus the RAM type) is written into the image at build time; nothing else model-specific is baked in outside the boot partition.
+- **The profiles** of all models ship in a package from the update system, and the device uses the one matching its model ID. A profile fixed from a community report then reaches devices as an update. The exact format and paths are decided in P2.
+- **The boot partition** (device trees, U-Boot) is per image and changes only by reflashing; a profile fix that needs a device-tree change needs a new image.
 - **Programs** (input daemon, on-screen keyboard, apps, status screens) read the profile when they start, and take the screen size from the real output, which also covers HDMI.
-- **Static configs** that can't read a file (labwc `rc.xml`, kanshi, Waybar's config) get their values either rendered at image build from the profile or rendered at session start the way the theme system already renders configs. Decided per file in P3.
+- **Static configs** that can't read a file (labwc `rc.xml`, kanshi, Waybar's config) are rendered from the profile **at session start**, the way the theme system already renders configs. Not at image build: a package update would overwrite a file rendered there.
 
 ## Build
 
-- One shared Debian root filesystem per release; for each image only the bootloader (RAM type), device trees, the profile and the configs rendered from it differ.
+- One shared Debian root filesystem per release; for each image only the bootloader (RAM type), the device trees and the model ID differ.
 - Measured on 2026-11-18 (v0.4.1 build): about 38 minutes for the first image, about 1.5 minutes for each further image that reuses the root filesystem. Three models with two RAM types each would take roughly 45–50 minutes.
 - The per-image step must not change the shared root filesystem (it writes into that image's partition files), so images can't leak into each other.
 - Each profile lists its valid combinations (RAM types, panels, device trees) explicitly. Nothing is generated as a cross product.
-- **RG35XX H regression check:** the H image built from the branch must match the previous release's file for file, except for the profile and files deliberately changed. Checked with a file list and checksum diff.
+- **RG35XX H regression check:** the H image built from the branch must match the previous release's file for file, except for the model ID and files deliberately changed. Checked with a file list and checksum diff.
 - Proposed image names: `handtop-<date>-<version>-<model>.img.xz`, with `-DDR3` where needed. The RG35XX H's existing names may stay as they are; decided in P2.
 
 ## Screen sizes
@@ -63,13 +66,27 @@ Every screen size is checked in all nine built-in themes; High contrast (larger 
 
 Built from a profile, no hardware needed: the existing headless tools take a profile and run labwc at its screen size, open every app and status screen, and save screenshots per theme. QEMU boots the root filesystem at that size. What only hardware can show (panel, input devices, radios, power, motor) stays in the hardware test list.
 
+## Order with the update system
+
+Decided 2026-11-18 (Jason): **P1 → "Updates without reflashing" → P2 onward.**
+
+- P1 is research only and touches no code, so it runs first.
+- The update system (signed apt repository of `handtop-*` packages on GitHub Pages, an Update app, a bootstrap for older installs; planned in the project roadmap, issue #4) is built on `main`. `device-support` is then rebased onto it, so the two never restructure `build/` and `overlay/` on parallel branches.
+- Why first: "Test required" models will get many quick fixes from reports, and testers who must reflash for each one lose their data and drop out. The bootstrap also only has to cover RG35XX H installs (v0.2 – v0.4.1) instead of every model's early images.
+- What the update system must allow for, so P2 fits on it without rework:
+  - a model ID written into the image, and profiles shipped as package data (above);
+  - configs rendered at session start, never files a package would overwrite;
+  - kernel modules packaged per platform and kernel version (all H700 models share ROCKNIX's one H700 kernel; RK3566 would add its own package, not a second repository);
+  - the Update app saying when a fix needs a new image (boot partition) instead of an update.
+- Costs accepted: device support starts later by the update work (estimated 4–5 sessions plus 5–6 hours of Jason's time); every release also publishes packages; the signing key needs care; releases add an upgrade test from the previous version.
+
 ## Phases
 
 | # | Phase | Done when | Hardware |
 |---|---|---|---|
 | P0 | Rules and baseline (written 2026-11-18: AGENTS.md, `testing/rg35xx-h-baseline.md`) | AGENTS.md says how "Test required" images relate to the tested-before-merge rule (it still applies in full to the RG35XX H and to shared code); the screen-size rule is updated; a list of what an RG35XX H must keep doing, used as the regression test | None |
 | P1 | Choose targets | One evidence page per candidate in `ports/evidence/`: screen, controls, radios, RAM and panel variants, how its device tree differs from the H's, sources, open questions; plus community-use findings. Jason picks 2–3 | None |
-| P2 | Profiles and build | Profile format and validation, the RG35XX H profile, profiles for the chosen models, the build loop for one image per model and variant, the regression check passes for the H | None |
+| P2 | Profiles and build (after the update system) | Profile format and validation, the profiles package, the RG35XX H profile, profiles for the chosen models, the build loop for one image per model and variant, the regression check passes for the H | None |
 | P3 | Code reads the profile | Input devices and mapping, outputs, LEDs and variant checks come from the profile (PE6 only on the H); every component follows the real screen size; the virtual test platform passes for every target in all nine themes; full on-device regression test on an RG35XX H (DDR4 and DDR3 where it matters) | RG35XX H |
 | P4 | Reporter app | Report / suggest choice, auto-filled diagnostics, hiding log lines before sending, preview, offline queue with the same report ID on retry, labels and duplicate handling on the Sites side | RG35XX H |
 | P5 | First "Test required" release | Images for the chosen models as a pre-release, `ports/README.md` status table, a short test checklist for testers | Community |
@@ -140,7 +157,6 @@ The hardware-safety rules and the reliability checklist apply unchanged to every
 ## Open questions
 
 - Profile format, validation, and how it relates to the user's own settings on the boot partition (P2).
-- Which static configs are rendered at build and which at session start (P3).
 - Controls for models without sticks; layout rules for square, wide and rotated screens; HDMI next to a non-640×480 panel (P3).
 - Image names, release grouping and version names (P2 / P5).
 - What "Basic confirmed", "Features confirmed" and supported each require (before P5).
