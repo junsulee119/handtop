@@ -4,3 +4,6 @@
 *.img.gz
 *.img.xz
 __pycache__/
+
+# Earlier Korean draft of the multi-device plan, kept locally only (ports/PLAN.md replaces it)
+/ports/PLAN-astra-ko.md
