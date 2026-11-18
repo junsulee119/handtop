@@ -14,6 +14,7 @@ How Handtop works on the RG35XX H. One document per app or background service; g
 | [ci.md](ci.md) | CI: the checks every push and pull request runs (`tools/ci-checks.sh`), and how to run them locally |
 | [upstreams.md](upstreams.md) | Pinned pieces outside apt (`build/upstreams.conf`), the weekly drift check and its issue, how to update or waive |
 | [release-checklist.md](release-checklist.md) | Before tagging a release: CI, upstream drift, images, device tests |
+| [apt-repository.md](apt-repository.md) | Handtop's signed apt repository (for updates without reflashing): suites, signing key, scripts in `tools/apt/`, publishing, the monthly re-sign |
 | [audits/](audits/README.md) | Codebase audits and how their findings are tracked |
 | [reliability-checklist.md](reliability-checklist.md) | **Scenarios to think through before every PR**: power cuts, interruptions, restart loops, first boot, Windows-edited files, other units, recovery |
 
