@@ -18,6 +18,7 @@ DEBIAN_SUITE="trixie"
 DEBIAN_MIRROR="https://deb.debian.org/debian"
 
 ROOTFS="$WORK/rootfs"              # Debian root filesystem being built
+MODEL_ID="rg35xx-h"                # written to /etc/handtop/model; selects the profile (device support)
 KVER="7.2.0"                       # ROCKNIX kernel version (must match modules/)
 # Hardware video decoder module (06b-cedrus.sh): same kernel source + compiler as ROCKNIX
 LINUX_VERSION="7.2"

@@ -21,13 +21,23 @@ fi
 PKG_OUT="$WORK/pkg"
 [ -d "$PKG_OUT" ] && safe_rm -r "$PKG_OUT"
 HANDTOP_FFMPEG_VERSION="$FFMPEG_HANDTOP_VERSION" python3 "$TOP/build/pkg/build-debs.py" "$ROOTFS" "$PKG_OUT" "$PKG_VERSION"
+# Kernel modules (refuse a card with another kernel) and the metapackages.
+[ -f "$ROOTFS/etc/handtop/boot-abi" ] || die "no /etc/handtop/boot-abi (06-hardware.sh writes it)"
+KSHA=$(sha256sum "$ROCKNIX_EX/boot/KERNEL" | cut -d' ' -f1)
+grep -qx "kernel_sha256=$KSHA" "$ROOTFS/etc/handtop/boot-abi" || die "/etc/handtop/boot-abi does not name this build's KERNEL ($KSHA)"
+python3 "$TOP/build/pkg/build-platform-debs.py" "$ROOTFS" "$PKG_OUT" "$PKG_VERSION" "$KVER" "$KSHA"
 
 chroot_mount
 mkdir -p "$ROOTFS/tmp/handtop-pkg"
-cp "$PKG_OUT"/handtop-*.deb "$ROOTFS/tmp/handtop-pkg/"
-in_chroot "dpkg -i --force-confdef --force-confold /tmp/handtop-pkg/handtop-core_*.deb /tmp/handtop-pkg/handtop-desktop_*.deb /tmp/handtop-pkg/handtop-video_*.deb"
+cp "$PKG_OUT"/handtop*.deb "$ROOTFS/tmp/handtop-pkg/"
+in_chroot "dpkg -i --force-confdef --force-confold /tmp/handtop-pkg/handtop*.deb"
 safe_rm -r "$ROOTFS/tmp/handtop-pkg"
-in_chroot "dpkg-query -W handtop-core handtop-desktop handtop-video"
+in_chroot "dpkg-query -W 'handtop*'" | grep -q '^handtop\s' || die "the handtop metapackage is not installed"
+in_chroot "dpkg-query -W 'handtop*'"
+while read -r m _; do
+  case "$m" in ""|\#*) continue ;; esac
+  in_chroot "dpkg -S /usr/lib/modules/$KVER/$m" | grep -q "^handtop-modules-h700-$KVER:" || die "$m is not owned by the modules package"
+done < "$TOP/build/pkg/modules.txt"
 
 # Nothing classed as Handtop's may stay unowned (FFmpeg's files belong to its packages from 04c).
 left=$(for c in handtop-core handtop-desktop handtop-video; do python3 "$TOP/build/pkg/audit-unowned.py" "$ROOTFS" --list "$c"; done)

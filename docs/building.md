@@ -31,7 +31,7 @@ sudo bash build/10-image.sh         # assembles work/out/handtop-<date>-<version
 | `05-configure-base.sh` | Overlay files, hostname, user, locale, timezone, fstab |
 | `06-hardware.sh` / `06b-cedrus.sh` | ROCKNIX modules/firmware, H700 quirks; builds the video decoder module (see `video-decode.md`) |
 | `07-desktop.sh` / `08-input.sh` / `09-services.sh` | Auto-login session, input daemon, system services |
-| `09b-packages.sh` | Handtop's own files become the `handtop-core`, `handtop-desktop` and `handtop-video` (VA driver) packages (`build/pkg/`), installed back into the rootfs unchanged so dpkg owns them; packages kept in `work/pkg/` for the apt repository ([apt-repository.md](apt-repository.md)) |
+| `09b-packages.sh` | Handtop's own files become the `handtop-core`, `handtop-desktop` and `handtop-video` (VA driver) packages, the kernel modules `handtop-modules-h700-<kernel>`, and the metapackages `handtop-platform-h700` and `handtop` (`build/pkg/`), installed back into the rootfs unchanged so dpkg owns them; packages kept in `work/pkg/` for the apt repository ([apt-repository.md](apt-repository.md)) |
 | `10-image.sh` | Partitions built as files (no loop devices) and written into the `.img`, then compressed |
 
 Settings (user name, default password, timezone, versions, CMA size) are in `build/config.sh`.

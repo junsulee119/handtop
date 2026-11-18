@@ -16,6 +16,11 @@ OUT="$WORK/out"; mkdir -p "$OUT"
 IMG="$OUT/$IMAGE_NAME-$VER.img"
 P="$WORK/image-parts"; [ -e "$P" ] && safe_rm -r "$P"; mkdir -p "$P"
 
+# --- which model and RAM type this image is for (the rootfs is shared by the DDR4 and DDR3 images)
+mkdir -p "$ROOTFS/etc/handtop"
+printf 'model=%s\nram=%s\n' "$MODEL_ID" "$RAM_TYPE" > "$ROOTFS/etc/handtop/model"
+chmod 644 "$ROOTFS/etc/handtop/model"
+
 # --- per-device identity must not ship in the image
 : > "$ROOTFS/etc/machine-id"                       # systemd generates one on first boot
 for k in "$ROOTFS"/etc/ssh/ssh_host_*; do [ -e "$k" ] && safe_rm "$k"; done   # regenerated on first boot

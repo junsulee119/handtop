@@ -71,6 +71,17 @@ History: two freezes on 2026-10-28 (Mario Kart in Switch Controller mode over Bl
 
 Worth reporting upstream to ROCKNIX (the same driver is used on their other devices with a motor).
 
+## Packaging (updates without reflashing)
+
+The five modules Handtop builds (`build/pkg/modules.txt`) ship as one package, `handtop-modules-h700-<kernel>` (`build/pkg/build-platform-debs.py`, run by `09b`), pulled in by `handtop-platform-h700`. They only fit the exact `KERNEL` on the boot partition, which changes only by reflashing, so:
+
+- `06-hardware.sh` writes `/etc/handtop/boot-abi` (platform, ROCKNIX release, kernel release, SHA-256 of `KERNEL`); ROCKNIX's DDR3 and DDR4 images carry the same `KERNEL` (checked 2026-11-18).
+- The package's `preinst` refuses to unpack unless `boot-abi` names the `KERNEL` it was built for: on a card with another kernel, an update stops with "a new image is needed" and changes nothing.
+- On an upgrade it keeps the patched joypad driver being replaced as `/var/lib/handtop/modules/rocknix-singleadc-joypad.ko.previous`, for the recovery path (never ROCKNIX's original, which has the vibration deadlock).
+- `postinst` only runs `depmod`; nothing is loaded. The new modules take effect at the next restart (`/run/reboot-required`).
+
+Tested 2026-11-18 on a copy of the rootfs: installed and owned; an upgrade kept the previous joypad driver and asked for a restart; a package for another kernel was refused with nothing changed.
+
 ## Updating to a new ROCKNIX release
 
 1. Set `ROCKNIX_VERSION` (and the image checksums) in `build/config.sh`, and `JOYPAD_COMMIT` / `JOYPAD_SHA256` from that release's `projects/ROCKNIX/packages/linux-drivers/rocknix-joypad/package.mk`.

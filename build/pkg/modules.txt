@@ -1,0 +1,7 @@
+# Kernel modules Handtop builds for ROCKNIX's H700 kernel (06b-06e), relative to
+# /usr/lib/modules/<kernel>/. Shipped as one set in handtop-modules-h700-<kernel>.
+extra/sunxi-cedrus.ko
+kernel/drivers/media/v4l2-core/v4l2-vp9.ko
+extra/usb_f_fs_xinput.ko
+extra/uhid.ko
+rocknix-joypad/rocknix-singleadc-joypad.ko
