@@ -27,11 +27,11 @@ sudo bash build/10-image.sh         # assembles work/out/handtop-<date>-<version
 | `03-debootstrap.sh` | Debian 13 trixie arm64 base |
 | `04-install-packages.sh` | Package lists in `build/packages/`, Moonlight and Tailscale repositories |
 | `04b-nwg-drawer.sh` | Cross-compiles nwg-drawer (not packaged in Debian) |
-| `04c-v4l2-ffmpeg.sh` | Cross-builds FFmpeg with the V4L2 request-API hwaccels (Cedrus VPU) and installs it over Debian's libs |
+| `04c-v4l2-ffmpeg.sh` | Cross-builds FFmpeg with the V4L2 request-API hwaccels (Cedrus VPU) from Debian's own source package, packages it under Debian's names (`+handtop1`, kept in `work/pkg-ffmpeg/`) and installs those over Debian's ([video-decode.md](video-decode.md#packages)) |
 | `05-configure-base.sh` | Overlay files, hostname, user, locale, timezone, fstab |
 | `06-hardware.sh` / `06b-cedrus.sh` | ROCKNIX modules/firmware, H700 quirks; builds the video decoder module (see `video-decode.md`) |
 | `07-desktop.sh` / `08-input.sh` / `09-services.sh` | Auto-login session, input daemon, system services |
-| `09b-packages.sh` | Handtop's own files become the `handtop-core` and `handtop-desktop` packages (`build/pkg/`), installed back into the rootfs unchanged so dpkg owns them; packages kept in `work/pkg/` for the apt repository ([apt-repository.md](apt-repository.md)) |
+| `09b-packages.sh` | Handtop's own files become the `handtop-core`, `handtop-desktop` and `handtop-video` (VA driver) packages (`build/pkg/`), installed back into the rootfs unchanged so dpkg owns them; packages kept in `work/pkg/` for the apt repository ([apt-repository.md](apt-repository.md)) |
 | `10-image.sh` | Partitions built as files (no loop devices) and written into the `.img`, then compressed |
 
 Settings (user name, default password, timezone, versions, CMA size) are in `build/config.sh`.

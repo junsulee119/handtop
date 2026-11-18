@@ -29,9 +29,13 @@ def canon(p):
     return p
 
 
-def owned_paths(root):
+def owned_paths(root, ignore_prefix=None):
+    """Paths dpkg owns. ignore_prefix: packages whose files count as not owned (build-debs.py
+    passes "handtop-", so a rootfs that already has Handtop's packages is packaged again)."""
     owned = set()
     for lst in glob.glob(os.path.join(root, "var/lib/dpkg/info/*.list")):
+        if ignore_prefix and os.path.basename(lst).startswith(ignore_prefix):
+            continue
         with open(lst, errors="replace") as f:
             for line in f:
                 owned.add(canon(line.rstrip("\n")))

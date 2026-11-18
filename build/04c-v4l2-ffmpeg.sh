@@ -23,7 +23,8 @@
 # has no interop for the v4l2request hwdevice and only the copy path works, which
 # caps 1080p below real time. See docs/video-decode.md ("Zero-copy").
 #
-# Source = the FFmpeg release Debian ships (FFMPEG_VERSION, now 7.1.5) + Kwiboo's
+# Source = Debian's own ffmpeg source package (FFMPEG_DEBIAN_VERSION: upstream FFMPEG_VERSION,
+# now 7.1.5, plus any patches Debian carries; 7.1.5-0+deb13u1 carries none) + Kwiboo's
 # patchset, applied as one diff (KWIBOO_BASE..KWIBOO_PIN: his branch
 # v4l2-request-n7.1.3 minus n7.1.3 itself). Up to v0.3.5 the build used Kwiboo's
 # branch as is, i.e. FFmpeg n7.1.3: about 388 upstream commits behind Debian's
@@ -33,8 +34,10 @@
 # mpv 0.40, Chromium and VLC were built against, so nothing else is rebuilt.
 # How to bump it: docs/video-decode.md, "Updating FFmpeg".
 #
-# The build installs into a staging folder first and copies that into the rootfs,
-# so the same build can later produce packages (planned updates without reflashing).
+# The build installs into a staging folder; build/pkg/build-ffmpeg-debs.py turns that into
+# packages with Debian's names (libavcodec61, ..., ffmpeg, the -dev packages) and version
+# FFMPEG_HANDTOP_VERSION (Debian's + "+handtop1"), split and described like Debian's own .debs of
+# the same version, and dpkg installs them over Debian's (updates without reflashing, step 3).
 #
 # Debian's ffmpeg is built against ~60 external libraries; a build with only
 # drm/udev/dav1d would drop most of them -- no gnutls, so libavformat has no
@@ -73,40 +76,81 @@ SECURITY_FIXES=(
 DEV_PKGS=(libdrm-dev libudev-dev zlib1g-dev libdav1d-dev
           libgnutls28-dev libx264-dev libmp3lame-dev libopus-dev
           libvorbis-dev libvpx-dev libass-dev libfreetype6-dev libxml2-dev
-          libva-dev)
+          libva-dev libvdpau-dev)
 
 # Runtime side of the same features. The replacement libav* link against these,
 # so they have to be in the image; installing them explicitly also keeps them
 # there (the ones that only Debian's libav* pulled in would otherwise be
 # candidates for autoremove).
 RUNTIME_PKGS=(libgnutls30t64 libx264-164 libmp3lame0 libopus0 libvorbis0a
-               libvpx9 libass9 libfreetype6 libxml2 libunibreak6 libva2)
+               libvpx9 libass9 libfreetype6 libxml2 libunibreak6 libva2 libvdpau1)
 
-# dpkg-owned libraries we overwrite. Holding them keeps an upgrade from
-# replacing them and silently dropping the VPU path again.
+# Our packages under Debian's names. Held until the image has Handtop's apt source (then a pin
+# to Handtop's repository replaces the hold, project doc update-system.md): otherwise Debian's
+# next security version would replace them and silently drop the VPU path.
 HOLD_PKGS=(libavcodec61 libavdevice61 libavfilter10 libavformat61
-           libavutil59 libpostproc58 libswresample5 libswscale8)
+           libavutil59 libpostproc58 libswresample5 libswscale8 ffmpeg)
+# Debian's binary packages of the same version: the reference for how files split into packages,
+# their control fields, shlibs / symbols, copyright and changelogs.
+REF_PKGS=(ffmpeg libavcodec61 libavdevice61 libavfilter10 libavformat61 libavutil59 libpostproc58
+          libswresample5 libswscale8 libavcodec-dev libavdevice-dev libavfilter-dev libavformat-dev
+          libavutil-dev libpostproc-dev libswresample-dev libswscale-dev)
 
 chroot_mount
 in_chroot "apt-get update -qq && apt-get install -y -qq --no-install-recommends ${DEV_PKGS[*]} ${RUNTIME_PKGS[*]}"
 chroot_umount
 
-[ -e "$SRC" ] && safe_rm -r "$SRC"
-[ -e "$STAGE" ] && safe_rm -r "$STAGE"
-mkdir -p "$SRC" "$STAGE"
-git init -q "$SRC"
-# The release, and Kwiboo's branch deep enough to reach its base (KWIBOO_COMMITS + 1).
-(cd "$SRC" && git remote add ffmpeg "$FFMPEG_URL" && git remote add kwiboo "$KWIBOO_URL" \
-  && git fetch -q --depth 1 ffmpeg "$FFMPEG_COMMIT" \
-  && git fetch -q --depth $((KWIBOO_COMMITS + 1)) kwiboo "$KWIBOO_PIN" \
-  && git checkout -q "$FFMPEG_COMMIT")
-[ "$(cd "$SRC" && git rev-parse HEAD)" = "$FFMPEG_COMMIT" ] || die "ffmpeg checkout mismatch"
-[ "$(cat "$SRC/RELEASE")" = "$FFMPEG_VERSION" ] || die "FFMPEG_COMMIT is not release $FFMPEG_VERSION"
-[ "$(cd "$SRC" && git rev-list --count "$KWIBOO_BASE..$KWIBOO_PIN")" = "$KWIBOO_COMMITS" ] \
+DEB="$WORK/download/ffmpeg-debian"   # Debian's source and reference packages
+KW="$WORK/src/ffmpeg-kwiboo"
+for d in "$SRC" "$STAGE" "$DEB" "$KW" "$WORK/pkg-ffmpeg" "$ROOTFS/tmp/ffdeb"; do
+  [ -e "$d" ] && safe_rm -r "$d"
+done
+mkdir -p "$SRC" "$STAGE" "$DEB/src" "$DEB/ref" "$ROOTFS/tmp/ffdeb"
+
+# Debian's source package and its binary packages of that version, fetched by apt in the rootfs,
+# which checks them against trixie-security's signed indexes. The source needs a deb-src line for
+# the moment; it is removed right after.
+src_list="$ROOTFS/etc/apt/sources.list.d/zz-handtop-ffmpeg-src.list"
+grep -h '^deb .*-security' "$ROOTFS/etc/apt/sources.list" | sed 's/^deb /deb-src /' > "$src_list"
+[ -s "$src_list" ] || die "no -security line in the rootfs' sources.list"
+refs=""
+for p in "${REF_PKGS[@]}"; do refs="$refs $p=$FFMPEG_DEBIAN_VERSION"; done
+chroot_mount
+fetched=1
+in_chroot "apt-get update -qq && cd /tmp/ffdeb && apt-get source -qq --download-only ffmpeg=$FFMPEG_DEBIAN_VERSION && apt-get download -qq$refs" || fetched=0
+safe_rm "$src_list"
+in_chroot "apt-get update -qq"
+chroot_umount
+[ "$fetched" = 1 ] || die "Debian's ffmpeg $FFMPEG_DEBIAN_VERSION could not be fetched (superseded in trixie-security? bump FFMPEG_DEBIAN_VERSION, docs/video-decode.md)"
+mv "$ROOTFS"/tmp/ffdeb/*.deb "$DEB/ref/"
+mv "$ROOTFS"/tmp/ffdeb/ffmpeg_* "$DEB/src/"
+safe_rm -r "$ROOTFS/tmp/ffdeb"
+
+orig="$DEB/src/ffmpeg_$FFMPEG_VERSION.orig.tar.xz"
+debian_tar=$(find "$DEB/src" -maxdepth 1 -name 'ffmpeg_*.debian.tar.xz' | head -n1)
+[ -f "$orig" ] && [ -f "$debian_tar" ] || die "Debian's ffmpeg source is not orig.tar.xz + debian.tar.xz"
+tar -C "$SRC" --strip-components=1 -xf "$orig"
+tar -C "$SRC" -xf "$debian_tar"
+[ "$(cat "$SRC/RELEASE")" = "$FFMPEG_VERSION" ] || die "Debian's source is not FFmpeg $FFMPEG_VERSION"
+debian_patches=0
+if [ -f "$SRC/debian/patches/series" ]; then
+  while read -r p _; do
+    case "$p" in ""|\#*) continue ;; esac
+    patch -d "$SRC" -p1 --forward -s < "$SRC/debian/patches/$p" || die "Debian's patch $p does not apply"
+    debian_patches=$((debian_patches + 1))
+  done < "$SRC/debian/patches/series"
+fi
+git init -q "$SRC"     # its own repository, so git apply below works on it and not on Handtop's
+
+# Kwiboo's branch, deep enough to reach its base (KWIBOO_COMMITS + 1), only to take the diff.
+git init -q "$KW"
+(cd "$KW" && git remote add kwiboo "$KWIBOO_URL" \
+  && git fetch -q --depth $((KWIBOO_COMMITS + 1)) kwiboo "$KWIBOO_PIN")
+[ "$(cd "$KW" && git rev-list --count "$KWIBOO_BASE..$KWIBOO_PIN")" = "$KWIBOO_COMMITS" ] \
   || die "Kwiboo's branch is not $KWIBOO_COMMITS commits on top of $KWIBOO_BASE"
 # git apply is all or nothing: one hunk that doesn't fit and nothing is changed.
-(cd "$SRC" && git diff --binary "$KWIBOO_BASE" "$KWIBOO_PIN" | git apply) \
-  || die "Kwiboo's patchset does not apply onto FFmpeg $FFMPEG_VERSION"
+(cd "$KW" && git diff --binary "$KWIBOO_BASE" "$KWIBOO_PIN") | (cd "$SRC" && git apply) \
+  || die "Kwiboo's patchset does not apply onto Debian's ffmpeg $FFMPEG_DEBIAN_VERSION"
 [ -f "$SRC/libavutil/hwcontext_v4l2request.c" ] || die "Kwiboo's patchset is missing after applying it"
 for fix in "${SECURITY_FIXES[@]}"; do
   IFS='|' read -r cve file line <<< "$fix"
@@ -125,7 +169,7 @@ grep -q "HWACCEL_DRM_V4L2REQUEST" "$SRC/libavcodec/hwconfig.h" || die "DRM-regis
 
 export PKG_CONFIG_SYSROOT_DIR="$ROOTFS"
 export PKG_CONFIG_LIBDIR="$ROOTFS/usr/lib/aarch64-linux-gnu/pkgconfig:$ROOTFS/usr/share/pkgconfig"
-(cd "$SRC" && ./configure --arch=aarch64 --target-os=linux --enable-cross-compile --cross-prefix=aarch64-linux-gnu- --sysroot="$ROOTFS" --pkg-config=pkg-config --prefix=/usr --libdir=/usr/lib/aarch64-linux-gnu --enable-shared --disable-static --disable-doc --disable-debug --enable-gpl --enable-neon --enable-libdrm --enable-libudev --enable-libdav1d --enable-v4l2-request --enable-vaapi --enable-gnutls --enable-libx264 --enable-libmp3lame --enable-libopus --enable-libvorbis --enable-libvpx --enable-libass --enable-libfreetype --enable-libxml2 > "$WORK/ffmpeg-config.log" 2>&1)
+(cd "$SRC" && ./configure --arch=aarch64 --target-os=linux --enable-cross-compile --cross-prefix=aarch64-linux-gnu- --sysroot="$ROOTFS" --pkg-config=pkg-config --prefix=/usr --libdir=/usr/lib/aarch64-linux-gnu --incdir=/usr/include/aarch64-linux-gnu --enable-shared --disable-static --disable-doc --disable-debug --enable-gpl --enable-neon --enable-libdrm --enable-libudev --enable-libdav1d --enable-v4l2-request --enable-vaapi --enable-gnutls --enable-libx264 --enable-libmp3lame --enable-libopus --enable-libvorbis --enable-libvpx --enable-libass --enable-libfreetype --enable-libxml2 --enable-vdpau > "$WORK/ffmpeg-config.log" 2>&1)
 (cd "$SRC" && make -j"$(nproc)" > "$WORK/ffmpeg-build.log" 2>&1)
 
 (cd "$SRC" && make DESTDIR="$STAGE" install >> "$WORK/ffmpeg-build.log" 2>&1)
@@ -152,22 +196,40 @@ done
 # av1 advertises the drm/v4l2request hw devices (renders black). See
 # docs/video-decode.md.
 grep -q "#define CONFIG_LIBDAV1D 1" "$SRC/config.h" || die "dav1d not compiled in"
+# VDPAU only so that libavcodec exports the same functions as Debian's (av_vdpau_*): our package
+# replaces Debian's, and a program using them must not fail to start. No VDPAU driver here.
+grep -q "#define CONFIG_VDPAU 1" "$SRC/config.h" || die "vdpau not compiled in"
 
-# Where these files came from: dpkg still lists Debian's libav* packages (held below)
-# although their files are replaced, so the image records the real source here.
+# Where these files came from (shipped in libavutil59).
 mkdir -p "$STAGE/usr/share/doc/handtop-ffmpeg"
 {
   echo "FFmpeg $FF_VERSION, built by Handtop's build/04c-v4l2-ffmpeg.sh."
-  echo "It replaces the files of Debian's libav* packages (held); dpkg still shows Debian's version."
-  echo "base:      FFmpeg $FFMPEG_VERSION, $FFMPEG_URL commit $FFMPEG_COMMIT"
+  echo "Packaged under Debian's names as $FFMPEG_HANDTOP_VERSION."
+  echo "base:      Debian's ffmpeg source package $FFMPEG_DEBIAN_VERSION (FFmpeg $FFMPEG_VERSION, $debian_patches Debian patches)"
   echo "patchset:  $KWIBOO_URL $KWIBOO_BASE..$KWIBOO_PIN ($KWIBOO_COMMITS commits)"
   echo "patch:     build/patches/ffmpeg-v4l2request-drm.patch sha256 $(sha256sum "$FF_PATCH" | cut -d' ' -f1)"
 } > "$STAGE/usr/share/doc/handtop-ffmpeg/BUILDINFO"
 chmod -R u=rwX,go=rX "$STAGE"
-# --no-overwrite-dir: leave the rootfs' own directories (owner, mode) as they are.
-tar -C "$STAGE" -cf - . | tar -C "$ROOTFS" -xf - --no-overwrite-dir
+python3 "$TOP/build/pkg/build-ffmpeg-debs.py" "$STAGE" "$DEB/ref" "$ROOTFS" "$WORK/pkg-ffmpeg" "$FFMPEG_HANDTOP_VERSION"
+
+# A reused rootfs still has the files earlier builds copied in without a package: headers in the
+# old /usr/include location, examples, BUILDINFO. The packages put everything else in place.
+for d in libavcodec libavdevice libavfilter libavformat libavutil libpostproc libswresample libswscale; do
+  [ -d "$ROOTFS/usr/include/$d" ] && safe_rm -r "$ROOTFS/usr/include/$d"
+done
+for d in usr/share/ffmpeg/examples usr/share/doc/handtop-ffmpeg; do
+  [ -e "$ROOTFS/$d" ] && safe_rm -r "$ROOTFS/$d"
+done
 
 chroot_mount
+in_chroot "apt-mark unhold ${HOLD_PKGS[*]} >/dev/null"
+mkdir -p "$ROOTFS/tmp/ffpkg"
+cp "$WORK"/pkg-ffmpeg/*.deb "$ROOTFS/tmp/ffpkg/"
+in_chroot "dpkg -i /tmp/ffpkg/*.deb"
+safe_rm -r "$ROOTFS/tmp/ffpkg"
+for p in "${HOLD_PKGS[@]}"; do
+  [ "$(in_chroot "dpkg-query -W -f='\${Version}' $p")" = "$FFMPEG_HANDTOP_VERSION" ] || die "$p is not $FFMPEG_HANDTOP_VERSION after installing"
+done
 in_chroot "ldconfig"
 [[ "$(in_chroot "command -v ffmpeg")" == "/usr/bin/ffmpeg" ]] || die "ffmpeg in PATH is not /usr/bin/ffmpeg"
 [[ "$(in_chroot "ffmpeg -version")" == *"$FF_VERSION"* ]] || die "patched ffmpeg is not the installed one"
@@ -206,8 +268,7 @@ if [ "$drm_ok" != 1 ]; then
   die "mpv does not offer the drm hwdec (DRM-registration patch missing?)"
 fi
 
-# Hold the libraries we replace: without this an upgrade reinstalls Debian's
-# ones and the VPU path disappears without a word.
+# Hold our packages until Handtop's apt source (with its pin) is in the image.
 hold=""
 for p in "${HOLD_PKGS[@]}"; do
   in_chroot "dpkg -s $p >/dev/null 2>&1" && hold="$hold $p"

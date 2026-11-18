@@ -1,6 +1,6 @@
 #!/bin/bash
 # Handtop's own files become packages (updates without reflashing, project doc update-system.md).
-# build/pkg/build-debs.py copies every file classes.txt gives to handtop-core / handtop-desktop out
+# build/pkg/build-debs.py copies every file classes.txt gives to handtop-core / -desktop / -video out
 # of the finished rootfs into .deb files (work/pkg/), and they are installed straight back with
 # dpkg: no file changes, but dpkg now owns them, so later versions can replace them on a card.
 # The audit then checks that no file of those packages is left unowned.
@@ -20,16 +20,16 @@ else
 fi
 PKG_OUT="$WORK/pkg"
 [ -d "$PKG_OUT" ] && safe_rm -r "$PKG_OUT"
-python3 "$TOP/build/pkg/build-debs.py" "$ROOTFS" "$PKG_OUT" "$PKG_VERSION"
+HANDTOP_FFMPEG_VERSION="$FFMPEG_HANDTOP_VERSION" python3 "$TOP/build/pkg/build-debs.py" "$ROOTFS" "$PKG_OUT" "$PKG_VERSION"
 
 chroot_mount
 mkdir -p "$ROOTFS/tmp/handtop-pkg"
 cp "$PKG_OUT"/handtop-*.deb "$ROOTFS/tmp/handtop-pkg/"
-in_chroot "dpkg -i --force-confdef --force-confold /tmp/handtop-pkg/handtop-core_*.deb /tmp/handtop-pkg/handtop-desktop_*.deb"
+in_chroot "dpkg -i --force-confdef --force-confold /tmp/handtop-pkg/handtop-core_*.deb /tmp/handtop-pkg/handtop-desktop_*.deb /tmp/handtop-pkg/handtop-video_*.deb"
 safe_rm -r "$ROOTFS/tmp/handtop-pkg"
-in_chroot "dpkg-query -W handtop-core handtop-desktop"
+in_chroot "dpkg-query -W handtop-core handtop-desktop handtop-video"
 
-# Nothing of handtop-core / handtop-desktop may stay unowned.
-left=$(python3 "$TOP/build/pkg/audit-unowned.py" "$ROOTFS" --list handtop-core; python3 "$TOP/build/pkg/audit-unowned.py" "$ROOTFS" --list handtop-desktop)
-[ -z "$left" ] || die "files still not owned by a Handtop package: $left"
+# Nothing classed as Handtop's may stay unowned (FFmpeg's files belong to its packages from 04c).
+left=$(for c in handtop-core handtop-desktop handtop-video; do python3 "$TOP/build/pkg/audit-unowned.py" "$ROOTFS" --list "$c"; done)
+[ -z "$left" ] || die "files still not owned by a package: $left"
 echo "Handtop packages $PKG_VERSION built in $PKG_OUT and installed."

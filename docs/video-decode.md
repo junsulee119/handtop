@@ -475,12 +475,16 @@ The build stops if the base is not the pinned release, if the patchset is not ex
 
 When Debian's `ffmpeg` moves to a new release (`apt-cache policy ffmpeg` in the chroot, or the Debian tracker), move ours to the same one:
 
-1. In `build/config.sh` set `FFMPEG_VERSION` and `FFMPEG_COMMIT` (the commit of tag `n<version>` in FFmpeg's repo).
+1. In `build/config.sh` set `FFMPEG_VERSION` (the upstream release) and `FFMPEG_DEBIAN_VERSION` (Debian's full version, with its epoch: `7:7.1.6-0+deb13u1`). `04c` fetches that source package and Debian's binary packages of the same version through apt in the rootfs (checked against trixie-security's signed indexes) and applies the patches in Debian's `debian/patches/series`, if any. A version Debian has superseded is gone from trixie-security, and `04c` stops saying so.
 2. Rebuild: `04c` stops with "does not apply" if the patchset no longer fits; then check Kwiboo's repo for a newer branch (set `KWIBOO_BASE`, `KWIBOO_PIN`, `KWIBOO_COMMITS`) or port the conflict.
 3. Keep the soname ABI: `libavcodec/version_major.h` and `libavutil/version.h` must still give the major versions Debian's packages have (61 / 59 on trixie); otherwise mpv and the rest would need rebuilding.
 4. Test on the device as in *Status*: mpv H.264, HEVC, MPEG-2 and VP8 (`vaapi` and `drm`), Chromium on YouTube, `tools/check-video-decode.sh`.
 
-Debian security updates inside the same release (`7.1.5-0+deb13u2` and so on) are patches on top of 7.1.5; compare them with the next FFmpeg point release and pick them up the same way when they matter. The planned updates without reflashing will ship this build as packages; until then a fix reaches handhelds only with a new image.
+Debian security updates inside the same release (`7.1.5-0+deb13u2` and so on) come in through `FFMPEG_DEBIAN_VERSION` the same way: the build starts from Debian's source package and applies Debian's own patches, then Kwiboo's patchset and ours. 7.1.5-0+deb13u1 carries no Debian patches (its source is upstream `n7.1.5` byte for byte, checked 2026-11-18).
+
+### Packages
+
+`build/pkg/build-ffmpeg-debs.py` packages the build under Debian's own names: the eight libraries (`libavcodec61` … `libswscale8`), `ffmpeg` (`ffmpeg`, `ffprobe`, presets) and the eight `-dev` packages, version `FFMPEG_HANDTOP_VERSION` (Debian's + `+handtop1`). Debian's `.debs` of the same version are the reference for which file goes where and for the control fields, `shlibs` / `symbols`, triggers, copyright and changelogs; dependencies on outside libraries are computed from what our build links. Not built: `ffplay`, `qt-faststart`, the static libraries and the examples. The build is configured with `--enable-vdpau` so that `libavcodec` exports the same functions as Debian's (decided 2026-11-18): without it six `av_vdpau_*` functions were missing, so a program using them would not start. Headers are in `/usr/include/aarch64-linux-gnu/` as in Debian. Until the image has Handtop's apt source, the packages are held so a newer Debian version cannot replace them; then a pin to Handtop's repository replaces the hold (project doc update-system.md).
 
 ## Why no IOMMU
 

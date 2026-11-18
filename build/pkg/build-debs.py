@@ -7,8 +7,9 @@ the bytes the image build produced, and installing it back into the image change
 
     sudo python3 build/pkg/build-debs.py <rootfs> <outdir> <version> [package ...]
 
-Packages built by default: handtop-core and handtop-desktop. handtop-video follows in step 3
-(FFmpeg as Debian-named packages). Writes <outdir>/<name>_<version>_arm64.deb and a manifest.
+Packages built by default: handtop-core, handtop-desktop and handtop-video (the VA driver; it
+depends on the exact FFmpeg packages of the same build, version in HANDTOP_FFMPEG_VERSION). FFmpeg
+itself is packaged under Debian's names by build-ffmpeg-debs.py (04c). Writes <outdir>/<name>_<version>_arm64.deb and a manifest.
 """
 import fnmatch
 import hashlib
@@ -37,11 +38,21 @@ DESCRIPTIONS = {
                         "The Handtop desktop: labwc, Waybar, drawer and power-menu configuration, the theme\n"
                         " system and nine built-in themes, icons and cursors, the media apps, the\n"
                         " volume and brightness bar, the boot screen and nwg-drawer."),
+    "handtop-video": ("Handtop: hardware video decoding",
+                      "The VA-API driver for Allwinner's video engine (v4l2-request) and the exact\n"
+                      " FFmpeg build with the V4L2 request API decoders that Handtop was tested with."),
 }
 LISTS = {"handtop-core": "base.list", "handtop-desktop": "desktop.list"}
+FFMPEG_FAMILY = ("libavcodec61", "libavdevice61", "libavfilter10", "libavformat61", "libavutil59",
+                 "libpostproc58", "libswresample5", "libswscale8", "ffmpeg")
 
 
 def list_depends(name):
+    if name == "handtop-video":
+        ffv = os.environ.get("HANDTOP_FFMPEG_VERSION")
+        if not ffv:
+            raise SystemExit("HANDTOP_FFMPEG_VERSION is not set (build/config.sh FFMPEG_HANDTOP_VERSION)")
+        return ["libva2"] + ["%s (= %s)" % (p, ffv) for p in FFMPEG_FAMILY]
     deps = []
     path = os.path.join(TOP, "build", "packages", LISTS[name])
     with open(path) as f:
@@ -64,7 +75,7 @@ def units():
 
 def collect(root):
     """{package: [paths]} for every unowned file classes.txt gives to a Handtop package."""
-    owned = audit.owned_paths(root)
+    owned = audit.owned_paths(root, ignore_prefix="handtop-")   # a reused rootfs has them already
     rules = audit.classes()
     files = {}
     for dp, dns, fns in os.walk(root):
@@ -122,7 +133,7 @@ def maintainer_scripts(pkg, paths, unit_policy):
         body += "    [ -d /run/udev ] && udevadm control --reload || true\n"
     if any(p.startswith("/usr/local/share/applications/") for p in paths):
         body += "    command -v update-desktop-database >/dev/null && update-desktop-database -q /usr/local/share/applications || true\n"
-    body += "fi\n"
+    body += "    :\nfi\n"
     out["postinst"] = script(body)
     return out
 
@@ -187,9 +198,23 @@ def main():
     if len(sys.argv) < 4:
         raise SystemExit(__doc__)
     root, outdir, version = sys.argv[1].rstrip("/"), sys.argv[2], sys.argv[3]
-    want = sys.argv[4:] or ["handtop-core", "handtop-desktop"]
+    want = sys.argv[4:] or ["handtop-core", "handtop-desktop", "handtop-video"]
     os.makedirs(outdir, exist_ok=True)
     files = collect(root)
+    # Every tracked overlay file a package gets must be in it: an empty or partial package would
+    # make dpkg delete the missing files from the card on upgrade.
+    import subprocess as sp
+    tracked = sp.run(["git", "-C", TOP, "ls-files", "overlay"], capture_output=True, text=True,
+                     timeout=60).stdout.split()
+    if tracked:
+        rules, divs = audit.classes(), audit.diversions()
+        for f in tracked:
+            p = f[len("overlay"):]
+            pkg = divs.get(p) or next((c for c, pat, _ in rules if fnmatch.fnmatchcase(p, pat)), None)
+            if pkg in want and p not in files.get(pkg, []):
+                raise SystemExit("%s would lack %s (from overlay/): refusing to build it" % (pkg, p))
+    else:
+        print("build-debs: not a git checkout, overlay completeness not checked", file=sys.stderr)
     unit_policy = units()
     for pkg in want:
         build(root, outdir, version, pkg, files.get(pkg, []), unit_policy)

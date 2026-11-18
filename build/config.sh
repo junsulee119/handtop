@@ -50,13 +50,16 @@ CMA_SIZE="256M"                    # contiguous memory for the decoder (no IOMMU
 # patchset (the one Moonlight embeds), applied as a diff.
 # - Base: the FFmpeg release Debian ships (trixie: 7.1.5), so the security fixes Debian has are
 #   in ours too and the libav ABI matches the one mpv, Chromium and VLC were built against.
-#   When Debian moves on (7.1.6, ...), bump FFMPEG_VERSION / FFMPEG_COMMIT to the same release:
-#   docs/video-decode.md, "Updating FFmpeg".
+#   The source is Debian's own source package of that version (fetched and verified by apt in the
+#   rootfs, Debian's patches applied); our packages carry Debian's names and version + "+handtop1".
+#   When Debian moves on (deb13u2, 7.1.6, ...), bump FFMPEG_VERSION / FFMPEG_DEBIAN_VERSION:
+#   docs/video-decode.md, "Updating FFmpeg". A superseded version disappears from trixie-security,
+#   so an old pin stops the build with a message saying so.
 # - Patchset: branch v4l2-request-n7.1.3 is KWIBOO_COMMITS commits on top of n7.1.3
 #   (KWIBOO_BASE); the build applies diff KWIBOO_BASE..KWIBOO_PIN onto the base.
-FFMPEG_URL="https://github.com/FFmpeg/FFmpeg"
 FFMPEG_VERSION="7.1.5"
-FFMPEG_COMMIT="3a0867c2bfda4a4d4309ca1a8cbdc6175e67f587"   # tag n7.1.5
+FFMPEG_DEBIAN_VERSION="7:7.1.5-0+deb13u1"   # Debian's ffmpeg source package the build starts from
+FFMPEG_HANDTOP_VERSION="${FFMPEG_DEBIAN_VERSION}+handtop1"   # our packages: newer than Debian's for apt
 KWIBOO_URL="https://github.com/Kwiboo/FFmpeg"
 KWIBOO_BASE="f46e514491172d15bd74b4abb1814cd2f05a763e"     # tag n7.1.3
 KWIBOO_PIN="fad85d9c76611c09b561167ab405c667a0dcdeb7"      # head of v4l2-request-n7.1.3

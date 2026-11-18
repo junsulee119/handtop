@@ -53,7 +53,8 @@ handtop-desktop  /etc/fonts/local.conf
 handtop-desktop  /etc/fonts/conf.d/10-hinting-slight.conf
 handtop-desktop  /etc/fonts/conf.d/70-no-bitmaps-except-emoji.conf
 
-# ---- Handtop: video (FFmpeg family and VA driver; FFmpeg becomes Debian-named packages) ---------
+# ---- Handtop: video. FFmpeg is now packaged under Debian's names (04c), so these must stay empty in
+# a finished rootfs (09b checks); the VA driver is the handtop-video package. ------------------------
 handtop-video    /usr/bin/ffmpeg
 handtop-video    /usr/bin/ffprobe
 handtop-video    /usr/include/libav*
