@@ -1,6 +1,6 @@
 # Handtop on more handhelds: plan
 
-**Status (2026-11-18):** direction agreed with Jason (maintainer); P0 done (`2716888`); nothing implemented in code yet. Next: P1, then "Updates without reflashing" on `main`, then P2 onward (see "Order with the update system"). Work for this plan happens on the `device-support` branch. The phases below are all open; tick them off with the commits and tests that closed them.
+**Status (2026-11-18):** direction agreed with Jason (maintainer); P0 done (`2716888`); P1 done (`evidence/`): first targets RG40XX V, RG CubeXX and RG35XX SP, then every other H700 model; nothing implemented in code yet. Next: "Updates without reflashing" on `main`, then P2 onward (see "Order with the update system"). Work for this plan happens on the `device-support` branch. The phases below are all open; tick them off with the commits and tests that closed them.
 
 This file is the working plan for running Handtop on handhelds other than the Anbernic RG35XX H. Profiles, evidence and test status for each model live next to it in `ports/`, so anyone can see from the repository where things stand.
 
@@ -10,7 +10,7 @@ This file is the working plan for running Handtop on handhelds other than the An
 2. **One image per model**, and per variant where the bootloader needs it and the user can tell which one they have (DDR3 / DDR4 RAM, as today). Each image carries its model's device trees and profile, so U-Boot loads the right device tree without anyone choosing at boot.
 3. **Variants a user can't tell apart** (the RG35XX H's regular and rev6 screen panels) are detected at boot by a check written for that model and switched on by its profile. Accurate profiles, built from official and community sources and then from community reports, are the core of this work.
 4. **Hardware layer: ROCKNIX**, the same release as the RG35XX H image (currently 20261001). Targets are the models that release supports.
-5. **First targets: 2–3 models**, chosen by Jason, on how easily they extend from the RG35XX H and how many people use them.
+5. **Targets** (Jason, 2026-11-18): first the RG40XX V, RG CubeXX and RG35XX SP; then every other H700 model ROCKNIX supports, most of them profile-only after those three ([evidence/README.md](evidence/README.md#targets-decided-2026-11-18-jason)).
 6. **"Test required" images.** New models are released once their image builds and passes the build checks, before anyone has run it on that hardware. Community testing moves each model on (see "Status and test reports").
 7. **Every component follows the real screen size**: no 640×480 area centred on a bigger screen. Checked first on a virtual test platform made from the model's profile, then on hardware.
 8. **On-device reporter app** (problem reports and feature suggestions to GitHub Issues, through ChatGPT Sites) ships before the first "Test required" release.
@@ -85,7 +85,7 @@ Decided 2026-11-18 (Jason): **P1 → "Updates without reflashing" → P2 onward.
 | # | Phase | Done when | Hardware |
 |---|---|---|---|
 | P0 | Rules and baseline (written 2026-11-18: AGENTS.md, `testing/rg35xx-h-baseline.md`) | AGENTS.md says how "Test required" images relate to the tested-before-merge rule (it still applies in full to the RG35XX H and to shared code); the screen-size rule is updated; a list of what an RG35XX H must keep doing, used as the regression test | None |
-| P1 | Choose targets | One evidence page per candidate in `ports/evidence/`: screen, controls, radios, RAM and panel variants, how its device tree differs from the H's, sources, open questions; plus community-use findings. Jason picks 2–3 | None |
+| P1 | Choose targets (done 2026-11-18: [evidence/README.md](evidence/README.md)) | One evidence page per candidate in `ports/evidence/`: screen, controls, radios, RAM and panel variants, how its device tree differs from the H's, sources, open questions; plus community-use findings. Jason picks 2–3 | None |
 | P2 | Profiles and build (after the update system) | Profile format and validation, the profiles package, the RG35XX H profile, profiles for the chosen models, the build loop for one image per model and variant, the regression check passes for the H | None |
 | P3 | Code reads the profile | Input devices and mapping, outputs, LEDs and variant checks come from the profile (PE6 only on the H); every component follows the real screen size; the virtual test platform passes for every target in all nine themes; full on-device regression test on an RG35XX H (DDR4 and DDR3 where it matters) | RG35XX H |
 | P4 | Reporter app | Report / suggest choice, auto-filled diagnostics, hiding log lines before sending, preview, offline queue with the same report ID on retry, labels and duplicate handling on the Sites side | RG35XX H |
@@ -94,22 +94,22 @@ Decided 2026-11-18 (Jason): **P1 → "Updates without reflashing" → P2 onward.
 
 ## Candidates (H700, ROCKNIX 20261001)
 
-Model IDs, board, panel and RAM variants are confirmed for each model before its profile is written.
+Full evidence per model, with sources and what is not confirmed: [evidence/](evidence/README.md). The table below is the short version.
 
 | Model | Notes |
 |---|---|
 | RG35XX H | Current device; the regression baseline |
 | RG CubeXX | 720×720 screen; device tree inherits from the RG35XX Plus's (four stick axes, right axis inverted in the device tree, motor, UART, RGB LED); a CubeXX owner offered to test on Reddit |
 | RG40XX H | Joypad, UART and LED setup close to CubeXX |
-| RG35XX Pro | Two sticks; check reuse of the stick input |
-| RG40XX V | One stick |
+| RG35XX Pro | Device tree = the RG35XX H's minus the second USB port |
+| RG40XX V | Device tree declares four stick axes; physical stick count to confirm |
 | RG34XX SP | 720×480, lid |
 | RG35XX Plus | No sticks |
 | RG35XX SP | No sticks, lid |
 | RG34XX | 720×480, no sticks |
-| RG28XX | Small rotated screen, no built-in Wi-Fi |
+| RG28XX | 480×640 panel rotated 270°, no sticks; Wi-Fi present in the device tree (to confirm) |
 | RG35XX 2024 | No built-in Wi-Fi, different controls |
-| RG SP | Listed separately in the release and device trees; find out what it is first |
+| RG SP | Announced July 2026: clamshell, 720×480, no sticks |
 
 Without sticks, the right-stick scroll and L3 / R3 copy and paste need other controls; every UI must still work with the D-pad and A. Without built-in Wi-Fi, the desktop works but Bluetooth controller and streaming features are marked as not available.
 

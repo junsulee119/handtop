@@ -1,0 +1,1973 @@
+{
+ "sun50i-h700-anbernic-rg-sp": {
+  "bluetooth": [
+   [
+    "realtek,rtl8821cs-bt",
+    "realtek,rtl8723bs-bt"
+   ]
+  ],
+  "compatible": [
+   "anbernic,rg-sp",
+   "allwinner,sun50i-h700"
+  ],
+  "dt_id": "sun50i-h700-anbernic-rg-sp",
+  "hdmi": true,
+  "joypad": {
+   "button_codes": [
+    304,
+    305,
+    307,
+    308,
+    310,
+    311,
+    312,
+    313,
+    314,
+    315,
+    316,
+    317,
+    318,
+    544,
+    545,
+    546,
+    547
+   ],
+   "driver": "rocknix-singleadc-joypad",
+   "inverted": [
+    "absx",
+    "absy"
+   ],
+   "motor_pwm_channel": 2,
+   "name": "H700 Gamepad",
+   "stick_axes": 0
+  },
+  "keys": [
+   {
+    "code": 115,
+    "group": "gpio-keys-volume",
+    "label": "Key Volume Up",
+    "type": 1
+   },
+   {
+    "code": 114,
+    "group": "gpio-keys-volume",
+    "label": "Key Volume Down",
+    "type": 1
+   },
+   {
+    "code": 0,
+    "group": "gpio-keys-lid",
+    "label": "Lid Switch",
+    "type": 5
+   }
+  ],
+  "leds": [
+   "power",
+   "status"
+  ],
+  "model": "Anbernic RG-SP",
+  "otg": [
+   "otg"
+  ],
+  "panel": {
+   "compatible": [
+    "anbernic,rg34xx-sp-v2-panel",
+    "panel-mipi-dpi-spi"
+   ],
+   "firmware": {
+    "modes": [
+     {
+      "clock_khz": 26000,
+      "height": 480,
+      "width": 720
+     }
+    ],
+    "size_mm": [
+     71,
+     48
+    ]
+   },
+   "rotation": 0
+  },
+  "rtc": [
+   "allwinner,sun50i-h616-rtc",
+   "nxp,pcf8563"
+  ],
+  "uarts_enabled": [
+   "serial@5000000",
+   "serial@5000400"
+  ],
+  "usb_controllers": [
+   "usb@5100000",
+   "usb@5101000",
+   "usb@5101400"
+  ],
+  "wifi": true
+ },
+ "sun50i-h700-anbernic-rg28xx": {
+  "bluetooth": [
+   [
+    "realtek,rtl8821cs-bt",
+    "realtek,rtl8723bs-bt"
+   ]
+  ],
+  "compatible": [
+   "anbernic,rg28xx",
+   "allwinner,sun50i-h700"
+  ],
+  "dt_id": "sun50i-h700-anbernic-rg28xx",
+  "hdmi": true,
+  "joypad": {
+   "button_codes": [
+    304,
+    305,
+    307,
+    308,
+    310,
+    311,
+    312,
+    313,
+    314,
+    315,
+    316,
+    317,
+    318,
+    544,
+    545,
+    546,
+    547
+   ],
+   "driver": "rocknix-singleadc-joypad",
+   "inverted": [
+    "absx",
+    "absy"
+   ],
+   "motor_pwm_channel": 2,
+   "name": "H700 Gamepad",
+   "stick_axes": 0
+  },
+  "keys": [
+   {
+    "code": 115,
+    "group": "gpio-keys-volume",
+    "label": "Key Volume Up",
+    "type": 1
+   },
+   {
+    "code": 114,
+    "group": "gpio-keys-volume",
+    "label": "Key Volume Down",
+    "type": 1
+   }
+  ],
+  "leds": [
+   "power",
+   "status"
+  ],
+  "model": "Anbernic RG28XX",
+  "otg": [
+   "otg"
+  ],
+  "panel": {
+   "compatible": [
+    "anbernic,rg28xx-panel",
+    "panel-mipi-dpi-spi"
+   ],
+   "firmware": {
+    "modes": [
+     {
+      "clock_khz": 27000,
+      "height": 640,
+      "width": 480
+     }
+    ],
+    "size_mm": [
+     44,
+     58
+    ]
+   },
+   "rotation": 270
+  },
+  "rtc": [
+   "allwinner,sun50i-h616-rtc",
+   "nxp,pcf8563"
+  ],
+  "uarts_enabled": [
+   "serial@5000000",
+   "serial@5000400"
+  ],
+  "usb_controllers": [
+   "usb@5100000",
+   "usb@5101000",
+   "usb@5101400"
+  ],
+  "wifi": true
+ },
+ "sun50i-h700-anbernic-rg34xx": {
+  "bluetooth": [
+   [
+    "realtek,rtl8821cs-bt",
+    "realtek,rtl8723bs-bt"
+   ]
+  ],
+  "compatible": [
+   "anbernic,rg34xx",
+   "allwinner,sun50i-h700"
+  ],
+  "dt_id": "sun50i-h700-anbernic-rg34xx",
+  "hdmi": true,
+  "joypad": {
+   "button_codes": [
+    304,
+    305,
+    307,
+    308,
+    310,
+    311,
+    312,
+    313,
+    314,
+    315,
+    316,
+    317,
+    318,
+    544,
+    545,
+    546,
+    547
+   ],
+   "driver": "rocknix-singleadc-joypad",
+   "inverted": [
+    "absx",
+    "absy"
+   ],
+   "motor_pwm_channel": 2,
+   "name": "H700 Gamepad",
+   "stick_axes": 0
+  },
+  "keys": [
+   {
+    "code": 115,
+    "group": "gpio-keys-volume",
+    "label": "Key Volume Up",
+    "type": 1
+   },
+   {
+    "code": 114,
+    "group": "gpio-keys-volume",
+    "label": "Key Volume Down",
+    "type": 1
+   }
+  ],
+  "leds": [
+   "power",
+   "status"
+  ],
+  "model": "Anbernic RG34XX",
+  "otg": [
+   "otg"
+  ],
+  "panel": {
+   "compatible": [
+    "anbernic,rg34xx-panel",
+    "panel-mipi-dpi-spi"
+   ],
+   "firmware": {
+    "modes": [
+     {
+      "clock_khz": 26000,
+      "height": 480,
+      "width": 720
+     },
+     {
+      "clock_khz": 52000,
+      "height": 480,
+      "width": 720
+     }
+    ],
+    "size_mm": [
+     71,
+     48
+    ]
+   },
+   "rotation": 0
+  },
+  "rtc": [
+   "allwinner,sun50i-h616-rtc",
+   "nxp,pcf8563"
+  ],
+  "uarts_enabled": [
+   "serial@5000000",
+   "serial@5000400"
+  ],
+  "usb_controllers": [
+   "usb@5100000",
+   "usb@5101000",
+   "usb@5101400"
+  ],
+  "wifi": true
+ },
+ "sun50i-h700-anbernic-rg34xx-sp": {
+  "bluetooth": [
+   [
+    "realtek,rtl8821cs-bt",
+    "realtek,rtl8723bs-bt"
+   ]
+  ],
+  "compatible": [
+   "anbernic,rg34xx-sp",
+   "allwinner,sun50i-h700"
+  ],
+  "dt_id": "sun50i-h700-anbernic-rg34xx-sp",
+  "hdmi": true,
+  "joypad": {
+   "button_codes": [
+    304,
+    305,
+    307,
+    308,
+    310,
+    311,
+    312,
+    313,
+    314,
+    315,
+    316,
+    317,
+    318,
+    544,
+    545,
+    546,
+    547
+   ],
+   "driver": "rocknix-singleadc-joypad",
+   "inverted": [
+    "absrx",
+    "absry",
+    "absx",
+    "absy"
+   ],
+   "motor_pwm_channel": 2,
+   "name": "H700 Gamepad",
+   "stick_axes": 4
+  },
+  "keys": [
+   {
+    "code": 115,
+    "group": "gpio-keys-volume",
+    "label": "Key Volume Up",
+    "type": 1
+   },
+   {
+    "code": 114,
+    "group": "gpio-keys-volume",
+    "label": "Key Volume Down",
+    "type": 1
+   },
+   {
+    "code": 0,
+    "group": "gpio-keys-lid",
+    "label": "Lid Switch",
+    "type": 5
+   }
+  ],
+  "leds": [
+   "power",
+   "status"
+  ],
+  "model": "Anbernic RG34XX-SP",
+  "otg": [
+   "otg"
+  ],
+  "panel": {
+   "compatible": [
+    "anbernic,rg34xx-sp-panel",
+    "panel-mipi-dpi-spi"
+   ],
+   "firmware": {
+    "modes": [
+     {
+      "clock_khz": 26000,
+      "height": 480,
+      "width": 720
+     },
+     {
+      "clock_khz": 52000,
+      "height": 480,
+      "width": 720
+     }
+    ],
+    "size_mm": [
+     71,
+     48
+    ]
+   },
+   "rotation": 0
+  },
+  "rtc": [
+   "allwinner,sun50i-h616-rtc",
+   "nxp,pcf8563"
+  ],
+  "uarts_enabled": [
+   "serial@5000000",
+   "serial@5000400"
+  ],
+  "usb_controllers": [
+   "usb@5100000",
+   "usb@5101000",
+   "usb@5101400"
+  ],
+  "wifi": true
+ },
+ "sun50i-h700-anbernic-rg34xx-sp-v2-panel": {
+  "bluetooth": [
+   [
+    "realtek,rtl8821cs-bt",
+    "realtek,rtl8723bs-bt"
+   ]
+  ],
+  "compatible": [
+   "anbernic,rg34xx-sp",
+   "allwinner,sun50i-h700"
+  ],
+  "dt_id": "sun50i-h700-anbernic-rg34xx-sp-v2-panel",
+  "hdmi": true,
+  "joypad": {
+   "button_codes": [
+    304,
+    305,
+    307,
+    308,
+    310,
+    311,
+    312,
+    313,
+    314,
+    315,
+    316,
+    317,
+    318,
+    544,
+    545,
+    546,
+    547
+   ],
+   "driver": "rocknix-singleadc-joypad",
+   "inverted": [
+    "absrx",
+    "absry",
+    "absx",
+    "absy"
+   ],
+   "motor_pwm_channel": 2,
+   "name": "H700 Gamepad",
+   "stick_axes": 4
+  },
+  "keys": [
+   {
+    "code": 115,
+    "group": "gpio-keys-volume",
+    "label": "Key Volume Up",
+    "type": 1
+   },
+   {
+    "code": 114,
+    "group": "gpio-keys-volume",
+    "label": "Key Volume Down",
+    "type": 1
+   },
+   {
+    "code": 0,
+    "group": "gpio-keys-lid",
+    "label": "Lid Switch",
+    "type": 5
+   }
+  ],
+  "leds": [
+   "power",
+   "status"
+  ],
+  "model": "Anbernic RG34XX-SP",
+  "otg": [
+   "otg"
+  ],
+  "panel": {
+   "compatible": [
+    "anbernic,rg34xx-sp-v2-panel",
+    "panel-mipi-dpi-spi"
+   ],
+   "firmware": {
+    "modes": [
+     {
+      "clock_khz": 26000,
+      "height": 480,
+      "width": 720
+     }
+    ],
+    "size_mm": [
+     71,
+     48
+    ]
+   },
+   "rotation": 0
+  },
+  "rtc": [
+   "allwinner,sun50i-h616-rtc",
+   "nxp,pcf8563"
+  ],
+  "uarts_enabled": [
+   "serial@5000000",
+   "serial@5000400"
+  ],
+  "usb_controllers": [
+   "usb@5100000",
+   "usb@5101000",
+   "usb@5101400"
+  ],
+  "wifi": true
+ },
+ "sun50i-h700-anbernic-rg35xx-2024": {
+  "bluetooth": [],
+  "compatible": [
+   "anbernic,rg35xx-2024",
+   "allwinner,sun50i-h700"
+  ],
+  "dt_id": "sun50i-h700-anbernic-rg35xx-2024",
+  "hdmi": true,
+  "joypad": {
+   "button_codes": [
+    304,
+    305,
+    307,
+    308,
+    310,
+    311,
+    312,
+    313,
+    314,
+    315,
+    316,
+    317,
+    318,
+    544,
+    545,
+    546,
+    547
+   ],
+   "driver": "rocknix-singleadc-joypad",
+   "inverted": [
+    "absx",
+    "absy"
+   ],
+   "motor_pwm_channel": 2,
+   "name": "H700 Gamepad",
+   "stick_axes": 0
+  },
+  "keys": [
+   {
+    "code": 115,
+    "group": "gpio-keys-volume",
+    "label": "Key Volume Up",
+    "type": 1
+   },
+   {
+    "code": 114,
+    "group": "gpio-keys-volume",
+    "label": "Key Volume Down",
+    "type": 1
+   }
+  ],
+  "leds": [
+   "power",
+   "status"
+  ],
+  "model": "Anbernic RG35XX 2024",
+  "otg": [
+   "otg"
+  ],
+  "panel": {
+   "compatible": [
+    "anbernic,rg35xx-plus-panel",
+    "panel-mipi-dpi-spi"
+   ],
+   "firmware": {
+    "modes": [
+     {
+      "clock_khz": 24000,
+      "height": 480,
+      "width": 640
+     },
+     {
+      "clock_khz": 48000,
+      "height": 480,
+      "width": 640
+     }
+    ],
+    "size_mm": [
+     70,
+     53
+    ]
+   },
+   "rotation": 0
+  },
+  "rtc": [
+   "allwinner,sun50i-h616-rtc"
+  ],
+  "uarts_enabled": [
+   "serial@5000000"
+  ],
+  "usb_controllers": [
+   "usb@5100000",
+   "usb@5101000",
+   "usb@5101400"
+  ],
+  "wifi": false
+ },
+ "sun50i-h700-anbernic-rg35xx-2024-rev6-panel": {
+  "bluetooth": [],
+  "compatible": [
+   "anbernic,rg35xx-2024",
+   "allwinner,sun50i-h700"
+  ],
+  "dt_id": "sun50i-h700-anbernic-rg35xx-2024-rev6-panel",
+  "hdmi": true,
+  "joypad": {
+   "button_codes": [
+    304,
+    305,
+    307,
+    308,
+    310,
+    311,
+    312,
+    313,
+    314,
+    315,
+    316,
+    317,
+    318,
+    544,
+    545,
+    546,
+    547
+   ],
+   "driver": "rocknix-singleadc-joypad",
+   "inverted": [
+    "absx",
+    "absy"
+   ],
+   "motor_pwm_channel": 2,
+   "name": "H700 Gamepad",
+   "stick_axes": 0
+  },
+  "keys": [
+   {
+    "code": 115,
+    "group": "gpio-keys-volume",
+    "label": "Key Volume Up",
+    "type": 1
+   },
+   {
+    "code": 114,
+    "group": "gpio-keys-volume",
+    "label": "Key Volume Down",
+    "type": 1
+   }
+  ],
+  "leds": [
+   "power",
+   "status"
+  ],
+  "model": "Anbernic RG35XX 2024",
+  "otg": [
+   "otg"
+  ],
+  "panel": {
+   "compatible": [
+    "anbernic,rg35xx-plus-rev6-panel",
+    "panel-mipi-dpi-spi"
+   ],
+   "firmware": {
+    "modes": [
+     {
+      "clock_khz": 24000,
+      "height": 480,
+      "width": 640
+     }
+    ],
+    "size_mm": [
+     70,
+     53
+    ]
+   },
+   "rotation": 0
+  },
+  "rtc": [
+   "allwinner,sun50i-h616-rtc"
+  ],
+  "uarts_enabled": [
+   "serial@5000000"
+  ],
+  "usb_controllers": [
+   "usb@5100000",
+   "usb@5101000",
+   "usb@5101400"
+  ],
+  "wifi": false
+ },
+ "sun50i-h700-anbernic-rg35xx-h": {
+  "bluetooth": [
+   [
+    "realtek,rtl8821cs-bt",
+    "realtek,rtl8723bs-bt"
+   ]
+  ],
+  "compatible": [
+   "anbernic,rg35xx-h",
+   "allwinner,sun50i-h700"
+  ],
+  "dt_id": "sun50i-h700-anbernic-rg35xx-h",
+  "hdmi": true,
+  "joypad": {
+   "button_codes": [
+    304,
+    305,
+    307,
+    308,
+    310,
+    311,
+    312,
+    313,
+    314,
+    315,
+    316,
+    317,
+    318,
+    544,
+    545,
+    546,
+    547
+   ],
+   "driver": "rocknix-singleadc-joypad",
+   "inverted": [
+    "absx",
+    "absy"
+   ],
+   "motor_pwm_channel": 2,
+   "name": "H700 Gamepad",
+   "stick_axes": 4
+  },
+  "keys": [
+   {
+    "code": 115,
+    "group": "gpio-keys-volume",
+    "label": "Key Volume Up",
+    "type": 1
+   },
+   {
+    "code": 114,
+    "group": "gpio-keys-volume",
+    "label": "Key Volume Down",
+    "type": 1
+   }
+  ],
+  "leds": [
+   "power",
+   "status"
+  ],
+  "model": "Anbernic RG35XX H",
+  "otg": [
+   "otg"
+  ],
+  "panel": {
+   "compatible": [
+    "anbernic,rg35xx-plus-panel",
+    "panel-mipi-dpi-spi"
+   ],
+   "firmware": {
+    "modes": [
+     {
+      "clock_khz": 24000,
+      "height": 480,
+      "width": 640
+     },
+     {
+      "clock_khz": 48000,
+      "height": 480,
+      "width": 640
+     }
+    ],
+    "size_mm": [
+     70,
+     53
+    ]
+   },
+   "rotation": 0
+  },
+  "rtc": [
+   "allwinner,sun50i-h616-rtc",
+   "nxp,pcf8563"
+  ],
+  "uarts_enabled": [
+   "serial@5000000",
+   "serial@5000400"
+  ],
+  "usb_controllers": [
+   "usb@5100000",
+   "usb@5101000",
+   "usb@5101400",
+   "usb@5200000",
+   "usb@5200400"
+  ],
+  "wifi": true
+ },
+ "sun50i-h700-anbernic-rg35xx-h-rev6-panel": {
+  "bluetooth": [
+   [
+    "realtek,rtl8821cs-bt",
+    "realtek,rtl8723bs-bt"
+   ]
+  ],
+  "compatible": [
+   "anbernic,rg35xx-h",
+   "allwinner,sun50i-h700"
+  ],
+  "dt_id": "sun50i-h700-anbernic-rg35xx-h-rev6-panel",
+  "hdmi": true,
+  "joypad": {
+   "button_codes": [
+    304,
+    305,
+    307,
+    308,
+    310,
+    311,
+    312,
+    313,
+    314,
+    315,
+    316,
+    317,
+    318,
+    544,
+    545,
+    546,
+    547
+   ],
+   "driver": "rocknix-singleadc-joypad",
+   "inverted": [
+    "absx",
+    "absy"
+   ],
+   "motor_pwm_channel": 2,
+   "name": "H700 Gamepad",
+   "stick_axes": 4
+  },
+  "keys": [
+   {
+    "code": 115,
+    "group": "gpio-keys-volume",
+    "label": "Key Volume Up",
+    "type": 1
+   },
+   {
+    "code": 114,
+    "group": "gpio-keys-volume",
+    "label": "Key Volume Down",
+    "type": 1
+   }
+  ],
+  "leds": [
+   "power",
+   "status"
+  ],
+  "model": "Anbernic RG35XX H",
+  "otg": [
+   "otg"
+  ],
+  "panel": {
+   "compatible": [
+    "anbernic,rg35xx-plus-rev6-panel",
+    "panel-mipi-dpi-spi"
+   ],
+   "firmware": {
+    "modes": [
+     {
+      "clock_khz": 24000,
+      "height": 480,
+      "width": 640
+     }
+    ],
+    "size_mm": [
+     70,
+     53
+    ]
+   },
+   "rotation": 0
+  },
+  "rtc": [
+   "allwinner,sun50i-h616-rtc",
+   "nxp,pcf8563"
+  ],
+  "uarts_enabled": [
+   "serial@5000000",
+   "serial@5000400"
+  ],
+  "usb_controllers": [
+   "usb@5100000",
+   "usb@5101000",
+   "usb@5101400",
+   "usb@5200000",
+   "usb@5200400"
+  ],
+  "wifi": true
+ },
+ "sun50i-h700-anbernic-rg35xx-plus": {
+  "bluetooth": [
+   [
+    "realtek,rtl8821cs-bt",
+    "realtek,rtl8723bs-bt"
+   ]
+  ],
+  "compatible": [
+   "anbernic,rg35xx-plus",
+   "allwinner,sun50i-h700"
+  ],
+  "dt_id": "sun50i-h700-anbernic-rg35xx-plus",
+  "hdmi": true,
+  "joypad": {
+   "button_codes": [
+    304,
+    305,
+    307,
+    308,
+    310,
+    311,
+    312,
+    313,
+    314,
+    315,
+    316,
+    317,
+    318,
+    544,
+    545,
+    546,
+    547
+   ],
+   "driver": "rocknix-singleadc-joypad",
+   "inverted": [
+    "absx",
+    "absy"
+   ],
+   "motor_pwm_channel": 2,
+   "name": "H700 Gamepad",
+   "stick_axes": 0
+  },
+  "keys": [
+   {
+    "code": 115,
+    "group": "gpio-keys-volume",
+    "label": "Key Volume Up",
+    "type": 1
+   },
+   {
+    "code": 114,
+    "group": "gpio-keys-volume",
+    "label": "Key Volume Down",
+    "type": 1
+   }
+  ],
+  "leds": [
+   "power",
+   "status"
+  ],
+  "model": "Anbernic RG35XX Plus",
+  "otg": [
+   "otg"
+  ],
+  "panel": {
+   "compatible": [
+    "anbernic,rg35xx-plus-panel",
+    "panel-mipi-dpi-spi"
+   ],
+   "firmware": {
+    "modes": [
+     {
+      "clock_khz": 24000,
+      "height": 480,
+      "width": 640
+     },
+     {
+      "clock_khz": 48000,
+      "height": 480,
+      "width": 640
+     }
+    ],
+    "size_mm": [
+     70,
+     53
+    ]
+   },
+   "rotation": 0
+  },
+  "rtc": [
+   "allwinner,sun50i-h616-rtc",
+   "nxp,pcf8563"
+  ],
+  "uarts_enabled": [
+   "serial@5000000",
+   "serial@5000400"
+  ],
+  "usb_controllers": [
+   "usb@5100000",
+   "usb@5101000",
+   "usb@5101400"
+  ],
+  "wifi": true
+ },
+ "sun50i-h700-anbernic-rg35xx-plus-rev6-panel": {
+  "bluetooth": [
+   [
+    "realtek,rtl8821cs-bt",
+    "realtek,rtl8723bs-bt"
+   ]
+  ],
+  "compatible": [
+   "anbernic,rg35xx-plus",
+   "allwinner,sun50i-h700"
+  ],
+  "dt_id": "sun50i-h700-anbernic-rg35xx-plus-rev6-panel",
+  "hdmi": true,
+  "joypad": {
+   "button_codes": [
+    304,
+    305,
+    307,
+    308,
+    310,
+    311,
+    312,
+    313,
+    314,
+    315,
+    316,
+    317,
+    318,
+    544,
+    545,
+    546,
+    547
+   ],
+   "driver": "rocknix-singleadc-joypad",
+   "inverted": [
+    "absx",
+    "absy"
+   ],
+   "motor_pwm_channel": 2,
+   "name": "H700 Gamepad",
+   "stick_axes": 0
+  },
+  "keys": [
+   {
+    "code": 115,
+    "group": "gpio-keys-volume",
+    "label": "Key Volume Up",
+    "type": 1
+   },
+   {
+    "code": 114,
+    "group": "gpio-keys-volume",
+    "label": "Key Volume Down",
+    "type": 1
+   }
+  ],
+  "leds": [
+   "power",
+   "status"
+  ],
+  "model": "Anbernic RG35XX Plus",
+  "otg": [
+   "otg"
+  ],
+  "panel": {
+   "compatible": [
+    "anbernic,rg35xx-plus-rev6-panel",
+    "panel-mipi-dpi-spi"
+   ],
+   "firmware": {
+    "modes": [
+     {
+      "clock_khz": 24000,
+      "height": 480,
+      "width": 640
+     }
+    ],
+    "size_mm": [
+     70,
+     53
+    ]
+   },
+   "rotation": 0
+  },
+  "rtc": [
+   "allwinner,sun50i-h616-rtc",
+   "nxp,pcf8563"
+  ],
+  "uarts_enabled": [
+   "serial@5000000",
+   "serial@5000400"
+  ],
+  "usb_controllers": [
+   "usb@5100000",
+   "usb@5101000",
+   "usb@5101400"
+  ],
+  "wifi": true
+ },
+ "sun50i-h700-anbernic-rg35xx-pro": {
+  "bluetooth": [
+   [
+    "realtek,rtl8821cs-bt",
+    "realtek,rtl8723bs-bt"
+   ]
+  ],
+  "compatible": [
+   "anbernic,rg35xx-pro",
+   "allwinner,sun50i-h700"
+  ],
+  "dt_id": "sun50i-h700-anbernic-rg35xx-pro",
+  "hdmi": true,
+  "joypad": {
+   "button_codes": [
+    304,
+    305,
+    307,
+    308,
+    310,
+    311,
+    312,
+    313,
+    314,
+    315,
+    316,
+    317,
+    318,
+    544,
+    545,
+    546,
+    547
+   ],
+   "driver": "rocknix-singleadc-joypad",
+   "inverted": [
+    "absx",
+    "absy"
+   ],
+   "motor_pwm_channel": 2,
+   "name": "H700 Gamepad",
+   "stick_axes": 4
+  },
+  "keys": [
+   {
+    "code": 115,
+    "group": "gpio-keys-volume",
+    "label": "Key Volume Up",
+    "type": 1
+   },
+   {
+    "code": 114,
+    "group": "gpio-keys-volume",
+    "label": "Key Volume Down",
+    "type": 1
+   }
+  ],
+  "leds": [
+   "power",
+   "status"
+  ],
+  "model": "Anbernic RG35XX Pro",
+  "otg": [
+   "otg"
+  ],
+  "panel": {
+   "compatible": [
+    "anbernic,rg35xx-plus-panel",
+    "panel-mipi-dpi-spi"
+   ],
+   "firmware": {
+    "modes": [
+     {
+      "clock_khz": 24000,
+      "height": 480,
+      "width": 640
+     },
+     {
+      "clock_khz": 48000,
+      "height": 480,
+      "width": 640
+     }
+    ],
+    "size_mm": [
+     70,
+     53
+    ]
+   },
+   "rotation": 0
+  },
+  "rtc": [
+   "allwinner,sun50i-h616-rtc",
+   "nxp,pcf8563"
+  ],
+  "uarts_enabled": [
+   "serial@5000000",
+   "serial@5000400"
+  ],
+  "usb_controllers": [
+   "usb@5100000",
+   "usb@5101000",
+   "usb@5101400"
+  ],
+  "wifi": true
+ },
+ "sun50i-h700-anbernic-rg35xx-sp": {
+  "bluetooth": [
+   [
+    "realtek,rtl8821cs-bt",
+    "realtek,rtl8723bs-bt"
+   ]
+  ],
+  "compatible": [
+   "anbernic,rg35xx-sp",
+   "allwinner,sun50i-h700"
+  ],
+  "dt_id": "sun50i-h700-anbernic-rg35xx-sp",
+  "hdmi": true,
+  "joypad": {
+   "button_codes": [
+    304,
+    305,
+    307,
+    308,
+    310,
+    311,
+    312,
+    313,
+    314,
+    315,
+    316,
+    317,
+    318,
+    544,
+    545,
+    546,
+    547
+   ],
+   "driver": "rocknix-singleadc-joypad",
+   "inverted": [
+    "absx",
+    "absy"
+   ],
+   "motor_pwm_channel": 2,
+   "name": "H700 Gamepad",
+   "stick_axes": 0
+  },
+  "keys": [
+   {
+    "code": 115,
+    "group": "gpio-keys-volume",
+    "label": "Key Volume Up",
+    "type": 1
+   },
+   {
+    "code": 114,
+    "group": "gpio-keys-volume",
+    "label": "Key Volume Down",
+    "type": 1
+   },
+   {
+    "code": 0,
+    "group": "gpio-keys-lid",
+    "label": "Lid Switch",
+    "type": 5
+   }
+  ],
+  "leds": [
+   "power",
+   "status"
+  ],
+  "model": "Anbernic RG35XX SP",
+  "otg": [
+   "otg"
+  ],
+  "panel": {
+   "compatible": [
+    "anbernic,rg35xx-plus-panel",
+    "panel-mipi-dpi-spi"
+   ],
+   "firmware": {
+    "modes": [
+     {
+      "clock_khz": 24000,
+      "height": 480,
+      "width": 640
+     },
+     {
+      "clock_khz": 48000,
+      "height": 480,
+      "width": 640
+     }
+    ],
+    "size_mm": [
+     70,
+     53
+    ]
+   },
+   "rotation": 0
+  },
+  "rtc": [
+   "allwinner,sun50i-h616-rtc",
+   "nxp,pcf8563"
+  ],
+  "uarts_enabled": [
+   "serial@5000000",
+   "serial@5000400"
+  ],
+  "usb_controllers": [
+   "usb@5100000",
+   "usb@5101000",
+   "usb@5101400"
+  ],
+  "wifi": true
+ },
+ "sun50i-h700-anbernic-rg35xx-sp-v2-panel": {
+  "bluetooth": [
+   [
+    "realtek,rtl8821cs-bt",
+    "realtek,rtl8723bs-bt"
+   ]
+  ],
+  "compatible": [
+   "anbernic,rg35xx-sp",
+   "allwinner,sun50i-h700"
+  ],
+  "dt_id": "sun50i-h700-anbernic-rg35xx-sp-v2-panel",
+  "hdmi": true,
+  "joypad": {
+   "button_codes": [
+    304,
+    305,
+    307,
+    308,
+    310,
+    311,
+    312,
+    313,
+    314,
+    315,
+    316,
+    317,
+    318,
+    544,
+    545,
+    546,
+    547
+   ],
+   "driver": "rocknix-singleadc-joypad",
+   "inverted": [
+    "absx",
+    "absy"
+   ],
+   "motor_pwm_channel": 2,
+   "name": "H700 Gamepad",
+   "stick_axes": 0
+  },
+  "keys": [
+   {
+    "code": 115,
+    "group": "gpio-keys-volume",
+    "label": "Key Volume Up",
+    "type": 1
+   },
+   {
+    "code": 114,
+    "group": "gpio-keys-volume",
+    "label": "Key Volume Down",
+    "type": 1
+   },
+   {
+    "code": 0,
+    "group": "gpio-keys-lid",
+    "label": "Lid Switch",
+    "type": 5
+   }
+  ],
+  "leds": [
+   "power",
+   "status"
+  ],
+  "model": "Anbernic RG35XX SP",
+  "otg": [
+   "otg"
+  ],
+  "panel": {
+   "compatible": [
+    "anbernic,rg35xx-sp-v2-panel",
+    "panel-mipi-dpi-spi"
+   ],
+   "firmware": {
+    "modes": [
+     {
+      "clock_khz": 24000,
+      "height": 480,
+      "width": 640
+     }
+    ],
+    "size_mm": [
+     70,
+     53
+    ]
+   },
+   "rotation": 0
+  },
+  "rtc": [
+   "allwinner,sun50i-h616-rtc",
+   "nxp,pcf8563"
+  ],
+  "uarts_enabled": [
+   "serial@5000000",
+   "serial@5000400"
+  ],
+  "usb_controllers": [
+   "usb@5100000",
+   "usb@5101000",
+   "usb@5101400"
+  ],
+  "wifi": true
+ },
+ "sun50i-h700-anbernic-rg40xx-h": {
+  "bluetooth": [
+   [
+    "realtek,rtl8821cs-bt",
+    "realtek,rtl8723bs-bt"
+   ]
+  ],
+  "compatible": [
+   "anbernic,rg40xx-h",
+   "allwinner,sun50i-h700"
+  ],
+  "dt_id": "sun50i-h700-anbernic-rg40xx-h",
+  "hdmi": true,
+  "joypad": {
+   "button_codes": [
+    304,
+    305,
+    307,
+    308,
+    310,
+    311,
+    312,
+    313,
+    314,
+    315,
+    316,
+    317,
+    318,
+    544,
+    545,
+    546,
+    547
+   ],
+   "driver": "rocknix-singleadc-joypad",
+   "inverted": [
+    "absrx",
+    "absry",
+    "absx",
+    "absy"
+   ],
+   "motor_pwm_channel": 3,
+   "name": "H700 Gamepad",
+   "stick_axes": 4
+  },
+  "keys": [
+   {
+    "code": 115,
+    "group": "gpio-keys-volume",
+    "label": "Key Volume Up",
+    "type": 1
+   },
+   {
+    "code": 114,
+    "group": "gpio-keys-volume",
+    "label": "Key Volume Down",
+    "type": 1
+   }
+  ],
+  "leds": [
+   "power",
+   "status",
+   "kbd_backlight"
+  ],
+  "model": "Anbernic RG40XX H",
+  "otg": [
+   "otg"
+  ],
+  "panel": {
+   "compatible": [
+    "anbernic,rg40xx-panel",
+    "panel-mipi-dpi-spi"
+   ],
+   "firmware": {
+    "modes": [
+     {
+      "clock_khz": 27000,
+      "height": 480,
+      "width": 640
+     },
+     {
+      "clock_khz": 54000,
+      "height": 480,
+      "width": 640
+     }
+    ],
+    "size_mm": [
+     81,
+     61
+    ]
+   },
+   "rotation": 0
+  },
+  "rtc": [
+   "allwinner,sun50i-h616-rtc",
+   "nxp,pcf8563"
+  ],
+  "uarts_enabled": [
+   "serial@5000000",
+   "serial@5000400",
+   "serial@5001400"
+  ],
+  "usb_controllers": [
+   "usb@5100000",
+   "usb@5101000",
+   "usb@5101400"
+  ],
+  "wifi": true
+ },
+ "sun50i-h700-anbernic-rg40xx-h-v2-panel": {
+  "bluetooth": [
+   [
+    "realtek,rtl8821cs-bt",
+    "realtek,rtl8723bs-bt"
+   ]
+  ],
+  "compatible": [
+   "anbernic,rg40xx-h",
+   "allwinner,sun50i-h700"
+  ],
+  "dt_id": "sun50i-h700-anbernic-rg40xx-h-v2-panel",
+  "hdmi": true,
+  "joypad": {
+   "button_codes": [
+    304,
+    305,
+    307,
+    308,
+    310,
+    311,
+    312,
+    313,
+    314,
+    315,
+    316,
+    317,
+    318,
+    544,
+    545,
+    546,
+    547
+   ],
+   "driver": "rocknix-singleadc-joypad",
+   "inverted": [
+    "absrx",
+    "absry",
+    "absx",
+    "absy"
+   ],
+   "motor_pwm_channel": 3,
+   "name": "H700 Gamepad",
+   "stick_axes": 4
+  },
+  "keys": [
+   {
+    "code": 115,
+    "group": "gpio-keys-volume",
+    "label": "Key Volume Up",
+    "type": 1
+   },
+   {
+    "code": 114,
+    "group": "gpio-keys-volume",
+    "label": "Key Volume Down",
+    "type": 1
+   }
+  ],
+  "leds": [
+   "power",
+   "status",
+   "kbd_backlight"
+  ],
+  "model": "Anbernic RG40XX H",
+  "otg": [
+   "otg"
+  ],
+  "panel": {
+   "compatible": [
+    "anbernic,rg40xx-v2-panel",
+    "panel-mipi-dpi-spi"
+   ],
+   "firmware": {
+    "modes": [
+     {
+      "clock_khz": 27000,
+      "height": 480,
+      "width": 640
+     }
+    ],
+    "size_mm": [
+     81,
+     61
+    ]
+   },
+   "rotation": 0
+  },
+  "rtc": [
+   "allwinner,sun50i-h616-rtc",
+   "nxp,pcf8563"
+  ],
+  "uarts_enabled": [
+   "serial@5000000",
+   "serial@5000400",
+   "serial@5001400"
+  ],
+  "usb_controllers": [
+   "usb@5100000",
+   "usb@5101000",
+   "usb@5101400"
+  ],
+  "wifi": true
+ },
+ "sun50i-h700-anbernic-rg40xx-v": {
+  "bluetooth": [
+   [
+    "realtek,rtl8821cs-bt",
+    "realtek,rtl8723bs-bt"
+   ]
+  ],
+  "compatible": [
+   "anbernic,rg40xx-V",
+   "allwinner,sun50i-h700"
+  ],
+  "dt_id": "sun50i-h700-anbernic-rg40xx-v",
+  "hdmi": true,
+  "joypad": {
+   "button_codes": [
+    304,
+    305,
+    307,
+    308,
+    310,
+    311,
+    312,
+    313,
+    314,
+    315,
+    316,
+    317,
+    318,
+    544,
+    545,
+    546,
+    547
+   ],
+   "driver": "rocknix-singleadc-joypad",
+   "inverted": [
+    "absx",
+    "absy"
+   ],
+   "motor_pwm_channel": 3,
+   "name": "H700 Gamepad",
+   "stick_axes": 4
+  },
+  "keys": [
+   {
+    "code": 115,
+    "group": "gpio-keys-volume",
+    "label": "Key Volume Up",
+    "type": 1
+   },
+   {
+    "code": 114,
+    "group": "gpio-keys-volume",
+    "label": "Key Volume Down",
+    "type": 1
+   }
+  ],
+  "leds": [
+   "power",
+   "status",
+   "kbd_backlight"
+  ],
+  "model": "Anbernic RG40XX V",
+  "otg": [
+   "otg"
+  ],
+  "panel": {
+   "compatible": [
+    "anbernic,rg40xx-panel",
+    "panel-mipi-dpi-spi"
+   ],
+   "firmware": {
+    "modes": [
+     {
+      "clock_khz": 27000,
+      "height": 480,
+      "width": 640
+     },
+     {
+      "clock_khz": 54000,
+      "height": 480,
+      "width": 640
+     }
+    ],
+    "size_mm": [
+     81,
+     61
+    ]
+   },
+   "rotation": 0
+  },
+  "rtc": [
+   "allwinner,sun50i-h616-rtc",
+   "nxp,pcf8563"
+  ],
+  "uarts_enabled": [
+   "serial@5000000",
+   "serial@5000400",
+   "serial@5001400"
+  ],
+  "usb_controllers": [
+   "usb@5100000",
+   "usb@5101000",
+   "usb@5101400"
+  ],
+  "wifi": true
+ },
+ "sun50i-h700-anbernic-rg40xx-v-v2-panel": {
+  "bluetooth": [
+   [
+    "realtek,rtl8821cs-bt",
+    "realtek,rtl8723bs-bt"
+   ]
+  ],
+  "compatible": [
+   "anbernic,rg40xx-V",
+   "allwinner,sun50i-h700"
+  ],
+  "dt_id": "sun50i-h700-anbernic-rg40xx-v-v2-panel",
+  "hdmi": true,
+  "joypad": {
+   "button_codes": [
+    304,
+    305,
+    307,
+    308,
+    310,
+    311,
+    312,
+    313,
+    314,
+    315,
+    316,
+    317,
+    318,
+    544,
+    545,
+    546,
+    547
+   ],
+   "driver": "rocknix-singleadc-joypad",
+   "inverted": [
+    "absx",
+    "absy"
+   ],
+   "motor_pwm_channel": 3,
+   "name": "H700 Gamepad",
+   "stick_axes": 4
+  },
+  "keys": [
+   {
+    "code": 115,
+    "group": "gpio-keys-volume",
+    "label": "Key Volume Up",
+    "type": 1
+   },
+   {
+    "code": 114,
+    "group": "gpio-keys-volume",
+    "label": "Key Volume Down",
+    "type": 1
+   }
+  ],
+  "leds": [
+   "power",
+   "status",
+   "kbd_backlight"
+  ],
+  "model": "Anbernic RG40XX V",
+  "otg": [
+   "otg"
+  ],
+  "panel": {
+   "compatible": [
+    "anbernic,rg40xx-v2-panel",
+    "panel-mipi-dpi-spi"
+   ],
+   "firmware": {
+    "modes": [
+     {
+      "clock_khz": 27000,
+      "height": 480,
+      "width": 640
+     }
+    ],
+    "size_mm": [
+     81,
+     61
+    ]
+   },
+   "rotation": 0
+  },
+  "rtc": [
+   "allwinner,sun50i-h616-rtc",
+   "nxp,pcf8563"
+  ],
+  "uarts_enabled": [
+   "serial@5000000",
+   "serial@5000400",
+   "serial@5001400"
+  ],
+  "usb_controllers": [
+   "usb@5100000",
+   "usb@5101000",
+   "usb@5101400"
+  ],
+  "wifi": true
+ },
+ "sun50i-h700-anbernic-rgcubexx": {
+  "bluetooth": [
+   [
+    "realtek,rtl8821cs-bt",
+    "realtek,rtl8723bs-bt"
+   ]
+  ],
+  "compatible": [
+   "anbernic,rgcubexx",
+   "allwinner,sun50i-h700"
+  ],
+  "dt_id": "sun50i-h700-anbernic-rgcubexx",
+  "hdmi": true,
+  "joypad": {
+   "button_codes": [
+    304,
+    305,
+    307,
+    308,
+    310,
+    311,
+    312,
+    313,
+    314,
+    315,
+    316,
+    317,
+    318,
+    544,
+    545,
+    546,
+    547
+   ],
+   "driver": "rocknix-singleadc-joypad",
+   "inverted": [
+    "absrx",
+    "absry",
+    "absx",
+    "absy"
+   ],
+   "motor_pwm_channel": 3,
+   "name": "H700 Gamepad",
+   "stick_axes": 4
+  },
+  "keys": [
+   {
+    "code": 115,
+    "group": "gpio-keys-volume",
+    "label": "Key Volume Up",
+    "type": 1
+   },
+   {
+    "code": 114,
+    "group": "gpio-keys-volume",
+    "label": "Key Volume Down",
+    "type": 1
+   }
+  ],
+  "leds": [
+   "power",
+   "status",
+   "kbd_backlight"
+  ],
+  "model": "Anbernic RG CubeXX",
+  "otg": [
+   "otg"
+  ],
+  "panel": {
+   "compatible": [
+    "anbernic,rgcubexx-panel",
+    "panel-mipi-dpi-spi"
+   ],
+   "firmware": {
+    "modes": [
+     {
+      "clock_khz": 36000,
+      "height": 720,
+      "width": 720
+     },
+     {
+      "clock_khz": 73000,
+      "height": 720,
+      "width": 720
+     }
+    ],
+    "size_mm": [
+     71,
+     71
+    ]
+   },
+   "rotation": 0
+  },
+  "rtc": [
+   "allwinner,sun50i-h616-rtc",
+   "nxp,pcf8563"
+  ],
+  "uarts_enabled": [
+   "serial@5000000",
+   "serial@5000400",
+   "serial@5001400"
+  ],
+  "usb_controllers": [
+   "usb@5100000",
+   "usb@5101000",
+   "usb@5101400"
+  ],
+  "wifi": true
+ }
+}
