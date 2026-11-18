@@ -108,7 +108,7 @@ Selection rule: light apps for 1 GB RAM; Qt apps preferred where equal, since mo
 | Clipboard | `wl-clipboard` | Required by L3/R3 copy/paste |
 | Brightness / volume | `brightnessctl`, `wireplumber` (`wpctl`) | Used by F + Vol and Vol keys; the pop-up bar is Handtop's own `rg35xxh-osd`, see [services/osd.md](services/osd.md) |
 | Screenshots | `grim`, `slurp` | |
-| Viewers | `ristretto` (images, "Image Viewer"), `qpdfview` (PDF), `mpv` (video, VPU decode — see [video-decode.md](video-decode.md); Handtop controls and buttons in [apps/videos.md](apps/videos.md)), `imv` (hidden second choice for images) | Ristretto since 2026-11-17: GTK3, so it follows the theme, has a thumbnail strip and big toolbar buttons; imv has no interface to browse with |
+| Viewers | `ristretto` (images, "Image Viewer"), `qpdfview` (PDF), `mpv` (video, VPU decode — see [video-decode.md](video-decode.md); Handtop controls and buttons in [apps/videos.md](apps/videos.md)), `imv` (hidden second choice for images) | Ristretto since 2026-11-17: GTK3, so it follows the theme, has a thumbnail strip and big toolbar buttons; imv has no interface to browse with. The strip needs `tumbler` (only a recommendation of Ristretto, so listed itself since v0.4.1); it also gives the File Manager picture thumbnails |
 | Media apps | Handtop's **Videos** and **Music** (`src/media`, libmpv through `python3-mpv`) | [apps/videos.md](apps/videos.md), [apps/music.md](apps/music.md) |
 | Archives | `xarchiver` | |
 | System | `htop`, `git`, `zram-tools`, `systemd-timesyncd` | zram = compressed RAM swap |

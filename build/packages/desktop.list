@@ -46,6 +46,7 @@ eject                    # udisks ejects USB sticks with it (SD cards: /usr/loca
 mousepad
 chromium                  # browser: about half Firefox's CPU when scrolling on this device (docs/desktop.md)
 ristretto                 # Image Viewer (GTK3, follows the theme); imv stays as a hidden second choice
+tumbler                   # thumbnail service (D-Bus, started on demand): Ristretto's strip, File Manager thumbnails
 imv
 qpdfview
 mpv
