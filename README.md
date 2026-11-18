@@ -20,7 +20,7 @@ an external monitor over mini HDMI, and everything else Debian's arm64 archive o
 - **Desktop:** labwc (Wayland) + Waybar + nwg-drawer + wlogout, 640×480 on the built-in screen
 - **Controls:** a custom input daemon turns the gamepad into mouse + keyboard, with an on-screen keyboard
 
-Status: **v0.4.0**, developed and tested on the RG35XX H.
+Status: **v0.4.1**, developed and tested on the RG35XX H.
 
 <p align="center">
   <img src="media/handtop-v0.4.0.png" width="800" alt="Handtop v0.4.0: the new theme system, with the four new built-in looks on the RG35XX H: Retro's app drawer in 90s pixel art, Glass's see-through power menu, Pocket's green game-console app drawer and Signal's black, white and red power menu">
@@ -29,7 +29,8 @@ Status: **v0.4.0**, developed and tested on the RG35XX H.
 ## Features
 
 - **Themes** (new in v0.4.0): nine looks built in, your own copies, shareable theme files (see [Themes](#themes))
-- **Controls app**: remap every button (also D-pad, Volume, F, Power), button combinations, macros you build or record, pointer / scroll / stick / vibration settings with live previews, profiles; every risky change runs 15 s on trial and undoes itself
+- **Controls app** (new in v0.4.1): remap every button (also D-pad, Volume, F, Power), button combinations, macros you build or record, pointer / scroll / stick / vibration settings with live previews, profiles that switch by themselves per app; every risky change runs 15 s on trial and undoes itself
+- **Videos, Music and Image Viewer** (new in v0.4.1): hardware-decoded videos with resume and big themed controls, a music player that keeps playing with the screen off, a picture viewer with a thumbnail strip
 - Desktop mode by default: stick / D-pad pointer, A/B clicks, right-stick scrolling, L1/R1/R2 = Esc/Enter/Backspace, L3/R3 = copy/paste
 - On-screen keyboard (X), navigable with the D-pad
 - Gamepad mode (tap Start) presents an Xbox 360 pad, e.g. for Moonlight; hold Start 1 s to go back
@@ -63,7 +64,7 @@ How to change, share and design themes: [docs/themes.md](docs/themes.md).
 
 You need a microSD card (16 GB or larger) and balenaEtcher or Rufus.
 
-1. Download `handtop-<date>-v0.4.0.img.xz` and its `.sha256` from the Releases page. If that image does nothing at all on power-on (no LED), your unit has DDR3 RAM: use the `-DDR3` image instead.
+1. Download `handtop-<date>-v0.4.1.img.xz` and its `.sha256` from the Releases page. If that image does nothing at all on power-on (no LED), your unit has DDR3 RAM: use the `-DDR3` image instead.
 2. Flash the `.img.xz` directly (no need to unpack). If Windows offers to format the card afterwards, choose **Cancel**.
 3. Optional: on the `RG35XXHBOOT` drive, fill in `wifi.txt` (SSID, password, country).
 4. Put the card in the **TF1** (left) slot and power on. The first boot takes longer (the system grows to fill the card).

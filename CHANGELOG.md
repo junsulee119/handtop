@@ -1,10 +1,11 @@
 # Handtop changelog
 
-## Unreleased
+## v0.4.1
+Controls and media: a Controls app for every button, with profiles that switch by themselves per app, and apps for videos, music and pictures.
 
 - **New: Videos app** (Apps → Videos). Your videos in `~/Videos` (and on a USB stick or SD card) with thumbnails and "Resume at" for the ones you stopped half-way; a click plays them full screen, hardware-decoded, with the rest of the folder next. The player's controls follow the theme and are big enough for the D-pad pointer: A pauses, the right stick seeks (faster the further you push it, up to 10 % of the video a second), R1 / R2 go to the next / previous video and L1 closes it. Videos opened from the File Manager play the same way, and every video now remembers where you stopped.
 - **New: Music app** (Apps → Music). Your songs in `~/Music`, folder by folder with album covers; a big Now playing page with the cover, a seek bar, shuffle and repeat, and a bar at the bottom while you browse. The handheld doesn't sleep while music plays. After 5 minutes without input the screen turns off and the music goes on (or tap **Screen off** on Now playing); Vol still changes the volume with the screen off, and any other button turns it back on. When the music ends with the screen off, the handheld goes to sleep as usual. The 5 minutes are `MUSIC_SCREEN_OFF_MINUTES` in `/etc/rg35xxh/power.conf`.
-- **New: Image Viewer** (Ristretto) replaces imv for pictures: it follows the theme, browses the folder with a thumbnail strip and has big toolbar buttons. imv stays installed.
+- **New: Image Viewer** (Ristretto) replaces imv for pictures: it follows the theme, browses the folder with a thumbnail strip and has big toolbar buttons. imv stays installed. Its thumbnail service (Tumbler) also gives the File Manager picture thumbnails.
 - New app icons for Videos, Music and Image Viewer in all nine themes.
 
 - **New: Controls app** (Apps → Controls). Everything about the controls in one place, applied at once:
