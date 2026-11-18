@@ -4,7 +4,7 @@
 TOP="$(cd "$(dirname "$(realpath "${BASH_SOURCE[0]}")")/.." && pwd)"   # absolute, independent of $HOME/sudo
 WORK="${WORK:-$TOP/work}"
 
-RELEASE_VERSION="0.4.0"            # used in the image name when not building from a git checkout
+RELEASE_VERSION="0.4.1"            # used in the image name when not building from a git checkout
 RAM_TYPE="${RAM_TYPE:-DDR4}"          # DDR4 (default) or DDR3 depending on board revision
 
 ROCKNIX_VERSION="20261001"
@@ -77,9 +77,9 @@ BUILD_EXTRA_CA="${BUILD_EXTRA_CA:-}"
 
 # nwg-drawer (not packaged in trixie; cross-compiled from source)
 NWG_DRAWER_VERSION="v0.7.5"
-GO_VERSION="1.27.3"                # pinned Go release, downloaded by 00-host-deps.sh (SHA-256 checked)
-GO_SHA256_AMD64="65efbc80fdc1fa2cd2631cad5b481777a68e8725f34e89f50fc6ac714e379b40"
-GO_SHA256_ARM64="a06e99309dbcbdca1a8ccd2282c3ee146e55930886e26b4f1193269587165f49"
+GO_VERSION="1.27.4"                # pinned Go release, downloaded by 00-host-deps.sh (SHA-256 checked)
+GO_SHA256_AMD64="7226736c2339719cda28fbf3a54d71aa63bcefe376e98cef00034268dab24840"
+GO_SHA256_ARM64="3392582988a273a87ab5043ee1b2c9c17a2c3c00580bf9326c47a2e0aaaeac92"
 GO_DEFAULT="$WORK/tools/go/bin/go"
 GO_TOOLCHAIN="${GO_TOOLCHAIN:-$GO_DEFAULT}"   # or set to your own Go >= 1.25
 

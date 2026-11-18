@@ -10,8 +10,9 @@
 #
 # The driver is built and patched by tools/build-va-v4l2request.sh (upstream
 # master + build/patches/libva-v4l2-request-fixes.patch: single-planar support
-# for cedrus, vaAcquireBufferHandle(), per-layer NV12 export for VLC 3). This
-# step only makes sure the artifact lands in the image.
+# for cedrus, vaAcquireBufferHandle(), per-layer NV12 export for VLC 3; and
+# build/patches/libva-v4l2-request-surface-mutex.patch, upstream's per-surface
+# mutex). This step only makes sure the artifact lands in the image.
 set -euo pipefail
 TOP="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "$TOP/build/config.sh"

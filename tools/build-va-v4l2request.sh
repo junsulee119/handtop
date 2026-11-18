@@ -20,6 +20,10 @@
 #  3. NV12/P010 export one plane per layer even when the client passes flags=0
 #     (VLC 3 rejects a composite layer, which shows as a green window).
 #
+# and build/patches/libva-v4l2-request-surface-mutex.patch: upstream's 60e1558
+# (a mutex per surface, so two threads preparing the same surface can't mmap an
+# fd that isn't set yet), backported without the later Apple-Silicon changes.
+#
 # The artifact is staged at work/va-driver/v4l2_request_drv_video.so; --ship
 # installs it into the rootfs, and tools/test-va-v4l2request.sh runs the checks
 # on the device. With LIBVA_DRIVER_NAME=v4l2_request exported for the session it
@@ -41,7 +45,7 @@ VA_TAG="f54d8d2c36433b38ba9b8633ac10eec444ac9cf1"   # master: surface: simplify 
 VA_URL="https://github.com/sofus13/libva-v4l2_request.git"
 SRC="$WORK/src/libva-v4l2_request"
 OUT="$WORK/va-driver"
-DEV_PKGS="meson ninja-build pkg-config libva-dev libdrm-dev"
+DEV_PKGS="libc6-dev meson ninja-build pkg-config libva-dev libdrm-dev"   # libc6-dev: crt files for linking (as 07b / 07c)
 
 # Fresh pinned checkout on the host side (network here, not in the chroot).
 [ -e "$SRC" ] && safe_rm -r "$SRC"
@@ -53,10 +57,14 @@ grep -q "v4l2_request" "$SRC/meson.build" || die "unexpected checkout at $VA_TAG
 # Single-planar support + the two VA-API interop fixes (see the header).
 patch -d "$SRC" -p1 -s --forward < "$TOP/build/patches/libva-v4l2-request-fixes.patch" \
   || die "the driver fixes patch did not apply"
+patch -d "$SRC" -p1 -s --forward < "$TOP/build/patches/libva-v4l2-request-surface-mutex.patch" \
+  || die "the surface mutex patch did not apply"
 for sym in "buf_info->mem_size = v4l2r_buffer_bytes(buffer)" \
            "v4l2r_format_pixelformat" "V4L2_CAP_VIDEO_M2M)" ; do
   grep -rq "$sym" "$SRC/src" || die "the driver fixes patch did not apply ($sym)"
 done
+grep -q "pthread_mutex_lock(&surface->mutex)" "$SRC/src/surface.c" \
+  || die "the surface mutex patch did not apply"
 
 chroot_mount
 in_chroot "apt-get update -qq && apt-get install -y -qq --no-install-recommends $DEV_PKGS"

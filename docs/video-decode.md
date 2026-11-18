@@ -286,6 +286,13 @@ What ships:
   drift check reports the next upstream commit again. If a later update is
   taken: install the module under the old name (or change the session's
   `LIBVA_DRIVER_NAME`), re-check the fixes patch, re-test Chromium and VLC.
+  Reviewed again 2026-11-18, up to `60e1558`: decoding changed once, in
+  `60e1558` ("surface: give each surface a mutex": a second
+  `v4l2r_surface_prepare` on the same surface could `mmap` a dmabuf fd that
+  wasn't set yet). That fix is backported as
+  `build/patches/libva-v4l2-request-surface-mutex.patch`; the vpp rework
+  (Apple's scaler) and the dropped HEVC checks (a downstream Rockchip control)
+  are not taken.
 - `build/patches/libva-v4l2-request-fixes.patch`, three fixes:
   1. **single-planar support** — master dropped it in `4cb4bde` because its
      author's SoCs are multiplanar; cedrus exposes `V4L2_CAP_VIDEO_M2M` only, so

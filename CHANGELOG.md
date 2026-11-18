@@ -15,6 +15,8 @@
   - **Profiles switch by themselves per app:** link apps to a profile (Advanced → Profiles → Apps…), and it is used while one of them is in front, with a short "Profile: …" note. It waits until you let go of the buttons, and stays put during External Controller mode.
 - **Controls apply at once.** Changes to the control settings no longer need a re-login; the input daemon picks them up within a second. Groundwork for the Controls app.
 - **Change: the boot partition's `rg35xxh-input.conf` is now a rescue file, all commented out.** A line you uncomment wins over everything else; if the controls are ever broken, uncomment `use_app_settings = no` at the top to ignore what the Controls app saved. Cards flashed before keep their old file, which still works but fixes every setting it lists.
+- **Fixed (upstream): a rare video failure in Chromium and VLC.** The VA-API driver they decode with takes upstream's fix for a race where two threads preparing the same video frame could make an allocation fail (`build/patches/libva-v4l2-request-surface-mutex.patch`). Decoding stays bit-exact.
+- **For builders:** Go 1.27.4 (security fixes in the toolchain; none reached the image), and the VA-API driver step no longer depends on an earlier step leaving the C library headers in the rootfs.
 
 ## v0.4.0
 Themes: nine looks built in (new: Retro, Glass, Pocket, Signal), a Theme app to copy and share them, and theme files you can design yourself.
