@@ -1,6 +1,6 @@
 # Handtop on more handhelds: plan
 
-**Status (2026-11-18):** direction agreed with Jason (maintainer); nothing implemented yet. All work happens on the `device-support` branch. The phases below are all open; tick them off with the commits and tests that closed them.
+**Status (2026-11-18):** direction agreed with Jason (maintainer); P0 written, waiting for review; nothing implemented in code yet. All work happens on the `device-support` branch. The phases below are all open; tick them off with the commits and tests that closed them.
 
 This file is the working plan for running Handtop on handhelds other than the Anbernic RG35XX H. Profiles, evidence and test status for each model live next to it in `ports/`, so anyone can see from the repository where things stand.
 
@@ -67,7 +67,7 @@ Built from a profile, no hardware needed: the existing headless tools take a pro
 
 | # | Phase | Done when | Hardware |
 |---|---|---|---|
-| P0 | Rules and baseline | AGENTS.md says how "Test required" images relate to the tested-before-merge rule (it still applies in full to the RG35XX H and to shared code); the screen-size rule is updated; a list of what an RG35XX H must keep doing, used as the regression test | None |
+| P0 | Rules and baseline (written 2026-11-18: AGENTS.md, `testing/rg35xx-h-baseline.md`) | AGENTS.md says how "Test required" images relate to the tested-before-merge rule (it still applies in full to the RG35XX H and to shared code); the screen-size rule is updated; a list of what an RG35XX H must keep doing, used as the regression test | None |
 | P1 | Choose targets | One evidence page per candidate in `ports/evidence/`: screen, controls, radios, RAM and panel variants, how its device tree differs from the H's, sources, open questions; plus community-use findings. Jason picks 2–3 | None |
 | P2 | Profiles and build | Profile format and validation, the RG35XX H profile, profiles for the chosen models, the build loop for one image per model and variant, the regression check passes for the H | None |
 | P3 | Code reads the profile | Input devices and mapping, outputs, LEDs and variant checks come from the profile (PE6 only on the H); every component follows the real screen size; the virtual test platform passes for every target in all nine themes; full on-device regression test on an RG35XX H (DDR4 and DDR3 where it matters) | RG35XX H |
