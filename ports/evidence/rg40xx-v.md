@@ -27,11 +27,11 @@ Evidence for the Handtop profile of this model (phase P1). Nothing here is built
 
 - Same as the RG40XX H in the device tree (panel, LEDs, motor channel) except that the right stick is not inverted.
 - The device tree declares four stick axes (`amux-count` 4).
-- Stock U-Boot (RG40XXV V1.1.1.0): reads **PE6 without changing its pull**; low selects the second sequence ([stock-firmware.md](stock-firmware.md)).
+- Stock U-Boot (RG40XXV V1.1.1.0): reads **PE6 without changing its pull**: high = `rg40xx-panel`, low = `rg40xx-v2-panel` ([stock-firmware.md](stock-firmware.md)).
 
 ## Not confirmed
 
-- Which ROCKNIX device tree each PE6 level means is inferred (low = the second panel: rev6 / v2) and needs one unit of each panel to confirm.
+- The PE6 table comes from matching the stock init sequences with ROCKNIX's panel files; a unit with the second panel should confirm the low reading.
 - Number of physical sticks: not confirmed from an official source here; the device tree reads four axes either way, so the profile needs a spec sheet or a tester before it says how many.
 - USB keyboards and hubs: only the OTG (charging) port is enabled, so they need it in host mode; untested in Handtop (see [h700.md](h700.md#usb)).
 - RAM type per batch: not confirmed.

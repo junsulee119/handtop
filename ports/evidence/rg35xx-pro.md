@@ -27,10 +27,10 @@ Evidence for the Handtop profile of this model (phase P1). Nothing here is built
 - Device tree: the RG35XX H's, except that the H's second USB host controller (`usb@5200000`, `usb@5200400`) and its VBUS regulators are disabled; same panel firmware (`rg35xx-plus-panel`, 640×480), same two sticks, same axis inversion, same motor channel.
 - Stock U-Boot of the Pro and the H, and of no other model, contains code for a **second USB port** (`allen_usb2_vbus_en`, `allen_usb2_pwr_en`, `allen_usb2_id_det`), but ROCKNIX's Pro device tree disables the second host controller. The Pro may have a host port like the H's left one that ROCKNIX does not switch on; check on the hardware.
 - Community: the top vote in the under-$50 category of Retro Handhelds' community vote (over 1,000 responses, December 2025) ([source](https://retrohandhelds.gg/the-best-handhelds-at-each-price-point-as-decided-by-you/)).
-- Stock U-Boot (RG35XXPRO V1.0.5): reads **PE6 with the pull-up on**, exactly like the H, and has two init sequences, while ROCKNIX ships one Pro device tree (the regular panel). A Pro with the second panel would need a rev6 variant ROCKNIX does not have ([stock-firmware.md](stock-firmware.md)).
+- Stock U-Boot (RG35XXPRO V1.0.5): reads **PE6 with the pull-up on**, like the H: high = `rg35xx-plus-panel`, low = `rg35xx-plus-rev6-panel`. ROCKNIX ships only the first as a Pro device tree; Handtop can make the rev6 one by changing the panel `compatible` ([stock-firmware.md](stock-firmware.md)).
 
 ## Not confirmed
 
-- Which ROCKNIX device tree each PE6 level means is inferred (low = the second panel: rev6 / v2) and needs one unit of each panel to confirm.
+- The PE6 table comes from matching the stock init sequences with ROCKNIX's panel files; a unit with the second panel should confirm the low reading.
 - USB: only the OTG controller is enabled, so a USB keyboard or hub must go through the charging port in host mode (see [h700.md](h700.md#usb)). Physical port count not confirmed.
 - RAM type (DDR3 / DDR4) per batch: not confirmed.

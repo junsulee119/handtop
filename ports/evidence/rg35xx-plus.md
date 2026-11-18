@@ -28,10 +28,10 @@ Evidence for the Handtop profile of this model (phase P1). Nothing here is built
 - No sticks (`amux-count` 0): the right-stick scroll and L3 / R3 copy and paste need other controls.
 - Same panels as the RG35XX H (regular and rev6), 640×480.
 - Editorial pick: "the default recommendation" of one 2026 comparison ([source](https://handheldindex.pages.dev/comparisons/best-anbernic-handheld-2026/)).
-- Stock U-Boot (RG35XX+-P V1.2.4): reads **PE6 with the pull-up on**, like the H, so the H's panel check should carry over ([stock-firmware.md](stock-firmware.md)).
+- Stock U-Boot (RG35XX+-P V1.2.4): reads **PE6 with the pull-up on**, like the H: high = base, low = rev6 ([stock-firmware.md](stock-firmware.md)).
 
 ## Not confirmed
 
-- Which ROCKNIX device tree each PE6 level means is inferred (low = the second panel: rev6 / v2) and needs one unit of each panel to confirm.
+- The PE6 table comes from matching the stock init sequences with ROCKNIX's panel files; a unit with the second panel should confirm the low reading.
 - USB keyboards and hubs: only the OTG (charging) port is enabled, so they need it in host mode; untested in Handtop (see [h700.md](h700.md#usb)).
 - RAM type per batch: not confirmed.

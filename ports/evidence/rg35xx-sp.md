@@ -29,11 +29,11 @@ Evidence for the Handtop profile of this model (phase P1). Nothing here is built
 - No sticks.
 - Two panels: `rg35xx-plus-panel` and `rg35xx-sp-v2-panel`, both 640×480.
 - Editorial pick: "the specific-use winner" in one 2026 comparison ([source](https://handheldindex.pages.dev/comparisons/best-anbernic-handheld-2026/)).
-- Stock U-Boot (RG35XXSP V1.1.5): reads **PE6 without changing its pull** (the board must set the level); low selects the second sequence ([stock-firmware.md](stock-firmware.md)).
+- Stock U-Boot (RG35XXSP V1.1.5): reads **PE6 without changing its pull**: high = `rg35xx-plus-panel`, low = `rg35xx-sp-v2-panel` ([stock-firmware.md](stock-firmware.md)).
 
 ## Not confirmed
 
-- Which ROCKNIX device tree each PE6 level means is inferred (low = the second panel: rev6 / v2) and needs one unit of each panel to confirm.
+- The PE6 table comes from matching the stock init sequences with ROCKNIX's panel files; a unit with the second panel should confirm the low reading.
 - Lid behaviour (sleep on close) is new to Handtop.
 - USB keyboards and hubs: only the OTG (charging) port is enabled, so they need it in host mode; untested in Handtop (see [h700.md](h700.md#usb)).
 - RAM type per batch: not confirmed.

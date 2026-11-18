@@ -29,10 +29,10 @@ Evidence for the Handtop profile of this model (phase P1). Nothing here is built
 - Clamshell with lid switch.
 - Two sticks, both inverted in the device tree.
 - Community: main pick of the $50–100 category in the same Retro Handhelds vote (December 2025) ([source](https://retrohandhelds.gg/the-best-handhelds-at-each-price-point-as-decided-by-you/)).
-- Stock U-Boot (RG34XXSP V1.0.6): reads **PE6 with the pull-up on**; low selects the second sequence ([stock-firmware.md](stock-firmware.md)).
+- Stock U-Boot (RG34XXSP V1.0.6): reads **PE6 with the pull-up on**, the other way round from the rest: high = `rg34xx-sp-v2-panel`, low = `rg34xx-sp-panel` ([stock-firmware.md](stock-firmware.md)).
 
 ## Not confirmed
 
-- Which ROCKNIX device tree each PE6 level means is inferred (low = the second panel: rev6 / v2) and needs one unit of each panel to confirm.
+- The PE6 table comes from matching the stock init sequences with ROCKNIX's panel files; a unit with the second panel should confirm the low reading.
 - USB keyboards and hubs: only the OTG (charging) port is enabled, so they need it in host mode; untested in Handtop (see [h700.md](h700.md#usb)).
 - RAM type per batch: not confirmed.

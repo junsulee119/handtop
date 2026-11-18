@@ -61,7 +61,7 @@ Every model except the H also needs USB keyboards and hubs on its charging port 
 
 ## Still open after P1
 
-- Panel variants: the stock U-Boot of every two-panel model reads PE6 ([stock-firmware.md](stock-firmware.md)); which level means which device tree still needs one unit of each panel. RG35XX 2024 stock firmware still missing.
+- Panel variants: the stock U-Boot of every two-panel model reads PE6, and its two init sequences say which device tree each level needs ([stock-firmware.md](stock-firmware.md)); one unit with the second panel per family should confirm the low reading. No RG35XX 2024 stock image exists; the Plus image is assumed to cover it.
 - RAM type per model and batch.
 - RG40XX V's stick count (its device tree reads four axes) and RG28XX's Wi-Fi (its device tree has it; the earlier plan said none): confirm from a spec sheet or a tester.
 - USB host mode on the OTG port, on each model.

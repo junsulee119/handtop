@@ -29,9 +29,9 @@ Evidence for the Handtop profile of this model (phase P1). Nothing here is built
 - Current Handtop device and the regression baseline ([../testing/rg35xx-h-baseline.md](../testing/rg35xx-h-baseline.md)).
 - Panel variant (regular / rev6) is detected at boot from pin PE6, a method read out of the stock U-Boot ([docs/services/panel.md](../../docs/services/panel.md)).
 - Ships with DDR4 or DDR3 RAM; users who get no LED at all try the DDR3 image ([docs/flashing.md](../../docs/flashing.md)).
-- Stock U-Boot (RG35XXH V1.2.4): reads **PE6 with the pull-up on**; low selects the second init sequence (lcd_type 1). Same as found in 2026-10 ([stock-firmware.md](stock-firmware.md)).
+- Stock U-Boot (RG35XXH V1.2.4): reads **PE6 with the pull-up on**; high = `rg35xx-plus-panel`, low = `rg35xx-plus-rev6-panel` (init sequences matched) ([stock-firmware.md](stock-firmware.md)).
 
 ## Not confirmed
 
-- Which ROCKNIX device tree each PE6 level means is inferred (low = the second panel: rev6 / v2) and needs one unit of each panel to confirm.
+- The PE6 table comes from matching the stock init sequences with ROCKNIX's panel files; a unit with the second panel should confirm the low reading.
 - A real rev6 unit's PE6 reading (expected 0) is still unmeasured.

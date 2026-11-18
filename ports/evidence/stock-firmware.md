@@ -17,29 +17,32 @@ Read-only analysis of Anbernic's stock card images, 2026-11-18, with `ports/tool
 | RG34XX SP | `RG34XXSP-V1.0.6-EN16GB-260526` |
 | RG SP | `RGSP-V1.0.1-EN16GB-260624` |
 | RG28XX | `RG28XX-V1.1.3-EN16GB-260526` |
-| RG35XX 2024 | **missing.** `35XX双-20231014-EN4GB` was checked: its U-Boot is "for owl board", i.e. the original RG35XX (Actions SoC, not H700) |
+| RG35XX 2024 | **none published** (Jason, 2026-11-18); assumed covered by the RG35XX Plus image until a 2024 owner says otherwise. `35XX双-20231014-EN4GB` was checked: its U-Boot is "for owl board", the original RG35XX (Actions SoC, not H700) |
 
 ## Result
 
-Every image has the same U-Boot function, `lcd_panel_uboot_fj035fhd05_v1_init` (at u-boot offset `0x262e4` in all of them). Where a model has two panels, it reads **PE6**, sets `lcd_type = 1` when PE6 is **low**, and runs one of two panel init sequences (`cmp lcd_type, #1`).
+Every image has the same U-Boot function, `lcd_panel_uboot_fj035fhd05_v1_init` (at u-boot offset `0x262e4` in all of them). Where a model has two panels, it reads **PE6**, sets `lcd_type = 1` when PE6 is **low**, and runs one of two panel init sequences (`cmp lcd_type, #1`). Each init sequence is a list of command and data writes with constant arguments, so the tool extracts both and compares them with ROCKNIX's panel firmware files (`--panels`); a score near 1.00 means the same command list.
 
-| Model | Pin | Pull-up set by U-Boot | ROCKNIX device trees |
-|---|---|---|---|
-| RG35XX H | PE6 | yes | base, rev6-panel |
-| RG35XX Pro | PE6 | yes | base only |
-| RG35XX Plus | PE6 | yes | base, rev6-panel |
-| RG34XX | PE6 | yes | base only |
-| RG34XX SP | PE6 | yes | base, v2-panel |
-| RG SP | PE6 | yes | v2 panel only |
-| RG35XX SP | PE6 | **no** (reads the pin as the board leaves it) | base, v2-panel |
-| RG40XX H | PE6 | **no** | base, v2-panel |
-| RG40XX V | PE6 | **no** | base, v2-panel |
-| RG CubeXX | none: one panel | | one |
-| RG28XX | none: one panel | | one |
+| Model | Pull-up set by U-Boot | PE6 **high** (lcd_type 0): closest ROCKNIX panel | PE6 **low** (lcd_type 1): closest ROCKNIX panel | ROCKNIX device trees |
+|---|---|---|---|---|
+| RG35XX H | yes | `rg35xx-plus-panel` (0.99) | `rg35xx-plus-rev6-panel` (0.87) | base, rev6-panel |
+| RG35XX Pro | yes | `rg35xx-plus-panel` (0.99) | `rg35xx-plus-rev6-panel` (0.87) | base only |
+| RG35XX Plus | yes | `rg35xx-plus-panel` (0.99) | `rg35xx-plus-rev6-panel` (0.87) | base, rev6-panel |
+| RG35XX SP | **no** | `rg35xx-plus-panel` (0.99) | `rg35xx-sp-v2-panel` (0.99) | base, v2-panel |
+| RG40XX H | **no** | `rg40xx-panel` (0.97) | `rg40xx-v2-panel` (0.99) | base, v2-panel |
+| RG40XX V | **no** | `rg40xx-panel` (0.97) | `rg40xx-v2-panel` (0.99) | base, v2-panel |
+| RG34XX | yes | `rg34xx-panel` (0.96) | `rg34xx-sp-panel` (0.99) | base only |
+| RG34XX SP | yes | `rg34xx-sp-v2-panel` (0.99) | `rg34xx-sp-panel` (0.99) | base, v2-panel |
+| RG SP | yes | `rg34xx-sp-v2-panel` (0.99) | `rg34xx-sp-panel` (0.99) | v2 panel only |
+| RG CubeXX | none: one panel | | | one |
+| RG28XX | none: one panel | | | one |
+
+The RG35XX H row agrees with the one measurement so far (a regular-panel H reads PE6 high). The rev6 match is lower (0.87) because ROCKNIX's rev6 file differs in some values; it is still far closer than any other file.
 
 ## What it means (conclusions)
 
-- **One check for all two-panel models.** Handtop's `rg35xxh-panel` already reads PE6 the H's way; the same check, enabled per model by its profile, covers every model above. For the RG35XX SP and RG40XX family the check should read the pin without turning the pull-up on, as their stock U-Boot does.
-- **Which device tree each level means is inferred, not measured:** PE6 low (`lcd_type` 1) = the second panel (rev6 / v2). On the H only the high reading has been measured (regular panel). Each family needs one unit with the second panel to confirm; until then `panel.txt` stays the override.
-- **ROCKNIX may be missing panel variants:** the stock U-Boot of the RG35XX Pro, RG34XX and RG SP has two init sequences, but ROCKNIX ships one device tree for each. Units with the other panel would show a garbled screen with every ROCKNIX-based image. For the Pro the fix would be a rev6 variant made like the H's (the H's two device trees differ only in the panel); for the RG34XX and RG SP it needs the second panel's init sequence, which would have to come from the stock firmware.
+- **One check for all two-panel models.** Handtop's `rg35xxh-panel` already reads PE6 the H's way; the same check, enabled per model by its profile with that model's high / low table, covers every model above. For the RG35XX SP and RG40XX family it should read the pin without turning the pull-up on, as their stock U-Boot does.
+- **The RG34XX SP is the other way round:** PE6 high means its v2 panel, low its original panel. The profile carries the table, so the check never assumes "low = second file".
+- **The panels ROCKNIX lacks already exist in ROCKNIX:** the second panel of the RG35XX Pro is the rev6 panel, and the second panel of the RG34XX and the RG SP is the RG34XX SP's original panel (`rg34xx-sp-panel`). ROCKNIX ships the firmware for both, only not a device tree for those combinations. Handtop can make them at image build the way the RG35XX H's two device trees differ: the same tree with the panel's `compatible` changed. No init sequence needs to be taken from the stock firmware.
+- **Still unmeasured:** a unit of each family with its second panel, to confirm the low reading; until then `panel.txt` stays the override.
 - **A second USB port on the RG35XX Pro:** only the H's and the Pro's stock U-Boot contain code for a second USB port (`allen_usb2_vbus_en`, `allen_usb2_pwr_en`, `allen_usb2_id_det`). ROCKNIX's Pro device tree disables the second host controller. If the Pro has that port, enabling it would give the Pro the H's separate host port. Check on the hardware or a spec sheet.

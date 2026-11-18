@@ -27,10 +27,10 @@ Evidence for the Handtop profile of this model (phase P1). Nothing here is built
 
 - Announced July 2026: H700, 3.4" 720×480, clamshell, **no sticks** ([Anbernic](https://anbernic.com/blogs/news/anbernic-rg-sp-first-look), [Retro Handhelds](https://retrohandhelds.gg/anbernic-announces-the-rg-sp-with-almost-everything-we-need-to-know/)).
 - Device tree: the RG34XX SP v2 panel (`rg34xx-sp-v2-panel`), lid switch, no stick axes.
-- Stock U-Boot (RGSP V1.0.1): reads **PE6 with the pull-up on** and has two init sequences; ROCKNIX ships one device tree (the RG34XX SP v2 panel) ([stock-firmware.md](stock-firmware.md)).
+- Stock U-Boot (RGSP V1.0.1): reads **PE6 with the pull-up on**: high = `rg34xx-sp-v2-panel` (ROCKNIX's RG SP device tree), low = `rg34xx-sp-panel`, which ROCKNIX has no RG SP device tree for; Handtop can make it by changing the panel `compatible` ([stock-firmware.md](stock-firmware.md)).
 
 ## Not confirmed
 
-- Which ROCKNIX device tree each PE6 level means is inferred (low = the second panel: rev6 / v2) and needs one unit of each panel to confirm.
+- The PE6 table comes from matching the stock init sequences with ROCKNIX's panel files; a unit with the second panel should confirm the low reading.
 - RAM, battery, ports: not stated by Anbernic at announcement.
 - USB keyboards and hubs: only the OTG (charging) port is enabled (see [h700.md](h700.md#usb)).

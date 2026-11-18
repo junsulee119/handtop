@@ -27,10 +27,10 @@ Evidence for the Handtop profile of this model (phase P1). Nothing here is built
 
 - **720×480** panel (`rg34xx-panel`, 71×48 mm, 3:2).
 - No sticks.
-- Stock U-Boot (RG34XX V1.0.6): reads **PE6 with the pull-up on** and has two init sequences, while ROCKNIX ships one RG34XX device tree. A second panel may exist that ROCKNIX does not know ([stock-firmware.md](stock-firmware.md)).
+- Stock U-Boot (RG34XX V1.0.6): reads **PE6 with the pull-up on**: high = `rg34xx-panel`, low = `rg34xx-sp-panel`. ROCKNIX ships only the first as an RG34XX device tree; Handtop can make the second by changing the panel `compatible` ([stock-firmware.md](stock-firmware.md)).
 
 ## Not confirmed
 
-- Which ROCKNIX device tree each PE6 level means is inferred (low = the second panel: rev6 / v2) and needs one unit of each panel to confirm.
+- The PE6 table comes from matching the stock init sequences with ROCKNIX's panel files; a unit with the second panel should confirm the low reading.
 - USB keyboards and hubs: only the OTG (charging) port is enabled, so they need it in host mode; untested in Handtop (see [h700.md](h700.md#usb)).
 - RAM type per batch: not confirmed.
