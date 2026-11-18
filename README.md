@@ -23,7 +23,7 @@ an external monitor over mini HDMI, and everything else Debian's arm64 archive o
 Status: **v0.4.1**, developed and tested on the RG35XX H.
 
 <p align="center">
-  <img src="media/handtop-v0.4.0.png" width="800" alt="Handtop v0.4.0: the new theme system, with the four new built-in looks on the RG35XX H: Retro's app drawer in 90s pixel art, Glass's see-through power menu, Pocket's green game-console app drawer and Signal's black, white and red power menu">
+  <img src="media/handtop-v0.4.1.png" width="800" alt="Handtop v0.4.1 on the RG35XX H: the new Controls app with a picture of the handheld, a profile with the apps it switches for, a video playing with big on-screen controls, and the Music app's Now playing page">
 </p>
 
 ## Features
