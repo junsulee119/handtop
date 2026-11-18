@@ -1,0 +1,27 @@
+# Handtop's systemd units and what a fresh install does with them (read by build-debs.py).
+#   enable     enabled on a fresh install, and on an existing card the first time a package
+#              version brings the unit; never re-enabled after that, so the user's choice stays
+#   on-demand  started by apps, udev or other units; never enabled
+# unit                                   policy
+rg35xxh-hwinit.service                   enable
+rg35xxh-panel.service                    enable
+rg35xxh-bt-check.service                 enable
+rg35xxh-ssh-keygen.service               enable
+rg35xxh-resize-root.service              enable
+rg35xxh-swapfile.service                 enable
+rg35xxh-tailscale-operator.service       enable
+rg35xxh-wifi-import.service              enable
+rg35xxh-bootlog.timer                    enable
+rg35xxh-bootlog-update.timer             enable
+rg35xxh-bootlogo.service                 enable
+rg35xxh-bootlogo-done.service            enable
+rg35xxh-bootlog.service                  on-demand
+rg35xxh-bootlog-update.service           on-demand
+rg35xxh-btclassic.service                on-demand
+rg35xxh-btpad.service                    on-demand
+rg35xxh-switchbt.service                 on-demand
+rg35xxh-switchpad.service                on-demand
+rg35xxh-usbpad.service                   on-demand
+rg35xxh-device-notify@.service           on-demand
+rg35xxh-drive-notify@.service            on-demand
+rg35xxh-drive-removed@.service           on-demand

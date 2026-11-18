@@ -6,6 +6,14 @@
 #               enable links of Debian units); recreated on the card, never shipped
 # Files Debian packages own but Handtop replaces (dpkg-divert) are listed in diversions.txt, not here.
 
+# ---- generated files that sit inside Handtop's own directories (must come first) ------------------
+generated        /usr/local/share/applications/mimeinfo.cache
+
+# ---- Handtop: desktop binaries in /usr/local/bin (before core's /usr/local/bin/*) ---------------
+handtop-desktop  /usr/local/bin/nwg-drawer
+handtop-desktop  /usr/local/bin/rg35xxh-osd
+handtop-desktop  /usr/local/bin/rg35xxh-bootsplash
+
 # ---- Handtop: hardware, session and system services --------------------------------------------
 handtop-core     /usr/local/sbin/*
 handtop-core     /usr/local/lib/rg35xxh-inputd/*

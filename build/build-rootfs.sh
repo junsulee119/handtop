@@ -23,3 +23,4 @@ bash ./07d-theme.sh
 bash ./07e-media.sh
 bash ./08-input.sh
 bash ./09-services.sh
+bash ./09b-packages.sh
