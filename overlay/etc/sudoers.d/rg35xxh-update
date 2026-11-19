@@ -1,3 +1,3 @@
 # The Update app (desktop user) runs Handtop's update worker without a password, with fixed
 # operations only (project doc update-system.md).
-%sudo ALL=(root) NOPASSWD: /usr/local/sbin/handtop-update status, /usr/local/sbin/handtop-update check, /usr/local/sbin/handtop-update download, /usr/local/sbin/handtop-update schedule, /usr/local/sbin/handtop-update schedule restart, /usr/local/sbin/handtop-update schedule poweroff, /usr/local/sbin/handtop-update cancel
+%sudo ALL=(root) NOPASSWD: /usr/local/sbin/handtop-update status, /usr/local/sbin/handtop-update check, /usr/local/sbin/handtop-update download, /usr/local/sbin/handtop-update schedule, /usr/local/sbin/handtop-update schedule restart, /usr/local/sbin/handtop-update schedule poweroff, /usr/local/sbin/handtop-update cancel, /usr/local/sbin/handtop-update channel stable, /usr/local/sbin/handtop-update channel testing

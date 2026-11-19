@@ -8,6 +8,8 @@
                                after checks (battery, controller modes), install at the next restart;
                                afterwards start the desktop (restart, default) or switch off
     handtop-update cancel      forget the downloaded update
+    handtop-update channel stable|testing
+                               where Handtop's packages come from (testing: its own sources file)
     handtop-update apply       maintenance boot only (handtop-update-apply.service)
     handtop-update recovery    early boot only: act on recovery.txt (handtop-recovery.service)
 
@@ -29,6 +31,8 @@ import time
 STATE = "/var/lib/handtop-update"
 CACHE = STATE + "/cache"            # the .debs of the downloaded update
 PREVIOUS = STATE + "/previous"      # the installed Handtop packages, kept for handtop=previous
+MAIN_SOURCES = "/etc/apt/sources.list.d/handtop.sources"           # handtop-keyring's; never edited
+CHANNEL_SOURCES = "/etc/apt/sources.list.d/handtop-testing.sources"  # written by 'channel testing'
 PLAN = STATE + "/plan.json"
 RESULT = STATE + "/last-result.json"
 ATTEMPTS = STATE + "/attempts"
@@ -339,6 +343,25 @@ def cmd_cancel():
         return 0
 
 
+def cmd_channel(which=None):
+    """testing: an extra source for trixie-testing in a file of its own (handtop-keyring's
+    handtop.sources stays untouched, so dpkg never has an edited conffile to keep). Packages from
+    testing stay installed after 'channel stable' until stable has the same or newer versions."""
+    if which not in ("stable", "testing"):
+        raise Fail("channel: stable or testing")
+    with lock():
+        if which == "testing":
+            keep = [l for l in open(MAIN_SOURCES).read().splitlines()
+                    if re.match(r"^(Types|URIs|Components|Signed-By):", l)]
+            write_atomic(CHANNEL_SOURCES, "# Written by 'handtop-update channel testing' (Update app); "
+                         "'channel stable' removes it.\n" + "\n".join(keep) + "\nSuites: trixie-testing\n")
+            os.chmod(CHANNEL_SOURCES, 0o644)
+        elif os.path.exists(CHANNEL_SOURCES):
+            os.unlink(CHANNEL_SOURCES)
+        out({"ok": True, "channel": which})
+        return 0
+
+
 def cmd_status():
     plan = read_json(PLAN)
     out({"downloaded": bool(plan), "kind": plan.get("kind") if plan else None,
@@ -346,6 +369,7 @@ def cmd_status():
          "after": after_choice() if os.path.islink(MARKER) else None,
          "previous_kept": os.path.isdir(PREVIOUS), "last_result": read_json(RESULT),
          "joypad_override": joypad_override_active(),
+         "channel": "testing" if os.path.exists(CHANNEL_SOURCES) else "stable",
          "reboot_required": os.path.exists("/run/reboot-required")})
     return 0
 
@@ -404,14 +428,18 @@ def policy_rc(on):
 
 
 def install_plan(plan, log):
-    run(["dpkg"] + CONF + ["--configure", "-a"], timeout=1800, log=log)
+    # After a power cut some packages may be unpacked at the new version while the siblings they
+    # depend on are still old: this pass then fails, and installing the rest of the plan below is
+    # what repairs it. So it is not fatal here; the pass after the install is.
+    run(["dpkg"] + CONF + ["--configure", "-a"], timeout=1800, log=log, check=False)
     if plan.get("kind") == "recovery":
         run(["dpkg"] + CONF + ["-i"] + plan["files"], timeout=3600, log=log)
     else:
-        # Half-unpacked packages from a power cut are unpacked again by this install.
+        # Packages left half-unpacked by a power cut are unpacked again by this install.
         want = ["%s=%s" % (i["name"], i["new"]) for i in plan["packages"]]
         run(["apt-get", "-q", "-y", "--no-download", "--allow-downgrades", "--allow-change-held-packages",
              "-o", "Dir::Cache::archives=" + CACHE] + APT_CONF + ["install"] + want, timeout=5400, log=log)
+    run(["dpkg"] + CONF + ["--configure", "-a"], timeout=1800, log=log)
     have = installed()
     wrong = [i["name"] for i in plan["packages"] if have.get(i["name"]) != i["new"]]
     if wrong:
@@ -609,9 +637,9 @@ def plan_previous(log):
 def main():
     cmds = {"status": cmd_status, "check": cmd_check, "download": cmd_download,
             "schedule": cmd_schedule, "cancel": cmd_cancel, "apply": cmd_apply,
-            "recovery": cmd_recovery}
+            "recovery": cmd_recovery, "channel": cmd_channel}
     args = sys.argv[2:]
-    if len(sys.argv) < 2 or sys.argv[1] not in cmds or len(args) > (1 if sys.argv[1] == "schedule" else 0):
+    if len(sys.argv) < 2 or sys.argv[1] not in cmds or len(args) > (1 if sys.argv[1] in ("schedule", "channel") else 0):
         print(__doc__.strip(), file=sys.stderr)
         return 2
     if os.geteuid() != 0:

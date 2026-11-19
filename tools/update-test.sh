@@ -131,6 +131,23 @@ hu apply || true
 expect_versions "$V1"
 [ ! -e "$ROOTFS/system-update" ] && ok "gives up after 3 attempts" || bad "still scheduled after 3 attempts"
 
+echo "== power cut during the install: some packages unpacked at the new version, the rest old"
+hu download >/dev/null || true; hu schedule || true
+for p in handtop handtop-desktop; do
+  chroot "$ROOTFS" dpkg --unpack "$(ls "$ROOTFS"/var/lib/handtop-update/cache/${p}_*.deb | sed "s|^$ROOTFS||")" >/dev/null 2>&1 || true
+done
+[ -n "$(chroot "$ROOTFS" dpkg --audit)" ] && ok "half-installed state made" || bad "could not make a half-installed state"
+hu apply || true
+expect_versions "$V2"
+clean_dpkg "after resuming"
+echo "== back to release 1 for the next test (dpkg keeps the edited handtop.sources)"
+SRCF=/etc/apt/sources.list.d/handtop.sources
+edited=$(md5sum < "$ROOTFS$SRCF" | cut -d' ' -f1)
+printf 'handtop=previous\n' > "$ROOTFS/boot/firmware/recovery.txt"
+hu recovery || true; hu apply || true
+expect_versions "$V1"
+[ "$(md5sum < "$ROOTFS$SRCF" | cut -d' ' -f1)" = "$edited" ] && ok "edited handtop.sources kept" || bad "edited handtop.sources replaced"
+
 echo "== then a normal update still works (install and power off)"
 hu download >/dev/null || true; hu schedule poweroff || true
 [ "$(hu status | js 'd["after"]')" = poweroff ] && ok "power off chosen" || bad "after: $(hu status | js 'd["after"]')"
@@ -139,6 +156,13 @@ echo "$out" | grep -q "would poweroff" && ok "powers off after the install" || b
 [ ! -e "$ROOTFS/var/lib/handtop-update/after" ] && ok "choice cleared" || bad "choice left behind"
 expect_versions "$V2"
 clean_dpkg "final"
+
+echo "== channel"
+hu channel testing >/dev/null || true
+grep -q "^Suites: trixie-testing" "$ROOTFS/etc/apt/sources.list.d/handtop-testing.sources" 2>/dev/null && ok "testing: own sources file" || bad "no testing sources file"
+[ "$(hu status | js 'd["channel"]')" = testing ] && ok "status says testing" || bad "status channel"
+hu channel stable >/dev/null || true
+[ ! -e "$ROOTFS/etc/apt/sources.list.d/handtop-testing.sources" ] && ok "stable: file removed" || bad "testing file left"
 
 echo; echo "update-test: $pass passed, $fail failed"
 [ "$fail" = 0 ]

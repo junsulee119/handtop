@@ -1,6 +1,7 @@
 # Handtop's own packages (updates without reflashing). Signed by the Handtop archive key,
 # fingerprint EF04B02F6569FB6FC8EAF9C5F5962C429E9C69FF (README, release notes).
-# Shipped by the handtop-keyring package; the Update app switches Suites to trixie-testing.
+# Shipped by the handtop-keyring package. Don't edit: the Update app's testing channel is a
+# separate file (handtop-testing.sources).
 Types: deb
 URIs: https://junsulee119.github.io/handtop-apt
 Suites: trixie-stable
