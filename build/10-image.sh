@@ -65,7 +65,7 @@ LABEL rg35xxh
   FDT /dtb.img
   APPEND root=PARTUUID=$PARTUUID_ROOT rootwait rootfstype=ext4 ro rdinit=/nonexistent console=ttyS0,115200 console=tty0 loglevel=4 cma=$CMA_SIZE
 X
-cp "$TOP/boot-files/wifi.txt" "$TOP/boot-files/README.txt" "$BOOTDIR/"
+cp "$TOP/boot-files/wifi.txt" "$TOP/boot-files/recovery.txt" "$TOP/boot-files/README.txt" "$BOOTDIR/"
 # Controls rescue file: the defaults, all commented out (nothing locked in the Controls app)
 python3 "$TOP/tools/boot-input-conf.py" "$TOP/overlay/etc/rg35xxh/input.conf" | sed 's/$/\r/' > "$BOOTDIR/rg35xxh-input.conf"
 grep -q '^\[rescue\]' "$BOOTDIR/rg35xxh-input.conf" || { echo "rg35xxh-input.conf: template failed" >&2; exit 1; }

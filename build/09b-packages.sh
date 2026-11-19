@@ -1,6 +1,7 @@
 #!/bin/bash
 # Handtop's own files become packages (updates without reflashing, project doc update-system.md).
-# build/pkg/build-debs.py copies every file classes.txt gives to handtop-core / -desktop / -video out
+# build/pkg/build-debs.py copies every file classes.txt gives to handtop-core / -desktop / -video /
+# -keyring out
 # of the finished rootfs into .deb files (work/pkg/), and they are installed straight back with
 # dpkg: no file changes, but dpkg now owns them, so later versions can replace them on a card.
 # The audit then checks that no file of those packages is left unowned.
@@ -32,6 +33,10 @@ mkdir -p "$ROOTFS/tmp/handtop-pkg"
 cp "$PKG_OUT"/handtop*.deb "$ROOTFS/tmp/handtop-pkg/"
 in_chroot "dpkg -i --force-confdef --force-confold /tmp/handtop-pkg/handtop*.deb"
 safe_rm -r "$ROOTFS/tmp/handtop-pkg"
+# handtop-keyring's pin now keeps Debian's FFmpeg out; 04c's holds would keep FFmpeg updates back.
+# (Not in its postinst: apt-mark can't run while dpkg holds its lock. Cards: handtop-update.)
+in_chroot "apt-mark unhold ffmpeg libavcodec61 libavdevice61 libavfilter10 libavformat61 libavutil59 libpostproc58 libswresample5 libswscale8 >/dev/null"
+[ -z "$(in_chroot "apt-mark showhold")" ] || die "packages still held: $(in_chroot "apt-mark showhold" | xargs)"
 in_chroot "dpkg-query -W 'handtop*'" | grep -q '^handtop\s' || die "the handtop metapackage is not installed"
 in_chroot "dpkg-query -W 'handtop*'"
 while read -r m _; do
@@ -40,6 +45,6 @@ while read -r m _; do
 done < "$TOP/build/pkg/modules.txt"
 
 # Nothing classed as Handtop's may stay unowned (FFmpeg's files belong to its packages from 04c).
-left=$(for c in handtop-core handtop-desktop handtop-video; do python3 "$TOP/build/pkg/audit-unowned.py" "$ROOTFS" --list "$c"; done)
+left=$(for c in handtop-core handtop-desktop handtop-video handtop-keyring; do python3 "$TOP/build/pkg/audit-unowned.py" "$ROOTFS" --list "$c"; done)
 [ -z "$left" ] || die "files still not owned by a package: $left"
 echo "Handtop packages $PKG_VERSION built in $PKG_OUT and installed."

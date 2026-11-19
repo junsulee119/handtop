@@ -1,0 +1,9 @@
+# Handtop recovery, for when the handheld can't be used normally. Edit from any PC, save,
+# put the card back and switch on. Each line is acted on once, then set back to none
+# (what happened is written to logs\recovery-NNNN.txt). Details: docs/services/update.md.
+#
+# joypad=previous   use the controls driver from before the last update (restarts once)
+# joypad=current    go back to the controls driver the installed release ships (restarts once)
+# handtop=previous  reinstall the Handtop release from before the last update (takes a few minutes)
+joypad=none
+handtop=none

@@ -1,6 +1,6 @@
 # Where every file the build adds outside Debian's packages belongs (first match wins).
 # Read by audit-unowned.py. Classes:
-#   handtop-core, handtop-desktop, handtop-video  shipped in that package
+#   handtop-core, handtop-desktop, handtop-video, handtop-keyring  shipped in that package
 #   image       written once by the image build (provisioning); never shipped or replaced by an update
 #   generated   made by Debian's own maintainer scripts and triggers (alternatives, caches,
 #               enable links of Debian units); recreated on the card, never shipped
@@ -19,6 +19,7 @@ handtop-core     /usr/local/sbin/*
 handtop-core     /usr/local/lib/rg35xxh-inputd/*
 handtop-core     /usr/local/lib/rg35xxh-controls/*
 handtop-core     /etc/systemd/system/rg35xxh-*
+handtop-core     /etc/systemd/system/handtop-*
 handtop-core     /etc/systemd/logind.conf.d/10-rg35xxh.conf
 handtop-core     /etc/udev/rules.d/*rg35xxh*
 handtop-core     /etc/sudoers.d/rg35xxh-*
@@ -29,6 +30,11 @@ handtop-core     /etc/ssh/sshd_config.d/10-rg35xxh.conf
 handtop-core     /etc/profile.d/zz-rg35xxh-session.sh
 handtop-core     /etc/wireplumber/wireplumber.conf.d/*
 handtop-core     /usr/local/bin/*
+
+# ---- Handtop: the archive key, the source and the pin (before image's /etc/apt/sources.list.d/*) --
+handtop-keyring  /usr/share/keyrings/handtop-archive.asc
+handtop-keyring  /etc/apt/sources.list.d/handtop.sources
+handtop-keyring  /etc/apt/preferences.d/handtop.pref
 
 # ---- Handtop: look, apps and data -----------------------------------------------------------------
 handtop-desktop  /usr/local/lib/rg35xxh-theme/*

@@ -1,0 +1,23 @@
+[Unit]
+Description=Install the downloaded Handtop update (maintenance boot)
+Documentation=https://github.com/junsulee119/handtop/blob/main/docs/services/update.md
+# Runs only in systemd's offline-update boot (system-update.target, entered while the
+# /system-update link exists): no session, no input daemon, no controller modes, no radios needed.
+DefaultDependencies=no
+Requires=sysinit.target
+After=sysinit.target local-fs.target system-update-pre.target
+# Before the target: systemd's system-update-cleanup.service (After=system-update.target) removes
+# the link and restarts if this unit ever ends without doing so itself.
+Before=system-update.target shutdown.target
+Conflicts=shutdown.target
+ConditionPathIsSymbolicLink=/system-update
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/handtop-update apply
+StandardOutput=journal+console
+StandardError=journal+console
+TimeoutStartSec=90min
+
+[Install]
+WantedBy=system-update.target

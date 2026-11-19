@@ -1,0 +1,15 @@
+# Handtop's FFmpeg replaces Debian's packages of the same names (V4L2 request API decoders for
+# the video engine). Only Handtop's repository may provide them: Debian's versions are never
+# installed, so a Debian security update cannot silently drop hardware decoding. Handtop's
+# repository follows Debian's security updates (project doc update-system.md).
+Package: ffmpeg libavcodec61 libavdevice61 libavfilter10 libavformat61 libavutil59 libpostproc58 libswresample5 libswscale8 libavcodec-dev libavdevice-dev libavfilter-dev libavformat-dev libavutil-dev libpostproc-dev libswresample-dev libswscale-dev
+Pin: release o=Handtop
+Pin-Priority: 995
+
+Package: ffmpeg libavcodec61 libavdevice61 libavfilter10 libavformat61 libavutil59 libpostproc58 libswresample5 libswscale8 libavcodec-dev libavdevice-dev libavfilter-dev libavformat-dev libavutil-dev libpostproc-dev libswresample-dev libswscale-dev
+Pin: release o=Debian
+Pin-Priority: -1
+
+Package: handtop handtop-*
+Pin: release o=Handtop
+Pin-Priority: 995

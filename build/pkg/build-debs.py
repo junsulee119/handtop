@@ -7,7 +7,7 @@ the bytes the image build produced, and installing it back into the image change
 
     sudo python3 build/pkg/build-debs.py <rootfs> <outdir> <version> [package ...]
 
-Packages built by default: handtop-core, handtop-desktop and handtop-video (the VA driver; it
+Packages built by default: handtop-core, handtop-desktop, handtop-keyring and handtop-video (the VA driver; it
 depends on the exact FFmpeg packages of the same build, version in HANDTOP_FFMPEG_VERSION). FFmpeg
 itself is packaged under Debian's names by build-ffmpeg-debs.py (04c). Writes <outdir>/<name>_<version>_arm64.deb and a manifest.
 """
@@ -41,6 +41,10 @@ DESCRIPTIONS = {
     "handtop-video": ("Handtop: hardware video decoding",
                       "The VA-API driver for Allwinner's video engine (v4l2-request) and the exact\n"
                       " FFmpeg build with the V4L2 request API decoders that Handtop was tested with."),
+    "handtop-keyring": ("Handtop: archive key, package source and FFmpeg pin",
+                        "The public key Handtop's package archive is signed with, the source entry for\n"
+                        " https://junsulee119.github.io/handtop-apt and the pin that keeps Handtop's FFmpeg\n"
+                        " build (and Handtop's packages) ahead of Debian's."),
 }
 LISTS = {"handtop-core": "base.list", "handtop-desktop": "desktop.list"}
 FFMPEG_FAMILY = ("libavcodec61", "libavdevice61", "libavfilter10", "libavformat61", "libavutil59",
@@ -48,6 +52,8 @@ FFMPEG_FAMILY = ("libavcodec61", "libavdevice61", "libavfilter10", "libavformat6
 
 
 def list_depends(name):
+    if name == "handtop-keyring":
+        return []
     if name == "handtop-video":
         ffv = os.environ.get("HANDTOP_FFMPEG_VERSION")
         if not ffv:
@@ -171,8 +177,9 @@ def build(root, outdir, version, pkg, paths, unit_policy):
         deps.insert(0, "handtop-core (= %s)" % version)
     short, long_ = DESCRIPTIONS[pkg]
     control = ("Package: %s\nVersion: %s\nArchitecture: arm64\nMaintainer: %s\nSection: misc\n"
-               "Priority: optional\nInstalled-Size: %d\nDepends: %s\nHomepage: https://github.com/junsulee119/handtop\n"
-               "Description: %s\n %s\n") % (pkg, version, MAINTAINER, size // 1024 + 1, ", ".join(deps), short, long_)
+               "Priority: optional\nInstalled-Size: %d\n%sHomepage: https://github.com/junsulee119/handtop\n"
+               "Description: %s\n %s\n") % (pkg, version, MAINTAINER, size // 1024 + 1,
+                                            ("Depends: %s\n" % ", ".join(deps)) if deps else "", short, long_)
     d = os.path.join(tree, "DEBIAN")
     with open(os.path.join(d, "control"), "w") as f:
         f.write(control)
@@ -198,7 +205,7 @@ def main():
     if len(sys.argv) < 4:
         raise SystemExit(__doc__)
     root, outdir, version = sys.argv[1].rstrip("/"), sys.argv[2], sys.argv[3]
-    want = sys.argv[4:] or ["handtop-core", "handtop-desktop", "handtop-video"]
+    want = sys.argv[4:] or ["handtop-core", "handtop-desktop", "handtop-video", "handtop-keyring"]
     os.makedirs(outdir, exist_ok=True)
     files = collect(root)
     # Every tracked overlay file a package gets must be in it: an empty or partial package would

@@ -6,6 +6,8 @@ Files you may edit on this partition (from Windows):
   rg35xxh-input.conf     Controls rescue: all commented out. A line you uncomment wins over
                          Apps > Controls. Controls broken? Uncomment use_app_settings = no.
   panel.txt              Screen panel: auto (default), regular or rev6.
+  recovery.txt           After an update went wrong: go back to the previous controls driver
+                         or Handtop release, without using the screen or buttons.
   logs\boot-NNNN.txt     Diagnostic logs of the last 5 boots (written by the device).
 
 Screen garbled or black?  RG35XX H units have one of two screens. The handheld picks

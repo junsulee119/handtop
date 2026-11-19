@@ -116,7 +116,8 @@ fi
         "Handtop: Allwinner H700 platform", "Pulls in the kernel modules for the kernel this image has.")
     deb(outdir, "handtop", version, "all",
         ["handtop-core (= %s)" % version, "handtop-desktop (= %s)" % version,
-         "handtop-video (= %s)" % version, "handtop-platform-h700 (= %s)" % version],
+         "handtop-video (= %s)" % version, "handtop-keyring (= %s)" % version,
+         "handtop-platform-h700 (= %s)" % version],
         "Handtop desktop for handheld consoles", "Metapackage: everything Handtop installs on top of Debian.")
 
 

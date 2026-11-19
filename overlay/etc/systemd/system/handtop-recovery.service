@@ -1,0 +1,18 @@
+[Unit]
+Description=Act on recovery.txt on the boot partition (Handtop recovery)
+Documentation=https://github.com/junsulee119/handtop/blob/main/docs/services/update.md
+# Early, before the session and the input daemon; it restarts once when it changed something.
+DefaultDependencies=no
+After=local-fs.target
+Before=sysinit.target system-update-pre.target shutdown.target
+Conflicts=shutdown.target
+RequiresMountsFor=/boot/firmware
+ConditionPathExists=/boot/firmware/recovery.txt
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/handtop-update recovery
+StandardOutput=journal+console
+
+[Install]
+WantedBy=sysinit.target
