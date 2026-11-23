@@ -65,7 +65,8 @@ def compare(expected, got, extra_ok=()):
 
 
 # ---- Waybar -------------------------------------------------------------------------------------
-WAYBAR_EXTRA = {("#custom-apps", "color")}   # dark: was inherited (#e8eaee), now explicit
+WAYBAR_EXTRA = {("#custom-apps", "color"),     # dark: was inherited (#e8eaee), now explicit
+                ("#image.update", "padding"), ("#image.update", "margin-top")}   # Update badge (v0.5.0)
 
 
 def test_waybar_dark(rendered):

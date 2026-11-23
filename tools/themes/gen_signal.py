@@ -160,6 +160,21 @@ def bluetooth(state):
     return img
 
 
+def update_badge(failed=False):
+    """The Update app's taskbar badge: the black tray with the red arrow (downloaded / installs at
+    restart), or with a red square holding a white "!" (the last update failed)."""
+    v = VSharp(23, 23)
+    v.line([(3.5, 12), (3.5, 19.5), (19.5, 19.5), (19.5, 12)], 2, INK)
+    if failed:
+        v.rrect(6.5, 1.5, 16.5, 11.5, 0, fill=RED)
+        v.rrect(10.6, 3, 12.4, 7.6, 0, fill=WHITE)
+        v.rrect(10.6, 8.6, 12.4, 10.2, 0, fill=WHITE)
+    else:
+        v.rrect(10, 1.5, 13, 9, 0, fill=RED)
+        v.poly([(6.5, 8.5), (16.5, 8.5), (11.5, 14.5)], fill=RED)
+    return v.final()
+
+
 def usbtarget(t):
     if t == "pc":
         rows = ["KKKKKKKKKKKKKKKKKKK"] * 2 + ["KK...............KK"] * 8 + \
@@ -256,6 +271,10 @@ def app_glyph(name, w=3.2):
     elif name == "videos":                                         # a black frame with a red play
         v.rrect(8, 12, 48, 44, 0, fill=INK)
         v.poly([(23, 20), (23, 36), (37, 28)], fill=RED)
+    elif name == "update":                                         # a red arrow down into a black tray
+        v.line([(10, 30), (10, 46), (46, 46), (46, 30)], w, INK)
+        v.rrect(25, 8, 31, 26, 0, fill=RED)
+        v.poly([(17, 24), (39, 24), (28, 37)], fill=RED)
     elif name == "music":                                          # two notes on one beam, one red head
         v.rrect(12, 33, 22, 42, 0, fill=INK)
         v.rrect(32, 29, 42, 38, 0, fill=RED)
@@ -493,6 +512,8 @@ def main(out):
                 for sv in (False, True):
                     name = f"battery{'-charging' if ch else ''}{'-low' if low else ''}-{n}{'-saver' if sv else ''}"
                     save(battery(n, ch, low, sv), f"icons/taskbar/{name}.png")
+    for u in S.UPDATE_BADGES:
+        save(update_badge(u.endswith("failed")), f"icons/taskbar/{u}.png")
     for w_ in S.WIFI:
         save(wifi(w_), f"icons/tray/{w_}.png")
     for b in S.BLUETOOTH:

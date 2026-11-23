@@ -64,6 +64,7 @@ index() {   # index [exclude-glob]: Packages + Release of the test archive (Orig
   local T="$ROOTFS/srv/idx-tmp" f
   [ -e "$T" ] && safe_rm -r "$T"; mkdir -p "$T"
   for f in "$R"/*.deb; do
+    # shellcheck disable=SC2254  # the argument is a glob on purpose
     case "$(basename "$f")" in ${1:-__none__}) ;; *) ln -s "../handtop-test/$(basename "$f")" "$T/" ;; esac
   done
   (cd "$ROOTFS/srv" && dpkg-scanpackages -m idx-tmp /dev/null 2>/dev/null | sed 's|^Filename: idx-tmp/|Filename: ./|' > "$R/Packages")
@@ -87,7 +88,7 @@ pass=0; fail=0
 ok()   { echo "PASS: $*"; pass=$((pass+1)); }
 bad()  { echo "FAIL: $*"; fail=$((fail+1)); }
 hu()   { chroot "$ROOTFS" env HANDTOP_UPDATE_NO_POWER_ACTION=1 HANDTOP_UPDATE_CHROOT=1 ${HU_ENV:-} /usr/local/sbin/handtop-update "$@"; }
-hr()   { chroot "$ROOTFS" env HANDTOP_UPDATE_NO_POWER_ACTION=1 /usr/local/sbin/handtop-recovery "$@"; }
+hr()   { chroot "$ROOTFS" env HANDTOP_UPDATE_NO_POWER_ACTION=1 /usr/local/sbin/handtop-recovery; }
 ver()  { chroot "$ROOTFS" dpkg-query -W -f '${Version}' "$1" 2>/dev/null || echo none; }
 js()   { python3 -c "import json,sys
 try:

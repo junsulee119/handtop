@@ -1,0 +1,23 @@
+#!/bin/sh
+# Waybar image#update: the Update app's taskbar badge (docs/apps/update.md). Shown only when there is
+# something to see; clicking it opens the app. Reads the update worker's state files (readable by
+# everyone, no sudo): /system-update (scheduled), plan.json (downloaded), last-result.json (failed /
+# stopped, until the app has shown it: ~/.config/rg35xxh/update-seen). The app sends SIGRTMIN+11.
+# Icons: the current theme's (rendered by rg35xxh-theme), Handtop dark's until then.
+S=/var/lib/handtop-update
+icons="${XDG_STATE_HOME:-$HOME/.local/state}/rg35xxh/theme/icons"
+[ -d "$icons" ] || icons=/usr/local/share/rg35xxh/icons
+seen=$(cat "${XDG_CONFIG_HOME:-$HOME/.config}/rg35xxh/update-seen" 2>/dev/null)
+
+# last-result.json is written with one key per line: '"ok": false,' / '"time": 1795...,'
+res_ok=$(sed -n 's/^ *"ok": *\([a-z]*\).*/\1/p' "$S/last-result.json" 2>/dev/null)
+res_time=$(sed -n 's/^ *"time": *\([0-9]*\).*/\1/p' "$S/last-result.json" 2>/dev/null)
+
+if [ "$(readlink /system-update 2>/dev/null)" = "$S" ]; then
+  printf '%s\n%s\n' "$icons/update.png" "An update installs at the next restart. Click for details."
+elif [ "$res_ok" = false ] && [ -n "$res_time" ] && [ "$res_time" != "$seen" ]; then
+  printf '%s\n%s\n' "$icons/update-failed.png" "The last update did not finish. Click for details."
+elif grep -q '"kind": "update"' "$S/plan.json" 2>/dev/null; then
+  printf '%s\n%s\n' "$icons/update.png" "An update is downloaded and ready to install. Click to install."
+fi
+# nothing printed: Waybar hides the module

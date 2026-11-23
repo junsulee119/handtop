@@ -22,7 +22,8 @@ _HI = "src/theme/art/icons/hicolor"
 _HL = "src/theme/art/icons/Handtop-Light"
 _APP_FILES = {"theme": "app-theme", "external-controller": "app-external-controller",
               "display": "app-display", "enable-ssh": "app-ssh", "recenter-sticks": "app-recenter",
-              "controls": "app-controls", "videos": "app-videos", "music": "app-music"}
+              "controls": "app-controls", "videos": "app-videos", "music": "app-music",
+              "update": "app-update"}
 
 
 def sources(repo, light):
@@ -34,7 +35,9 @@ def sources(repo, light):
     out["taskbar/power"] = j(_I, f"panel-power{sfx}.png")
     for slot in S.IMAGE_SLOTS:
         group, name = slot.split("/")
-        if group == "taskbar" and name.startswith(("inputmode-", "battery")):
+        if group == "taskbar" and name.startswith("update"):
+            out[slot] = j(_I, f"{name}{sfx}.png")
+        elif group == "taskbar" and name.startswith(("inputmode-", "battery")):
             if "-shake" in name:
                 mode, dx = name.split("-shake")
                 out[slot] = j(_I, f"{mode}{sfx}-shake{dx}.png")

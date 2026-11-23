@@ -337,6 +337,32 @@ def bluetooth(state):
     return a
 
 
+# ---- the Update app's taskbar badge --------------------------------------------------------------------
+def update_badge(failed=False):
+    """Downloaded / installs at restart: a green arrow down into a grey tray. Failed: the tray with a
+    red stop disc and a white "!"."""
+    a = Art(23, 23)
+    a.rect(3, 13, 19, 19, "S")
+    a.box(3, 13, 19, 19, "K")
+    a.hline(4, 18, 14, "W"); a.vline(4, 14, 18, "W")            # raised bevel
+    a.hline(4, 18, 18, "G"); a.vline(18, 14, 18, "G")
+    a.rect(7, 13, 15, 15, "G")                                     # the slot the arrow goes into
+    n = Art(23, 23)
+    if failed:
+        for y in range(23):
+            for x in range(23):
+                if (x - 11) ** 2 + (y - 7) ** 2 <= 30:
+                    n.px(x, y, "R")
+        n.rect(10, 3, 12, 8, "W"); n.rect(10, 10, 12, 11, "W")
+    else:
+        n.rect(9, 1, 13, 7, "V")
+        n.vline(9, 1, 7, "E")
+        for i in range(5):
+            n.hline(6 + i, 16 - i, 8 + i, "V")
+    a.paste(n.outlined("K"), 0, 0)
+    return a
+
+
 # ---- External Controller's USB cable card (shown at 2x) --------------------------------------------------
 def usbtarget(t):
     a = Art(23, 23)
@@ -563,6 +589,19 @@ def app(name):
         a.rect(3, 9, 24, 18, "T")
         for i in range(6):
             a.vline(11 + i, 10 + i // 2, 17 - i // 2, "W")
+    elif name == "update":
+        # an installer dialog: a grey window with a progress bar, a green arrow coming down into it
+        window(a, 1, 8, 26, 26, content="S")
+        a.rect(4, 19, 23, 22, "W")
+        a.box(4, 19, 23, 22, "G")
+        for x in range(5, 17, 3):
+            a.rect(x, 20, x + 1, 21, "N")
+        n = Art(28, 28)
+        n.rect(11, 0, 15, 7, "V")
+        for i in range(6):
+            n.hline(8 + i, 18 - i, 8 + i, "V")
+        n.vline(11, 0, 7, "E")
+        a.paste(n.outlined("K"), 0, 0)
     elif name == "music":
         # two beamed notes, navy with a black outline
         n = Art(28, 28)
@@ -923,6 +962,8 @@ def main(out):
                     save(battery(n, ch, low, sv), f"icons/taskbar/{name}.png")
     sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "src", "theme"))
     from handtop_theme import schema as S
+    for u in S.UPDATE_BADGES:
+        save(update_badge(u.endswith("failed")).centred(), f"icons/taskbar/{u}.png")
     for w in S.WIFI:
         save(wifi(w), f"icons/tray/{w}.png")
     for b in S.BLUETOOTH:

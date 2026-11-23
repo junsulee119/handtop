@@ -462,6 +462,30 @@ def release_ffmpeg_holds():
     return None
 
 
+def release_notes(version):
+    """The Handtop release and its short notes, from the handtop metapackage's control data in the
+    signed index (Handtop-Release, Handtop-Changes)."""
+    p = run(["apt-cache", "show", "handtop=%s" % version], timeout=60, check=False)
+    rel, lines, inside = None, [], False
+    for line in p.stdout.splitlines():
+        if line.startswith("Handtop-Release:"):
+            rel = line.split(":", 1)[1].strip()
+            inside = False
+        elif line.startswith("Handtop-Changes:"):
+            inside = True
+            first = line.split(":", 1)[1].strip()
+            if first:
+                lines.append(first)
+        elif inside and line.startswith(" "):
+            lines.append(line.strip())
+        elif line.strip() == "":
+            if rel or lines:
+                break
+        else:
+            inside = False
+    return {"release": rel, "lines": lines}
+
+
 def cmd_check():
     with lock():
         warnings = [w for w in [release_ffmpeg_holds()] if w]
@@ -474,8 +498,12 @@ def cmd_check():
         write_json(CHECKED, {"ok": True, "time": int(time.time())})
         inst, held, bad = plan_transaction(frozen=False)
         handtop = [i for i in inst if "Handtop" in i["origin"] or is_handtop(i["name"])]
+        meta = next((i for i in inst if i["name"] == "handtop"), None)
+        size = sum(v["size"] for v in archive_info(apt_opts(False, held), held).values()) if inst else 0
         out({"ok": True, "updates": inst, "handtop": handtop, "debian": len(inst) - len(handtop),
-             "warnings": warnings + problems, "new_image_needed": bad, "handtop_held": held})
+             "warnings": warnings + problems, "new_image_needed": bad, "handtop_held": held,
+             "download_mb": round(size / (1 << 20), 1),
+             "release_notes": release_notes(meta["new"]) if meta else None})
         return 0
 
 
@@ -975,6 +1003,22 @@ def complete(ok):
     fsync_dir(STATE)
 
 
+def kept_config(since):
+    """Config files dpkg kept because they were edited: the package's version sits next to them
+    (.dpkg-dist), written by this install."""
+    res = []
+    for top, dirs, files in os.walk("/etc"):
+        for f in files:
+            if f.endswith((".dpkg-dist", ".dpkg-new")):
+                p = os.path.join(top, f)
+                try:
+                    if os.lstat(p).st_mtime >= since - 1:
+                        res.append(p)
+                except OSError:
+                    pass
+    return sorted(res)[:50]
+
+
 def cmd_apply():
     if not our_marker():
         return 0                      # no marker, or another updater's: not ours to act on
@@ -1010,7 +1054,8 @@ def cmd_apply():
                        log, resume=True)
                 return 1
             write_json(SCHEDULE, dict(sched, attempts=attempts + 1, deferrals=0))
-            write_json(INPROGRESS, {"plan": plan["id"], "attempt": attempts + 1, "started": int(time.time())})
+            prog_start = int(time.time())
+            write_json(INPROGRESS, {"plan": plan["id"], "attempt": attempts + 1, "started": prog_start})
             budget = Budget(APPLY_BUDGET)
             try:
                 if plan["kind"] == "update":
@@ -1045,7 +1090,7 @@ def cmd_apply():
             if error:
                 finish(plan, False, "update failed: %s" % error, log)
                 return 1
-            extra = {}
+            extra = {"kept_config": kept_config(prog_start)}
             if plan["kind"] == "update":
                 manifest = read_json(PREVIOUS + "/manifest.json")
                 if manifest and manifest.get("for_plan") == plan["id"]:

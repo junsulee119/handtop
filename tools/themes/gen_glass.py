@@ -348,6 +348,21 @@ def wifi(name):
     return img
 
 
+def update_badge(failed=False):
+    """The Update app's taskbar badge: the app's tray-and-arrow line glyph (downloaded / installs at
+    restart), or the tray with a red disc and a white "!" (the last update failed)."""
+    v = VSharp(23, 23)
+    v.line([(4.5, 12), (4.5, 19), (18.5, 19), (18.5, 12)], 1.8, INK)
+    if failed:
+        v.ellipse(6, 1, 17, 12, fill=RED)
+        v.line([(11.5, 3.5), (11.5, 7.5)], 1.8, WHITE)
+        v.ellipse(10.6, 8.6, 12.4, 10.4, fill=WHITE)
+    else:
+        v.line([(11.5, 2), (11.5, 14)], 1.8, INK)
+        v.line([(7.5, 10), (11.5, 14), (15.5, 10)], 1.8, INK)
+    return v.final()
+
+
 def bluetooth(state):
     v = V(23, 23)
     c = DIM if state == "blueman-disabled" else INK
@@ -450,6 +465,11 @@ def app_glyph(name, c=INK, w=3):
         v.rrect(11, 15, 45, 39, 0, outline=c, width=w)
         v.poly([(24, 21), (24, 33), (34, 27)], fill=c)
         v.line([(21, 44), (35, 44)], w, c)
+    elif name == "update":
+        # an arrow coming down into an open tray (an update going in)
+        v.line([(13, 30), (13, 43), (43, 43), (43, 30)], w, c)
+        v.line([(28, 10), (28, 34)], w, c)
+        v.line([(19, 25), (28, 34), (37, 25)], w, c)
     elif name == "music":
         # two beamed eighth notes
         v.ellipse(14, 34, 24, 42, fill=c)
@@ -724,6 +744,8 @@ def main(out):
                 for sv in (False, True):
                     name = f"battery{'-charging' if ch else ''}{'-low' if low else ''}-{n}{'-saver' if sv else ''}"
                     save(battery(n, ch, low, sv), out, f"icons/taskbar/{name}.png")
+    for u in S.UPDATE_BADGES:
+        save(update_badge(u.endswith("failed")), out, f"icons/taskbar/{u}.png")
     for w in S.WIFI:
         save(wifi(w), out, f"icons/tray/{w}.png")
     for b in S.BLUETOOTH:

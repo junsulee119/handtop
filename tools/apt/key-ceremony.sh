@@ -47,7 +47,7 @@ cp "$GNUPGHOME/openpgp-revocs.d/$FPR.rev" "$OUT/handtop-archive-revocation.rev"
 echo "$FPR" > "$OUT/FINGERPRINT.txt"
 tar -C "$OUT" -cf "$T/handtop-key-backup.tar" .
 echo "== 3/4 importing only the signing subkey into $KEEP"
-mkdir -p -m 700 "$KEEP"
+mkdir -p "$KEEP" && chmod 700 "$KEEP"
 echo "pinentry-mode loopback" > "$KEEP/gpg.conf"
 gpg --homedir "$KEEP" --batch --import "$OUT/handtop-archive-public.asc"
 g --homedir "$KEEP" --import "$T/signing-subkey.asc"

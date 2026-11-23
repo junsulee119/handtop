@@ -252,6 +252,25 @@ def wifi(name):
     return p
 
 
+def update_badge(failed=False):
+    """The Update app's taskbar badge: a parcel, with an arrow going in (downloaded / installs at
+    restart) or a "!" sign (the last update failed)."""
+    p = P(23, 23)
+    p.rect(5, 12, 17, 20, "b")
+    p.rect(15, 12, 17, 20, "c")                                    # shaded side
+    p.rect(2, 10, 5, 11, "b"); p.rect(17, 10, 20, 11, "b")         # open flaps
+    p.rect(10, 12, 12, 14, "a")                                    # tape
+    if failed:
+        p.rrect(12, 0, 21, 9, 2, "c")
+        p.rect(16, 2, 17, 5, "a"); p.rect(16, 7, 17, 7, "a")
+    else:
+        p.rect(10, 0, 12, 6, "a")
+        p.poly([(7, 6), (15, 6), (11, 10)], "a")
+    p.outline()
+    p.centred()
+    return p.outline("a").centred()
+
+
 def bluetooth(state):
     p = P(23, 23)
     fill, rune = ("c", "b") if state == "blueman-disabled" else ("a", "d")
@@ -448,6 +467,9 @@ MINI = {
     "music": ["____________", "____dddddddd", "____dddddddd", "____d______d", "____d______d",
               "____d______d", "____d______d", "_dddd___dddd", "ddddd__ddddd", "_ddd____ddd_",
               "____________", "____________"],       # two beamed notes
+    "update": ["_____dd_____", "_____dd_____", "_____dd_____", "___dddddd___", "____dddd____",
+               "d____dd____d", "dd________dd", "dddddddddddd", "dbbbbccbbbbd", "dbbbbbbbbbbd",
+               "dbbbbbbbbbbd", "dddddddddddd"],      # a parcel with an arrow going in
     "blueman": ["_____d______", "_____dd_____", "_____d_d____", "__d__d__d___", "___d_d_d____",
                 "____ddd_____", "_____d______", "____ddd_____", "___d_d_d____", "__d__d__d___",
                 "_____d_d____", "_____dd_____"],
@@ -745,6 +767,8 @@ def main(out):
                 for sv in (False, True):
                     name = f"battery{'-charging' if ch else ''}{'-low' if low else ''}-{n}{'-saver' if sv else ''}"
                     save(battery(n, ch, low, sv).rgba(), f"icons/taskbar/{name}.png")
+    for u in S.UPDATE_BADGES:
+        save(update_badge(u.endswith("failed")).rgba(), f"icons/taskbar/{u}.png")
     for w in S.WIFI:
         save(wifi(w).rgba(), f"icons/tray/{w}.png")
     for b in S.BLUETOOTH:

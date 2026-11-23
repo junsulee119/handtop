@@ -96,6 +96,7 @@ window#waybar {{ background: {c('bg')}; color: {c('fg')}; border-top: {t.borders
 #image.battery {{ padding: 0 0 0 12px; margin-top: 1px; }}   /* icon, then the % (#battery) */
 #battery {{ padding: 0; }}
 #image.inputmode {{ padding: 0 0 0 8px; margin-top: 1px; }}
+#image.update {{ padding: 0 0 0 8px; margin-top: 1px; }}       /* the Update badge, when shown */
 #image.bluetooth {{ padding: 0 0 0 8px; margin-top: 1px; }}   /* centres the 23 px icon in the 31 px under the border */
 #battery.warning {{ color: {c('warn')}; }}
 #battery.critical {{ color: {c('critical')}; }}

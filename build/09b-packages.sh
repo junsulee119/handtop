@@ -26,7 +26,7 @@ HANDTOP_FFMPEG_VERSION="$FFMPEG_HANDTOP_VERSION" python3 "$TOP/build/pkg/build-d
 [ -f "$ROOTFS/etc/handtop/boot-abi" ] || die "no /etc/handtop/boot-abi (06-hardware.sh writes it)"
 KSHA=$(sha256sum "$ROCKNIX_EX/boot/KERNEL" | cut -d' ' -f1)
 grep -qx "kernel_sha256=$KSHA" "$ROOTFS/etc/handtop/boot-abi" || die "/etc/handtop/boot-abi does not name this build's KERNEL ($KSHA)"
-python3 "$TOP/build/pkg/build-platform-debs.py" "$ROOTFS" "$PKG_OUT" "$PKG_VERSION" "$KVER" "$KSHA"
+HANDTOP_RELEASE_VERSION="$RELEASE_VERSION" python3 "$TOP/build/pkg/build-platform-debs.py" "$ROOTFS" "$PKG_OUT" "$PKG_VERSION" "$KVER" "$KSHA"
 
 chroot_mount
 mkdir -p "$ROOTFS/tmp/handtop-pkg"

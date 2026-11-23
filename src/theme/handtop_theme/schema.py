@@ -184,14 +184,14 @@ BORDERS = (1, 3)                 # line width multiplier (taskbar line, notifica
 INPUT_MODES = ("desktop", "gamepad", "bt", "wired")
 SHAKES = (-2, -1, 1, 2)
 HANDTOP_APPS = ("theme", "external-controller", "display", "enable-ssh", "recenter-sticks", "controls",
-                "videos", "music")
+                "videos", "music", "update")
 DEFAULT_APPS = ("foot", "thunar", "mousepad", "chromium", "htop", "micro", "qpdfview", "xarchiver",
                 "blueman", "ristretto")
 APP_ICON_NAMES = {            # slot -> icon name looked up by GTK / labwc / Waybar
     "theme": "rg35xxh-theme", "external-controller": "rg35xxh-external-controller",
     "display": "rg35xxh-display", "enable-ssh": "rg35xxh-enable-ssh",
     "recenter-sticks": "rg35xxh-recenter-sticks", "controls": "rg35xxh-controls",
-    "videos": "rg35xxh-videos", "music": "rg35xxh-music",
+    "videos": "rg35xxh-videos", "music": "rg35xxh-music", "update": "rg35xxh-update",
     "foot": "foot", "thunar": "org.xfce.thunar", "mousepad": "org.xfce.mousepad",
     "chromium": "chromium", "htop": "htop", "micro": "micro", "qpdfview": "qpdfview",
     "xarchiver": "xarchiver", "blueman": "blueman", "ristretto": "org.xfce.ristretto",
@@ -202,6 +202,9 @@ WIFI = (["nm-device-wired", "nm-device-wired-secure", "nm-no-connection"]
 BLUETOOTH = ("blueman-tray", "blueman-active", "blueman-disabled")
 POWER_ACTIONS = ("sleep", "reboot", "logout", "shutdown", "saver")
 USB_TARGETS = ("pc", "console")
+
+
+UPDATE_BADGES = ("update", "update-failed")   # downloaded or scheduled / the last update failed
 
 
 def _battery():
@@ -222,6 +225,8 @@ def _slots():
             s[f"taskbar/inputmode-{m}-shake{dx}"] = (23, 23, "generated")
     for b in _battery():
         s[f"taskbar/{b}"] = (20, 11, "required")
+    for u in UPDATE_BADGES:        # the Update app's taskbar badge (rg35xxh-update-badge)
+        s[f"taskbar/{u}"] = (23, 23, "optional")
     for w in WIFI:
         s[f"tray/{w}"] = (23, 23, "optional")
     for b in BLUETOOTH:

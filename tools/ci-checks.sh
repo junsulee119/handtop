@@ -63,6 +63,7 @@ step "theme tests"
 python3 -m pytest -q -p no:cacheprovider src/theme/tests || bad "pytest (src/theme)"
 python3 -m pytest -q -p no:cacheprovider src/controls/tests || bad "pytest (src/controls)"
 python3 -m pytest -q -p no:cacheprovider src/media/tests || bad "pytest (src/media)"
+python3 -m pytest -q -p no:cacheprovider src/update/tests || bad "pytest (src/update)"
 if /usr/bin/python3 -c 'import gi; gi.require_version("GdkPixbuf", "2.0"); import pytest' 2>/dev/null; then
   /usr/bin/python3 -m pytest -q -p no:cacheprovider src/theme/tests/test_gdk.py || bad "pytest (src/theme, GdkPixbuf)"
 else

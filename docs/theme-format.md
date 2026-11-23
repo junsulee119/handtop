@@ -246,6 +246,8 @@ PNG only, exact pixel size, at the path shown (relative to the theme folder). Pi
 | `icons/taskbar/battery-charging-low-4-saver.png` | 20×11 | base theme's |
 | `icons/taskbar/battery-charging-low-5.png` | 20×11 | base theme's |
 | `icons/taskbar/battery-charging-low-5-saver.png` | 20×11 | base theme's |
+| `icons/taskbar/update.png` | 23×23 | base theme's |
+| `icons/taskbar/update-failed.png` | 23×23 | base theme's |
 | `icons/tray/nm-device-wired.png` | 23×23 | base theme's, *system ok* |
 | `icons/tray/nm-device-wired-secure.png` | 23×23 | base theme's, *system ok* |
 | `icons/tray/nm-no-connection.png` | 23×23 | base theme's, *system ok* |
@@ -319,6 +321,9 @@ PNG only, exact pixel size, at the path shown (relative to the theme folder). Pi
 | `icons/apps/music.png` | 56×56 | base theme's |
 | `icons/apps/music@22.png` | 22×22 | made from `icons/apps/music.png` (smooth downscale; draw it for crisp pixel art) if that one is yours, else the base theme's |
 | `icons/apps/music@20.png` | 20×20 | made from `icons/apps/music.png` (smooth downscale; draw it for crisp pixel art) if that one is yours, else the base theme's |
+| `icons/apps/update.png` | 56×56 | base theme's |
+| `icons/apps/update@22.png` | 22×22 | made from `icons/apps/update.png` (smooth downscale; draw it for crisp pixel art) if that one is yours, else the base theme's |
+| `icons/apps/update@20.png` | 20×20 | made from `icons/apps/update.png` (smooth downscale; draw it for crisp pixel art) if that one is yours, else the base theme's |
 | `icons/apps/foot.png` | 56×56 | base theme's, *system ok* |
 | `icons/apps/foot@22.png` | 22×22 | made from `icons/apps/foot.png` (smooth downscale; draw it for crisp pixel art) if that one is yours, else the base theme's, *system ok* |
 | `icons/apps/foot@20.png` | 20×20 | made from `icons/apps/foot.png` (smooth downscale; draw it for crisp pixel art) if that one is yours, else the base theme's, *system ok* |

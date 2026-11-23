@@ -21,6 +21,7 @@ bash ./07b-osd.sh
 bash ./07c-bootsplash.sh
 bash ./07d-theme.sh
 bash ./07e-media.sh
+bash ./07f-update-app.sh
 bash ./08-input.sh
 bash ./09-services.sh
 bash ./09b-packages.sh

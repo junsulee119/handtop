@@ -1,0 +1,24 @@
+#!/usr/bin/python3
+"""Handtop's Update app: check, download and install updates at restart (docs/apps/update.md).
+The code is the handtop_update package (src/update); the privileged steps are the update worker's
+(/usr/local/sbin/handtop-update, through sudo).
+
+  rg35xxh-update                 open the app
+  rg35xxh-update --page NAME     open on a page (results, list, advanced; screenshots)
+  HANDTOP_UPDATE_FAKE=SCENARIO   canned answers instead of the worker (tools/update-app-shots.sh)"""
+import fcntl
+import os
+import sys
+
+sys.path.insert(0, "/usr/local/lib/rg35xxh-update")
+
+# One window at a time: two windows driving the worker would only queue on its lock.
+lock = open(os.path.join(os.environ.get("XDG_RUNTIME_DIR", "/tmp"), "rg35xxh-update.lock"), "w")
+try:
+    fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+except OSError:
+    sys.exit("rg35xxh-update: already open")
+
+from handtop_update import app  # noqa: E402
+
+app.run()

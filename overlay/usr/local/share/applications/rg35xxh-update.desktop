@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Update
+Comment=Updates for Handtop and Debian, installed at restart
+Exec=rg35xxh-update
+Icon=rg35xxh-update
+Terminal=false
+Categories=Settings;System;

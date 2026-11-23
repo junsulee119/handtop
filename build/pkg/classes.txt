@@ -13,6 +13,8 @@ generated        /usr/local/share/applications/mimeinfo.cache
 handtop-desktop  /usr/local/bin/nwg-drawer
 handtop-desktop  /usr/local/bin/rg35xxh-osd
 handtop-desktop  /usr/local/bin/rg35xxh-bootsplash
+handtop-desktop  /usr/local/bin/rg35xxh-update
+handtop-desktop  /usr/local/bin/rg35xxh-update-badge
 
 # ---- Handtop: hardware, session and system services --------------------------------------------
 handtop-core     /usr/local/sbin/*
@@ -39,6 +41,7 @@ handtop-keyring  /etc/apt/preferences.d/handtop.pref
 # ---- Handtop: look, apps and data -----------------------------------------------------------------
 handtop-desktop  /usr/local/lib/rg35xxh-theme/*
 handtop-desktop  /usr/local/lib/rg35xxh-media/*
+handtop-desktop  /usr/local/lib/rg35xxh-update/*
 handtop-desktop  /usr/local/share/*
 handtop-desktop  /usr/share/rg35xxh/*
 handtop-desktop  /usr/share/icons/Handtop/*

@@ -67,6 +67,54 @@ def deb(outdir, name, version, arch, depends, short, long_, files=(), scripts=No
     print("%s: %d files -> %s" % (name, len(files), out))
 
 
+def release_notes(changelog, release, limit=12):
+    """Short lines for the Update app from CHANGELOG.md's "## v<release>" section: its summary line,
+    then each top-level bullet's bold lead (else its start). None if there is no such section."""
+    import re
+    try:
+        text = open(changelog, encoding="utf-8").read()
+    except OSError:
+        return None
+    m = re.search(r"^## v%s\s*$(.*?)(?=^## |\Z)" % re.escape(release), text, re.M | re.S)
+    if not m:
+        return None
+
+    def plain(s):
+        s = re.sub(r"\[([^\]]*)\]\([^)]*\)", r"\1", s)          # links -> their text
+        return re.sub(r"[`*]", "", s).strip()
+
+    lines = []
+    for line in m.group(1).splitlines():
+        if not line.strip() or line.startswith(("  ", "\t")):
+            continue
+        if line.startswith("- "):
+            b = re.match(r"- \*\*(.+?)\*\*", line)
+            t = plain(b.group(1)) if b else plain(line[2:])
+            t = t.rstrip(".:")
+            if t.lower().startswith("for builders"):
+                continue                                   # nothing to see on the handheld
+        elif lines:
+            continue                                       # only the first paragraph's summary
+        else:
+            t = plain(line)
+        cap = 100 if lines else 200
+        if len(t) > cap:
+            t = t[:cap - 3].rsplit(" ", 1)[0] + "..."
+        lines.append(t)
+    return lines[:limit] or None
+
+
+def meta_fields():
+    rel = os.environ.get("HANDTOP_RELEASE_VERSION")
+    if not rel:
+        return {}
+    f = {"Handtop-Release": rel}
+    notes = release_notes(os.path.join(os.path.dirname(os.path.dirname(HERE)), "CHANGELOG.md"), rel)
+    if notes:
+        f["Handtop-Changes"] = "\n " + "\n ".join(notes)
+    return f
+
+
 def main():
     root, outdir, version, kver, ksha = sys.argv[1:6]
     root = root.rstrip("/")
@@ -125,7 +173,9 @@ fi
          # current signing key), so an older metapackage must accept a newer keyring.
          "handtop-keyring",
          "handtop-platform-h700 (= %s)" % version],
-        "Handtop desktop for handheld consoles", "Metapackage: everything Handtop installs on top of Debian.")
+        "Handtop desktop for handheld consoles", "Metapackage: everything Handtop installs on top of Debian.",
+        # Read by the Update app before downloading: the release and its notes, from the signed index.
+        fields=meta_fields())
 
 
 if __name__ == "__main__":
