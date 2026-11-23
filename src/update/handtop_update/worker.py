@@ -32,6 +32,18 @@ def call(*args):
     return res
 
 
+def installed_release():
+    """The installed release's name (Handtop-Release of the handtop metapackage), or None."""
+    if FAKE:
+        return None
+    try:
+        p = subprocess.run(["dpkg-query", "-W", "-f", "${Handtop-Release}", "handtop"], stdout=subprocess.PIPE,
+                           stderr=subprocess.DEVNULL, text=True, timeout=30)
+        return p.stdout.strip() or None
+    except (OSError, subprocess.SubprocessError):
+        return None
+
+
 def installed_version():
     if FAKE:
         return "0.5.0"

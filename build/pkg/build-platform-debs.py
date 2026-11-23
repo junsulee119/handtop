@@ -109,7 +109,9 @@ def meta_fields():
     if not rel:
         return {}
     f = {"Handtop-Release": rel}
-    notes = release_notes(os.path.join(os.path.dirname(os.path.dirname(HERE)), "CHANGELOG.md"), rel)
+    # HANDTOP_CHANGELOG: another changelog (tools/update-device-archive.sh's test release)
+    notes = release_notes(os.environ.get("HANDTOP_CHANGELOG") or
+                          os.path.join(os.path.dirname(os.path.dirname(HERE)), "CHANGELOG.md"), rel)
     if notes:
         f["Handtop-Changes"] = "\n " + "\n ".join(notes)
     return f

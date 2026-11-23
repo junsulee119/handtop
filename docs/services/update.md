@@ -112,3 +112,19 @@ self-test in `lkg/`, so a release that breaks either can still be undone.
   `handtop=previous`, install and power off.
 - The device: the same with real power cuts, the screen during the maintenance boot, the charger and fuel
   gauge at early boot, the regression list.
+
+### Device test
+
+`tools/update-device-archive.sh` (root, build server, second checkout) builds two releases from the checkout
+into `work/device-archive`: `r1` (what 09b builds) and `r2` (newer, one changed script, release notes from a
+test changelog). Serve the folder unprivileged (`python3 -m http.server 8088`), add it to the card as a
+separate source (`/etc/apt/sources.list.d/handtop-devtest.sources`: `URIs: http://<server>:8088/current/`,
+`Suites: ./`, `Trusted: yes`; Handtop's own source stays as shipped), install release 1, restart, point
+`current` at `r2` and use the Update app. Delete the test source afterwards.
+
+First run (2026-11-23, RG35XX H, step-4 card with Debian's sources on): check, download (23.5 MB),
+Restart and install, maintenance boot, Handtop + 21 Debian updates installed, no failed units, log on the
+FAT, release 1 kept for going back. Found two worker bugs the chroot test can't see (its Debian sources are
+off): apt 3.0's `--print-uris` gives no hash for Debian's security archive and only MD5 elsewhere (the plan
+now takes each archive's SHA-256 from `apt-cache show`), and the FFmpeg pin check read source priorities
+instead of the version's pin.

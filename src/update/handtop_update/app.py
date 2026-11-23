@@ -211,7 +211,7 @@ class App:
     def _header(self, p):
         ver = W.installed_version()
         ch = self.status.get("channel") or "stable"
-        p.pack_start(_title("Handtop %s" % M.short_version(ver)), False, False, 0)
+        p.pack_start(_title("Handtop %s" % M.short_version(ver, W.installed_release())), False, False, 0)
         p.pack_start(_label("Channel: %s" % ("testing (early builds)" if ch == "testing" else "stable"),
                             dim=True), False, False, 0)
 
@@ -297,7 +297,7 @@ class App:
             p, body = _framed()
             body.pack_start(_title("Everything is up to date"), False, False, 0)
             body.pack_start(_label("Handtop %s and all of Debian's packages are the newest available on the %s "
-                                "channel." % (M.short_version(W.installed_version()),
+                                "channel." % (M.short_version(W.installed_version(), W.installed_release()),
                                               self.status.get("channel") or "stable"), dim=True), False, False, 0)
             p.pack_end(_button("Done", self.refresh), False, False, 0)
             self._set("results", p)

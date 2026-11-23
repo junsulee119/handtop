@@ -5,10 +5,13 @@ import time
 STATE = "/var/lib/handtop-update"
 
 
-def short_version(v):
-    """'0.5.0+202611231200.gabc1234' -> '0.5.0 (dev build)'; '0.5.1' -> '0.5.1'."""
+def short_version(v, release=None):
+    """The release a version belongs to: '0.5.1' -> '0.5.1', '0.5.0+202611231200.gabc1234' -> '0.5.0 (dev build)'.
+    release: the metapackage's Handtop-Release field, which names it when present."""
     if not v:
-        return "unknown"
+        return release or "unknown"
+    if release:
+        return release + ("" if v == release else " (dev build)")
     m = re.match(r"^([0-9][0-9.]*)(\+.*)?$", v)
     if not m:
         return v

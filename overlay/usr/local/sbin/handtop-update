@@ -447,8 +447,22 @@ def plan_transaction(frozen):
 def ffmpeg_pin_effective():
     """Debian's FFmpeg is at -1 (Handtop's pin works): only then may v0.4.x's holds go."""
     p = run(["apt-cache", "policy", "ffmpeg"], timeout=60, check=False)
-    prios = [int(m.group(1)) for m in re.finditer(r"^\s+(-?\d+) \S*debian\.org", p.stdout, re.M)]
-    return all(x == -1 for x in prios)
+    return debian_versions_pinned_out(p.stdout)
+
+
+def debian_versions_pinned_out(policy):
+    """apt-cache policy's version table: each version line ("[***] VERSION PIN") is followed by its
+    sources ("PRIORITY URI ..."). True when every version a debian.org source offers has pin -1
+    (and at least one does: no Debian source means nothing to check, also True)."""
+    pins, cur = [], None
+    for line in policy.splitlines():
+        m = re.match(r"^\s+(?:\*\*\* )?(\S+) (-?\d+)$", line)
+        if m:
+            cur = int(m.group(2))
+            continue
+        if cur is not None and re.match(r"^\s+-?\d+ \S*debian\.org", line):
+            pins.append(cur)
+    return all(x == -1 for x in pins)
 
 
 def release_ffmpeg_holds():
@@ -499,7 +513,8 @@ def cmd_check():
         inst, held, bad = plan_transaction(frozen=False)
         handtop = [i for i in inst if "Handtop" in i["origin"] or is_handtop(i["name"])]
         meta = next((i for i in inst if i["name"] == "handtop"), None)
-        size = sum(v["size"] for v in archive_info(apt_opts(False, held), held).values()) if inst else 0
+        size = sum(v["size"] for v in archive_info(apt_opts(False, held), held, hashes=False).values()) \
+            if inst else 0
         out({"ok": True, "updates": inst, "handtop": handtop, "debian": len(inst) - len(handtop),
              "warnings": warnings + problems, "new_image_needed": bad, "handtop_held": held,
              "download_mb": round(size / (1 << 20), 1),
@@ -531,9 +546,11 @@ def freeze_lists():
     os.rename(tmp, LISTS)
 
 
-def archive_info(opts, held):
-    """{(name, version, arch): {file, size, hash}} for every archive of the plan, from the signed
-    indexes (asked against an empty archive directory, so already-downloaded files count too)."""
+def archive_info(opts, held, hashes=True):
+    """{(name, version, arch): {file, size, algo, hash}} for every archive of the plan. Names and sizes
+    come from apt's download list (asked against an empty archive directory, so already-downloaded
+    files count too); the SHA-256 from the signed package indexes (apt-cache show), because the
+    download list gives only the weakest hash, or none (Debian's security archive, apt 3.0)."""
     rmtree(EMPTY)
     os.makedirs(EMPTY + "/partial")
     p = run(["apt-get", "-qq", "--print-uris", "-o", "Dir::Cache::archives=" + EMPTY] + opts
@@ -542,17 +559,31 @@ def archive_info(opts, held):
     res = {}
     from urllib.parse import unquote
     for line in p.stdout.splitlines():
-        m = re.match(r"^'(\S+)' (\S+) (\d+) (\S+)", line)
+        m = re.match(r"^'(\S+)' (\S+) (\d+)", line)
         if not m:
             continue
         fname = m.group(2)
         parts = fname[:-4].split("_") if fname.endswith(".deb") else []
         if len(parts) != 3:
             continue
-        algo, _, digest = m.group(4).partition(":")
         res[(parts[0], unquote(parts[1]), parts[2])] = {"file": fname, "size": int(m.group(3)),
-                                                         "algo": algo.lower(), "hash": digest.lower()}
+                                                         "algo": "sha256", "hash": None}
+    if hashes and res:
+        add_sha256(res, opts)
     return res
+
+
+def add_sha256(res, opts):
+    """Fill in each archive's SHA-256 from the package indexes; refuse an archive without one."""
+    p = run(["apt-cache", "show"] + opts + ["%s:%s=%s" % (n, a, v) for n, v, a in res], timeout=300)
+    for st in p.stdout.split("\n\n"):
+        f = dict(re.findall(r"^(Package|Version|Architecture|SHA256|Size): (\S+)$", st, re.M))
+        key = (f.get("Package"), f.get("Version"), f.get("Architecture"))
+        if key in res and f.get("SHA256") and int(f.get("Size", -1)) == res[key]["size"]:
+            res[key]["hash"] = f["SHA256"].lower()
+    missing = ["%s %s" % (n, v) for (n, v, _), r in res.items() if not r["hash"]]
+    if missing:
+        raise Fail("no SHA-256 in the package indexes for %s" % ", ".join(missing))
 
 
 def file_ok(path, algo, digest):

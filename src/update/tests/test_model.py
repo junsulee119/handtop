@@ -10,6 +10,8 @@ def test_short_version():
     assert M.short_version("0.5.1") == "0.5.1"
     assert M.short_version("0.5.0+202611231200.gabc1234") == "0.5.0 (dev build)"
     assert M.short_version(None) == "unknown"
+    assert M.short_version("0.5.0", "0.5.0") == "0.5.0"
+    assert M.short_version("0.4.1+202611231318.g2897e69+t2", "0.5.0-test") == "0.5.0-test (dev build)"
 
 
 def test_summarize_splits_handtop_and_debian():
