@@ -18,7 +18,8 @@ echo "image: $IMG  kernel: $KV"
 
 # --- test root filesystem = rootfs + Debian kernel modules
 TR="$Q/rootfs-test"; [ -e "$TR" ] && safe_rm -r "$TR"
-cp -a "$ROOTFS" "$TR"
+assert_no_mounts "$ROOTFS" "$TR"
+cp -a --one-file-system "$ROOTFS" "$TR"
 mkdir -p "$TR/usr/lib/modules"; cp -a "$MD/$KV" "$TR/usr/lib/modules/"
 depmod -b "$TR" "$KV"
 ROOT_START_MIB=$(( BOOT_START_MIB + BOOT_SIZE_MIB ))

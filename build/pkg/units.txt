@@ -17,6 +17,7 @@ rg35xxh-bootlogo.service                 enable
 rg35xxh-bootlogo-done.service            enable
 handtop-recovery.service                 enable
 handtop-update-apply.service             enable
+handtop-update-boot-check.service        enable
 rg35xxh-bootlog.service                  on-demand
 rg35xxh-bootlog-update.service           on-demand
 rg35xxh-btclassic.service                on-demand

@@ -131,8 +131,9 @@ def maintainer_scripts(pkg, paths, unit_policy):
         body += "    mkdir -p /var/lib/handtop\n    seen=/var/lib/handtop/units-enabled\n    touch \"$seen\"\n"
         body += "    for u in %s; do\n" % " ".join(mine)
         body += '        grep -qx "$u" "$seen" && continue\n'
-        body += '        systemctl enable "$u" >/dev/null 2>&1 || echo "handtop: could not enable $u" >&2\n'
-        body += '        echo "$u" >> "$seen"\n    done\n'
+        # Remembered only when enabling worked, so a failure is retried by the next version.
+        body += '        if systemctl enable "$u" >/dev/null 2>&1; then echo "$u" >> "$seen"; '
+        body += 'else echo "handtop: could not enable $u (tried again by the next update)" >&2; fi\n    done\n'
     if any(p.startswith("/etc/systemd/") for p in paths):
         body += "    [ -d /run/systemd/system ] && systemctl daemon-reload || true\n"
     if any(p.startswith("/etc/udev/") for p in paths):

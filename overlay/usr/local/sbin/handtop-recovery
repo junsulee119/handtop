@@ -1,0 +1,296 @@
+#!/usr/bin/python3
+"""Handtop recovery without screen or buttons: acts on recovery.txt on the boot partition, early in
+every boot (handtop-recovery.service, through handtop-run, which falls back to the last copy that
+worked). Standalone on purpose: it doesn't use the update worker it may need to undo.
+
+    joypad=previous   the patched joypad driver from before the last modules update (restarts once)
+    joypad=current    back to the driver the installed release ships (restarts once)
+    handtop=previous  go back to the Handtop release kept for that (a maintenance boot does it; Handtop
+                      packages the newer release added are removed; the archive key is never taken back)
+
+The request is saved on ext4 before recovery.txt is set back to none, and the saved request is
+finished after a power cut; each step can be repeated safely. docs/services/update.md.
+"""
+import hashlib
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+import time
+import uuid
+
+STATE = "/var/lib/handtop-update"
+REQUEST = STATE + "/recovery-request.json"
+PREVIOUS = STATE + "/previous"
+PLAN = STATE + "/plan.json"
+SCHEDULE = STATE + "/schedule.json"
+FATSEQ = STATE + "/fat-seq"
+MARKER = "/system-update"
+FAT = "/boot/firmware"
+RECOVERY_TXT = FAT + "/recovery.txt"
+LOGDIR = "/var/log/handtop-update"
+BOOT_ABI = "/etc/handtop/boot-abi"
+JOYPAD_PREVIOUS = "/var/lib/handtop/modules/rocknix-singleadc-joypad.ko.previous"
+OVERRIDE_DIR = "updates/handtop-recovery"
+JOYPAD_KO = "rocknix-singleadc-joypad.ko"
+NEVER_ROLLED_BACK = ("handtop-keyring",)
+MAX_READ = 64 * 1024
+NO_POWER_ACTION = os.environ.get("HANDTOP_UPDATE_NO_POWER_ACTION") == "1"
+ENV = dict(os.environ, LC_ALL="C", PATH="/usr/sbin:/usr/bin:/sbin:/bin")
+TEMPLATE = """\
+# Handtop recovery, for when the handheld can't be used normally. Edit from any PC, save,
+# put the card back and switch on. Each line is acted on once, then set back to none
+# (what happened is written to logs\\recovery-NNNNNN.txt). Details: docs/services/update.md.
+#
+# joypad=previous   use the controls driver from before the last update (restarts once)
+# joypad=current    go back to the controls driver the installed release ships (restarts once)
+# handtop=previous  reinstall the Handtop release from before the last update (takes a few minutes)
+joypad=none
+handtop=none
+"""
+
+
+def fsync_dir(path):
+    d = os.open(path, os.O_RDONLY)
+    try:
+        os.fsync(d)
+    finally:
+        os.close(d)
+
+
+def write_atomic(path, data, mode=0o644):
+    tmp = path + ".new"
+    with open(tmp, "wb") as f:
+        f.write(data if isinstance(data, bytes) else data.encode())
+        f.flush()
+        os.fsync(f.fileno())
+    os.chmod(tmp, mode)
+    os.rename(tmp, path)
+    fsync_dir(os.path.dirname(path))
+
+
+def read_json(path):
+    try:
+        with open(path) as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return None
+
+
+def write_json(path, obj):
+    write_atomic(path, json.dumps(obj, indent=1, sort_keys=True))
+
+
+class Log:
+    def __init__(self):
+        os.makedirs(LOGDIR, exist_ok=True)
+        self.path = os.path.join(LOGDIR, "recovery-%s.log" % time.strftime("%Y%m%d-%H%M%S"))
+        self.f = open(self.path, "a", buffering=1)
+
+    def __call__(self, text):
+        line = time.strftime("%H:%M:%S ") + text
+        self.f.write(line + "\n")
+        print("handtop-recovery: " + text, flush=True)
+
+
+def run(cmd, log, timeout=300):
+    p = subprocess.run(cmd, env=ENV, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+                       errors="replace", timeout=timeout)
+    if p.stdout.strip():
+        log("$ %s\n%s" % (" ".join(cmd), p.stdout.strip()[-2000:]))
+    return p
+
+
+def sha256(path):
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for b in iter(lambda: f.read(1 << 20), b""):
+            h.update(b)
+    return h.hexdigest()
+
+
+def kernel():
+    try:
+        for line in open(BOOT_ABI):
+            k, _, v = line.strip().partition("=")
+            if k == "kernel" and v:
+                return v
+    except OSError:
+        pass
+    return os.uname().release
+
+
+def parse(raw):
+    res = {}
+    for line in raw.lstrip("﻿").splitlines():
+        line = line.split("#", 1)[0].strip()
+        k, eq, v = line.partition("=")
+        if eq and k.strip().lower() in ("joypad", "handtop"):
+            res[k.strip().lower()] = v.strip().strip('"').lower()[:40]
+    return res
+
+
+def read_fat_request(log):
+    if not os.path.ismount(FAT) or not os.path.isfile(RECOVERY_TXT):
+        return {}
+    with open(RECOVERY_TXT, "rb") as f:
+        raw = f.read(MAX_READ + 1)
+    if len(raw) > MAX_READ:
+        log("recovery.txt is larger than %d KiB: ignored" % (MAX_READ // 1024))
+        return {}
+    return parse(raw.decode("utf-8", "replace"))
+
+
+def copy_log_to_fat(log):
+    try:
+        if not os.path.ismount(FAT) or not os.access(FAT, os.W_OK):
+            return
+        logs = FAT + "/logs"
+        os.makedirs(logs, exist_ok=True)
+        seqs = read_json(FATSEQ) or {}
+        seq = seqs.get("recovery", 0) + 1
+        seqs["recovery"] = seq
+        write_json(FATSEQ, seqs)
+        with open(log.path, "rb") as f:
+            f.seek(0, 2)
+            f.seek(max(0, f.tell() - 60000))
+            data = f.read().decode("utf-8", "replace").replace("\r", "").replace("\n", "\r\n")
+        write_atomic(os.path.join(logs, "recovery-%06d.txt" % (seq % 1000000)), data)
+        mine = sorted((x for x in os.listdir(logs) if re.match(r"recovery-\d{6}\.txt$", x)),
+                      key=lambda x: os.path.getmtime(os.path.join(logs, x)))
+        for x in mine[:-5]:
+            os.unlink(os.path.join(logs, x))
+    except Exception:       # noqa: BLE001 - the FAT copy is best effort
+        pass
+
+
+def joypad(want, log):
+    """Returns True when a restart is needed. Always re-indexes, so a cut between the file change
+    and depmod is repaired by asking again."""
+    tree = "/usr/lib/modules/" + kernel()
+    odir = os.path.join(tree, OVERRIDE_DIR)
+    override = os.path.join(odir, JOYPAD_KO)
+    if want == "previous":
+        if not os.path.isfile(JOYPAD_PREVIOUS):
+            log("joypad: no previous driver kept (no update has replaced it yet); nothing changed")
+            return False
+        os.makedirs(odir, exist_ok=True)
+        shutil.copyfile(JOYPAD_PREVIOUS, override + ".new")
+        with open(override + ".new", "rb") as f:
+            os.fsync(f.fileno())
+        os.rename(override + ".new", override)
+        fsync_dir(odir)
+    elif os.path.lexists(override):
+        os.unlink(override)
+        fsync_dir(odir)
+    if run(["depmod", "-a", os.path.basename(tree)], log).returncode != 0:
+        log("joypad: depmod failed; ask again in recovery.txt")
+        return False
+    path = run(["modinfo", "-k", os.path.basename(tree), "-n", JOYPAD_KO[:-3]], log).stdout.strip()
+    ok = (path == override) if want == "previous" else (OVERRIDE_DIR not in path)
+    log("joypad: %s driver from the next start (%s)%s" % (want, path or "?", "" if ok else ": NOT as asked"))
+    return ok
+
+
+def installed():
+    p = subprocess.run(["dpkg-query", "-W", "-f", "${Package}\\t${Version}\\t${db:Status-Abbrev}\\n"],
+                       env=ENV, stdout=subprocess.PIPE, text=True, timeout=60)
+    return {n: v for n, v, st in (l.split("\t") for l in p.stdout.splitlines()) if len(st) > 1 and st[1] == "i"}
+
+
+def handtop_previous(log):
+    m = read_json(PREVIOUS + "/manifest.json")
+    if not m or not m.get("complete"):
+        log("handtop=previous: no complete earlier release is kept on this card (it is kept when an "
+            "update that changes Handtop is installed)")
+        return False
+    for p in m["packages"]:
+        f = os.path.join(PREVIOUS, p["file"])
+        if not os.path.isfile(f) or sha256(f) != p["hash"]:
+            log("handtop=previous: %s is missing or damaged; can't go back" % p["file"])
+            return False
+    have = installed()
+    names = {p["name"] for p in m["packages"]}
+    change = [p for p in m["packages"] if have.get(p["name"]) != p["version"]]
+    remove = sorted(n for n in have if (n == "handtop" or n.startswith("handtop-"))
+                    and n not in names and n not in NEVER_ROLLED_BACK)
+    if not change and not remove:
+        log("handtop=previous: release %s is already installed; nothing to do" % m.get("release"))
+        return False
+    if os.path.lexists(MARKER) and not (os.path.islink(MARKER) and os.readlink(MARKER) == STATE):
+        log("handtop=previous: another offline update is scheduled (/system-update); not touching it")
+        return False
+    # A downloaded update is dropped (its files and plan), the kept release isn't.
+    for d in (STATE + "/cache", STATE + "/lists", STATE + "/prefs.d", PREVIOUS + ".next"):
+        if os.path.isdir(d):
+            shutil.rmtree(d)
+    pid = uuid.uuid4().hex[:12]
+    write_json(PLAN, {"id": pid, "kind": "recovery", "created": int(time.time()),
+                      "release": m.get("release"), "packages": change, "remove": remove})
+    write_json(SCHEDULE, {"plan": pid, "after": "restart", "attempts": 0, "deferrals": 0})
+    if not os.path.lexists(MARKER):
+        os.symlink(STATE, MARKER)
+    fsync_dir("/")
+    log("handtop=previous: back to %s at the next start (%s%s)" % (
+        m.get("release"), ", ".join("%s %s" % (p["name"], p["version"]) for p in change),
+        "; removing " + ", ".join(remove) if remove else ""))
+    return True
+
+
+def main():
+    if sys.argv[1:] == ["--self-test"]:
+        assert parse("﻿Joypad = Previous\r\nhandtop=none # x\n") == {"joypad": "previous", "handtop": "none"}
+        return 0
+    if os.geteuid() != 0:
+        print("handtop-recovery: run as root (handtop-recovery.service)", file=sys.stderr)
+        return 2
+    os.makedirs(STATE, exist_ok=True)
+    req = read_json(REQUEST)
+    log = None
+    if not req:
+        probe = []
+        fat = read_fat_request(probe.append)
+        if not any(v not in ("", "none") for v in fat.values()):
+            return 0
+        log = Log()
+        for line in probe:
+            log(line)
+        req = {"joypad": fat.get("joypad", "none"), "handtop": fat.get("handtop", "none")}
+        write_json(REQUEST, req)                         # saved before recovery.txt is set back
+        try:
+            write_atomic(RECOVERY_TXT, TEMPLATE.replace("\n", "\r\n"))
+        except OSError as e:
+            log("could not set recovery.txt back to none (%s): not acting on it" % e)
+            os.unlink(REQUEST)
+            return 1
+    log = log or Log()
+    log("request: joypad=%s handtop=%s" % (req.get("joypad"), req.get("handtop")))
+    restart = False
+    j = req.get("joypad", "none")
+    if j in ("previous", "rocknix-patched-fallback", "current"):
+        restart |= joypad("previous" if j != "current" else "current", log)
+    elif j not in ("", "none"):
+        log("joypad=%s not understood (previous, current or none)" % j)
+    h = req.get("handtop", "none")
+    if h == "previous":
+        restart |= handtop_previous(log)
+    elif h not in ("", "none"):
+        log("handtop=%s not understood (previous or none)" % h)
+    os.unlink(REQUEST)
+    fsync_dir(STATE)
+    copy_log_to_fat(log)
+    if restart:
+        print("handtop-recovery: restarting", flush=True)
+        if NO_POWER_ACTION:
+            print("handtop-recovery: would reboot now", flush=True)
+        else:
+            subprocess.run(["sync"], timeout=120)
+            if subprocess.run(["systemctl", "reboot", "--no-block"], timeout=60).returncode != 0:
+                subprocess.run(["systemctl", "--force", "--force", "reboot"], timeout=60)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

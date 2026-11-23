@@ -14,10 +14,11 @@ ConditionPathIsSymbolicLink=/system-update
 
 [Service]
 Type=oneshot
-ExecStart=/usr/local/sbin/handtop-update apply
+ExecStart=/usr/local/sbin/handtop-run handtop-update apply
 StandardOutput=journal+console
 StandardError=journal+console
-TimeoutStartSec=90min
+# The worker keeps its own budget of 100 min and finishes (result, restart) within this.
+TimeoutStartSec=120min
 
 [Install]
 WantedBy=system-update.target

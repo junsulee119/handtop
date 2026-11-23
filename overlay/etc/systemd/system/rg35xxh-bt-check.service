@@ -9,6 +9,10 @@ Wants=sys-kernel-debug.mount
 Conflicts=shutdown.target
 Before=shutdown.target
 
+# Not in the update maintenance boot (system-update.target): its progress text must stay visible,
+# and nothing there should touch the radio.
+ConditionPathIsSymbolicLink=!/system-update
+
 [Service]
 Type=simple
 ExecStart=/usr/local/sbin/rg35xxh-bt-check

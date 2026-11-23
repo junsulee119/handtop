@@ -39,3 +39,17 @@ safe_rm() {
     rm -f $rec --one-file-system -- "$rp"
   done
 }
+
+# assert_no_mounts DIR...   refuse when anything is mounted at or below DIR. A chroot left mounted by a
+# killed run (its EXIT trap never ran) binds the host's /dev, /proc, ... into the rootfs: copying from
+# it or deleting into it (rsync --delete) would reach the host (external review 2026-11-19, #11).
+assert_no_mounts() {
+  local d r
+  for d in "$@"; do
+    r="$(realpath -m -- "$d")"
+    if awk -v r="$r" '{ m = $2; gsub(/\\040/, " ", m); if (m == r || index(m, r "/") == 1) { print "  " m; f = 1 } }
+                      END { exit !f }' /proc/self/mounts; then
+      die "something is still mounted under $r (a chroot left by a killed run?); unmount it first"
+    fi
+  done
+}

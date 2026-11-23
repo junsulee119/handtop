@@ -1,0 +1,14 @@
+[Unit]
+Description=Handtop update: check after the maintenance boot, keep working copies of the update tools
+Documentation=https://github.com/junsulee119/handtop/blob/main/docs/services/update.md
+# Normal boots only. Reports a maintenance boot that was stopped (time-out, crash) and removes its
+# service blocker; finishes a cut switch of the kept release; keeps last-known-good tool copies.
+After=local-fs.target
+ConditionPathIsSymbolicLink=!/system-update
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/handtop-run handtop-update boot-check
+
+[Install]
+WantedBy=multi-user.target

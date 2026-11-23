@@ -27,7 +27,7 @@ HOME = "https://github.com/junsulee119/handtop"
 JOYPAD = "rocknix-joypad/rocknix-singleadc-joypad.ko"
 
 
-def deb(outdir, name, version, arch, depends, short, long_, files=(), scripts=None, root=None):
+def deb(outdir, name, version, arch, depends, short, long_, files=(), scripts=None, root=None, fields=None):
     tree = os.path.join(outdir, "tree", name)
     if os.path.exists(tree):
         shutil.rmtree(tree)
@@ -50,9 +50,10 @@ def deb(outdir, name, version, arch, depends, short, long_, files=(), scripts=No
                 os.chmod(os.path.join(dp, d), 0o755)
     with open(tree + "/DEBIAN/control", "w") as f:
         f.write("Package: %s\nVersion: %s\nArchitecture: %s\nMaintainer: %s\nSection: %s\nPriority: optional\n"
-                "Installed-Size: %d\n%sHomepage: %s\nDescription: %s\n %s\n" % (
+                "Installed-Size: %d\n%s%sHomepage: %s\nDescription: %s\n %s\n" % (
                     name, version, arch, MAINT, "kernel" if files else "metapackages", size // 1024 + 1,
-                    ("Depends: %s\n" % ", ".join(depends)) if depends else "", HOME, short, long_))
+                    ("Depends: %s\n" % ", ".join(depends)) if depends else "",
+                    "".join("%s: %s\n" % kv for kv in (fields or {}).items()), HOME, short, long_))
     if md5:
         with open(tree + "/DEBIAN/md5sums", "w") as f:
             f.write("\n".join(md5) + "\n")
@@ -91,12 +92,13 @@ if [ "$have" != "$want" ]; then
     exit 1
 fi
 # Keep the patched joypad driver being replaced, for the recovery path (recovery.txt).
-if [ "$1" = upgrade ] && [ -f %s ]; then
+# Only when another version is replaced: reinstalling this one must not overwrite the kept driver.
+if [ "$1" = upgrade ] && [ "$2" != "%s" ] && [ -f %s ]; then
     mkdir -p /var/lib/handtop/modules
     cp %s /var/lib/handtop/modules/rocknix-singleadc-joypad.ko.previous.new
     mv /var/lib/handtop/modules/rocknix-singleadc-joypad.ko.previous.new /var/lib/handtop/modules/rocknix-singleadc-joypad.ko.previous
 fi
-""" % (ksha, mod, joy, joy)
+""" % (ksha, mod, version, joy, joy)
     postinst = """#!/bin/sh
 set -e
 if [ "$1" = configure ]; then
@@ -111,12 +113,17 @@ fi
     deb(outdir, mod, version, "arm64", [], "Handtop: kernel modules for ROCKNIX's H700 kernel %s" % kver,
         "Video decoder (Cedrus, VP9 helper), wired Xbox 360 controller function, uhid for\n"
         " Bluetooth LE input, and the gamepad driver with Handtop's vibration fix, built for\n"
-        " kernel %s (KERNEL sha256 %s)." % (kver, ksha), files, {"preinst": preinst, "postinst": postinst}, root)
+        " kernel %s (KERNEL sha256 %s)." % (kver, ksha), files, {"preinst": preinst, "postinst": postinst}, root,
+        # The update worker reads it before scheduling: a card with another KERNEL needs a new image.
+        fields={"Handtop-Kernel-SHA256": ksha, "Handtop-Kernel-Release": kver})
     deb(outdir, "handtop-platform-h700", version, "all", ["%s (= %s)" % (mod, version)],
         "Handtop: Allwinner H700 platform", "Pulls in the kernel modules for the kernel this image has.")
     deb(outdir, "handtop", version, "all",
         ["handtop-core (= %s)" % version, "handtop-desktop (= %s)" % version,
-         "handtop-video (= %s)" % version, "handtop-keyring (= %s)" % version,
+         "handtop-video (= %s)" % version,
+         # Unversioned: the keyring is never taken back by handtop=previous (a newer one may carry the
+         # current signing key), so an older metapackage must accept a newer keyring.
+         "handtop-keyring",
          "handtop-platform-h700 (= %s)" % version],
         "Handtop desktop for handheld consoles", "Metapackage: everything Handtop installs on top of Debian.")
 

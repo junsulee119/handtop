@@ -11,7 +11,7 @@ ConditionPathExists=/boot/firmware/recovery.txt
 
 [Service]
 Type=oneshot
-ExecStart=/usr/local/sbin/handtop-update recovery
+ExecStart=/usr/local/sbin/handtop-run handtop-recovery
 StandardOutput=journal+console
 
 [Install]

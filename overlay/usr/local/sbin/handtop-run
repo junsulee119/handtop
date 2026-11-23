@@ -1,0 +1,14 @@
+#!/bin/sh
+# handtop-run TOOL ARGS: run /usr/local/sbin/TOOL if it passes its self-test, otherwise the last copy
+# that did (kept by handtop-update boot-check in /var/lib/handtop-update/lkg). So a release that
+# breaks the update worker or handtop-recovery can still be undone (docs/services/update.md).
+t="$1"; shift
+cur="/usr/local/sbin/$t"
+lkg="/var/lib/handtop-update/lkg/$t"
+case "$t" in handtop-update|handtop-recovery) ;; *) echo "handtop-run: unknown tool $t" >&2; exit 2 ;; esac
+if "$cur" --self-test >/dev/null 2>&1; then exec "$cur" "$@"; fi
+if [ -x "$lkg" ] && "$lkg" --self-test >/dev/null 2>&1; then
+	echo "handtop-run: $cur failed its self-test; using the last copy that worked" >&2
+	exec "$lkg" "$@"
+fi
+exec "$cur" "$@"

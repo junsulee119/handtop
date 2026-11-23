@@ -1,25 +1,29 @@
 #!/usr/bin/python3
 """Handtop's update worker (docs/services/update.md).
 
-    handtop-update status      what is downloaded / scheduled / the last result (JSON)
+    handtop-update status      downloaded / scheduled / going back possible / last result (JSON)
     handtop-update check       refresh the package lists and list the available updates (JSON)
-    handtop-update download    download the whole update and save the exact plan
+    handtop-update download    download the update, the release to go back to, and save the plan
     handtop-update schedule [restart|poweroff]
-                               after checks (battery, controller modes), install at the next restart;
-                               afterwards start the desktop (restart, default) or switch off
+                               after checks, install at the next restart; then start the desktop
+                               (restart, default) or switch off
     handtop-update cancel      forget the downloaded update
     handtop-update channel stable|testing
-                               where Handtop's packages come from (testing: its own sources file)
+                               where Handtop's packages come from (cancels a downloaded update)
     handtop-update apply       maintenance boot only (handtop-update-apply.service)
-    handtop-update recovery    early boot only: act on recovery.txt (handtop-recovery.service)
+    handtop-update boot-check  normal boot only (handtop-update-boot-check.service)
+    handtop-update --self-test exit 0 if this copy works (handtop-run uses it)
 
 Updates are never installed in the running desktop. They are downloaded here, then installed in
 systemd's offline-update boot (system-update.target, entered while the /system-update link
-exists), where no session, input daemon or controller mode runs, so package scripts can't restart
-anything that holds hardware. The Update app runs the first five through sudo
-(/etc/sudoers.d/rg35xxh-update).
+exists), where no session, input daemon or controller mode runs. The plan is exact: the package
+lists are frozen at download, every file's SHA-256 is recorded, and the maintenance boot refuses
+to do anything the plan didn't approve. The Update app runs status, check, download, schedule,
+cancel and channel through sudo (/etc/sudoers.d/rg35xxh-update). recovery.txt is handled by
+handtop-recovery, a separate small script.
 """
 import fcntl
+import hashlib
 import json
 import os
 import re
@@ -27,70 +31,102 @@ import shutil
 import subprocess
 import sys
 import time
+import uuid
 
 STATE = "/var/lib/handtop-update"
-CACHE = STATE + "/cache"            # the .debs of the downloaded update
-PREVIOUS = STATE + "/previous"      # the installed Handtop packages, kept for handtop=previous
-MAIN_SOURCES = "/etc/apt/sources.list.d/handtop.sources"           # handtop-keyring's; never edited
-CHANNEL_SOURCES = "/etc/apt/sources.list.d/handtop-testing.sources"  # written by 'channel testing'
 PLAN = STATE + "/plan.json"
+SCHEDULE = STATE + "/schedule.json"     # {plan, after, attempts, deferrals}
+INPROGRESS = STATE + "/in-progress.json"
 RESULT = STATE + "/last-result.json"
-ATTEMPTS = STATE + "/attempts"
-AFTER = STATE + "/after"            # restart or poweroff once the update is installed
+CHECKED = STATE + "/checked.json"
+CACHE = STATE + "/cache"                # the plan's .debs
+LISTS = STATE + "/lists"                # the package lists the plan was made from (hard links)
+PREFS = STATE + "/prefs.d"              # preferences for a plan that holds Handtop back (new image)
+EMPTY = STATE + "/empty"
+PREVIOUS = STATE + "/previous"          # the release to go back to (handtop=previous)
+NEXT = PREVIOUS + ".next"               # staged by download, becomes PREVIOUS when the install starts
+OLD = PREVIOUS + ".old"
+LKG = STATE + "/lkg"                    # last copies of the worker and handtop-recovery that worked
+NO_PREDECESSOR = STATE + "/no-predecessor"   # step 7 (migration) writes it: first update can't go back
+FATSEQ = STATE + "/fat-seq"
 MARKER = "/system-update"
 LOCK = "/run/handtop-update.lock"
 LOGDIR = "/var/log/handtop-update"
 FAT = "/boot/firmware"
-RECOVERY_TXT = FAT + "/recovery.txt"
 BOOT_ABI = "/etc/handtop/boot-abi"
-JOYPAD_PREVIOUS = "/var/lib/handtop/modules/rocknix-singleadc-joypad.ko.previous"
-JOYPAD_OVERRIDE = "updates/handtop-recovery/rocknix-singleadc-joypad.ko"   # under the module tree
+MAIN_SOURCES = "/etc/apt/sources.list.d/handtop.sources"             # handtop-keyring's; never edited
+CHANNEL_SOURCES = "/etc/apt/sources.list.d/handtop-testing.sources"  # 'channel testing'
+TESTING_STANZA = """\
+# Written by 'handtop-update channel testing' (Update app); 'channel stable' removes it.
+# Packages from testing stay installed until stable has the same or newer versions.
+Types: deb
+URIs: https://junsulee119.github.io/handtop-apt
+Suites: trixie-testing
+Components: main
+Signed-By: /usr/share/keyrings/handtop-archive.asc
+"""
 POLICY_RC = "/usr/sbin/policy-rc.d"
-POLICY_TAG = "# handtop-update"
-# Tests (tools/update-test.sh) run the worker in a chroot: no restart or power-off there.
-NO_POWER_ACTION = os.environ.get("HANDTOP_UPDATE_NO_POWER_ACTION") == "1"
-MAX_ATTEMPTS = 3                    # maintenance boots per plan (power cuts included)
-MIN_BATTERY = 40                    # to schedule without the charger
-STOP_BATTERY = 10                   # the maintenance boot powers off below this and resumes later
+POLICY_SAVED = POLICY_RC + ".handtop-saved"
+POLICY_BODY = "#!/bin/sh\n# handtop-update: no service starts during the maintenance boot\nexit 101\n"
+APPLY_UNIT = "handtop-update-apply.service"
+SYSFS = os.environ.get("HANDTOP_UPDATE_SYSFS", "/sys")          # tests point it at a fake tree
+NO_POWER_ACTION = os.environ.get("HANDTOP_UPDATE_NO_POWER_ACTION") == "1"   # tests: chroot
+CHROOT_TEST = os.environ.get("HANDTOP_UPDATE_CHROOT") == "1"   # tests: systemd can't answer is-active
+MAX_ATTEMPTS = 3          # maintenance boots per plan that start installing (power cuts included)
+MAX_DEFERRALS = 3         # maintenance boots that switch off without installing (unknown battery)
+MIN_BATTERY = 40          # to schedule without the charger
+STOP_BATTERY = 10         # the maintenance boot switches off below this and continues later
+CHECK_MAX_AGE = 24 * 3600
+APPLY_BUDGET = 100 * 60   # handtop-update-apply.service has TimeoutStartSec=120min
 CONTROLLER_UNITS = ("rg35xxh-btpad", "rg35xxh-btclassic", "rg35xxh-usbpad",
                     "rg35xxh-switchpad", "rg35xxh-switchbt")
+FFMPEG_FAMILY = ("ffmpeg", "libavcodec61", "libavdevice61", "libavfilter10", "libavformat61",
+                 "libavutil59", "libpostproc58", "libswresample5", "libswscale8")
+FFMPEG_DEV = ("libavcodec-dev", "libavdevice-dev", "libavfilter-dev", "libavformat-dev",
+              "libavutil-dev", "libpostproc-dev", "libswresample-dev", "libswscale-dev")
+NEVER_ROLLED_BACK = ("handtop-keyring",)    # an old keyring could lack the current signing key
 APT_ENV = dict(os.environ, DEBIAN_FRONTEND="noninteractive", LC_ALL="C",
                APT_LISTCHANGES_FRONTEND="none", PATH="/usr/sbin:/usr/bin:/sbin:/bin")
 CONF = ["--force-confdef", "--force-confold"]
 APT_CONF = ["-o", "Dpkg::Options::=--force-confdef", "-o", "Dpkg::Options::=--force-confold"]
-RECOVERY_TEMPLATE = """\
-# Handtop recovery, for when the handheld can't be used normally. Edit from any PC, save,
-# put the card back and switch on. Each line is acted on once, then set back to none
-# (what happened is written to logs\\recovery-NNNN.txt). Details: docs/services/update.md.
-#
-# joypad=previous   use the controls driver from before the last update (restarts once)
-# joypad=current    go back to the controls driver the installed release ships (restarts once)
-# handtop=previous  reinstall the Handtop release from before the last update (takes a few minutes)
-joypad=none
-handtop=none
-"""
 
 
 class Fail(Exception):
     pass
 
 
+class Drift(Fail):
+    """The card no longer matches the plan: retrying can't help."""
+
+
 def out(obj):
-    print(json.dumps(obj, indent=1, sort_keys=True))
+    print(json.dumps(obj, indent=1, sort_keys=True), flush=True)
 
 
-def write_atomic(path, data):
-    tmp = path + ".new"
-    with open(tmp, "w") as f:
-        f.write(data)
-        f.flush()
-        os.fsync(f.fileno())
-    os.rename(tmp, path)
-    d = os.open(os.path.dirname(path) or ".", os.O_RDONLY)
+# ---- files ------------------------------------------------------------------------------------
+
+def fsync_dir(path):
+    d = os.open(path, os.O_RDONLY)
     try:
         os.fsync(d)
     finally:
         os.close(d)
+
+
+def write_atomic(path, data, mode=0o644):
+    tmp = path + ".new"
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, mode)
+    with os.fdopen(fd, "w") as f:
+        f.write(data)
+        f.flush()
+        os.fsync(f.fileno())
+    os.chmod(tmp, mode)
+    os.rename(tmp, path)
+    fsync_dir(os.path.dirname(path) or ".")
+
+
+def write_json(path, obj):
+    write_atomic(path, json.dumps(obj, indent=1, sort_keys=True))
 
 
 def read_json(path, default=None):
@@ -101,24 +137,149 @@ def read_json(path, default=None):
         return default
 
 
+def unlink(path):
+    if os.path.lexists(path):
+        os.unlink(path)
+
+
+def rmtree(path):
+    if os.path.lexists(path):
+        if os.path.isdir(path) and not os.path.islink(path):
+            shutil.rmtree(path)
+        else:
+            os.unlink(path)
+
+
+def sha256(path):
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for b in iter(lambda: f.read(1 << 20), b""):
+            h.update(b)
+    return h.hexdigest()
+
+
+def free_space(path):
+    st = os.statvfs(path)
+    return st.f_bavail * st.f_frsize // (1 << 20), st.f_favail
+
+
+# ---- logs -------------------------------------------------------------------------------------
+
+class Log:
+    """Root log in /var/log/handtop-update; command output is streamed into it as it comes."""
+
+    def __init__(self, kind):
+        os.makedirs(LOGDIR, exist_ok=True)
+        self.path = os.path.join(LOGDIR, "%s-%s.log" % (kind, time.strftime("%Y%m%d-%H%M%S")))
+        self.f = open(self.path, "a", buffering=1)
+
+    def __call__(self, text):
+        self.f.write(time.strftime("%H:%M:%S ") + text.rstrip("\n") + "\n")
+        self.f.flush()
+
+    def sync(self):
+        try:
+            os.fsync(self.f.fileno())
+        except OSError:
+            pass
+
+
+def tail(path, n):
+    with open(path, "rb") as f:
+        f.seek(0, 2)
+        f.seek(max(0, f.tell() - n))
+        return f.read().decode("utf-8", "replace")
+
+
 def run(cmd, timeout, log=None, check=True, cwd=None):
-    p = subprocess.run(cmd, env=APT_ENV, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                       text=True, errors="replace", timeout=timeout)
+    """Run cmd. With a log, output goes straight to the log file (so a power cut leaves what the
+    command printed so far); the result's stdout is then the last part of it."""
     if log:
-        log("$ %s\n%s" % (" ".join(cmd), p.stdout))
+        log("$ " + " ".join(cmd))
+        start = log.f.tell()
+        try:
+            p = subprocess.run(cmd, env=APT_ENV, cwd=cwd, stdout=log.f, stderr=subprocess.STDOUT,
+                               timeout=timeout)
+        finally:
+            log.f.flush()
+        with open(log.path, "rb") as f:
+            f.seek(start)
+            text = f.read()[-20000:].decode("utf-8", "replace")
+        p.stdout = text
+    else:
+        p = subprocess.run(cmd, env=APT_ENV, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                           text=True, errors="replace", timeout=timeout)
     if check and p.returncode != 0:
         raise Fail("%s failed (%d): %s" % (" ".join(cmd[:2]), p.returncode, p.stdout.strip()[-600:]))
     return p
 
 
-def lock():
-    f = open(LOCK, "w")
+def copy_log_to_fat(path, kind):
+    """A short copy on the boot partition (logs\\<kind>-NNNNNN.txt), readable from any PC; the last
+    5 are kept. Best effort: never part of a transaction."""
     try:
-        fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        if not os.path.ismount(FAT) or not os.access(FAT, os.W_OK):
+            return
+        logs = FAT + "/logs"
+        os.makedirs(logs, exist_ok=True)
+        seq = (read_json(FATSEQ) or {}).get(kind, 0) + 1
+        write_json(FATSEQ, dict(read_json(FATSEQ) or {}, **{kind: seq}))
+        name = "%s-%06d.txt" % (kind, seq % 1000000)
+        write_atomic(os.path.join(logs, name), tail(path, 60000).replace("\r", "").replace("\n", "\r\n"))
+        mine = sorted((f for f in os.listdir(logs) if re.match(kind + r"-\d{6}\.txt$", f)),
+                      key=lambda f: os.path.getmtime(os.path.join(logs, f)))
+        for f in mine[:-5]:
+            os.unlink(os.path.join(logs, f))
+    except Exception:       # noqa: BLE001 - a broken FAT must never stop an update from finishing
+        pass
+
+
+def console(msg):
+    line = "Handtop: %s" % msg
+    print(line, flush=True)
+    try:
+        with open("/dev/tty1", "w") as t:
+            t.write("\r\n" + line + "\r\n")
     except OSError:
-        f.close()
-        raise Fail("another update operation is running")
-    return f
+        pass
+
+
+# ---- system state -------------------------------------------------------------------------------
+
+def lock(wait=0):
+    f = open(LOCK, "w")
+    end = time.time() + wait
+    while True:
+        try:
+            fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            return f
+        except OSError:
+            if time.time() >= end:
+                f.close()
+                raise Fail("another update operation is running")
+            time.sleep(1)
+
+
+_NATIVE = []
+
+
+def native_arch():
+    if not _NATIVE:
+        _NATIVE.append(run(["dpkg", "--print-architecture"], timeout=30).stdout.strip())
+    return _NATIVE[0]
+
+
+def installed():
+    """{package: version} of the installed packages, held ones included. Names as apt prints them:
+    plain for the native architecture and all, name:arch for a foreign one."""
+    p = run(["dpkg-query", "-W", "-f", "${Package}\\t${Architecture}\\t${Version}\\t${db:Status-Abbrev}\\n"],
+            timeout=60)
+    res = {}
+    for line in p.stdout.splitlines():
+        name, arch, ver, st = line.split("\t")
+        if len(st) > 1 and st[1] == "i":
+            res[name if arch in (native_arch(), "all") else "%s:%s" % (name, arch)] = ver
+    return res
 
 
 def boot_abi():
@@ -132,512 +293,828 @@ def boot_abi():
     return res
 
 
-def installed():
-    p = run(["dpkg-query", "-W", "-f", "${Package}\\t${Version}\\t${db:Status-Abbrev}\\n"], timeout=60)
-    res = {}
-    for line in p.stdout.splitlines():
-        name, ver, st = line.split("\t")
-        if st.startswith("ii"):
-            res[name] = ver
-    return res
-
-
-FFMPEG_FAMILY = ("ffmpeg", "libavcodec61", "libavdevice61", "libavfilter10", "libavformat61",
-                 "libavutil59", "libpostproc58", "libswresample5", "libswscale8")
-PIN = "/etc/apt/preferences.d/handtop.pref"
-
-
-def release_ffmpeg_holds(log=None):
-    """v0.4.x held the FFmpeg packages; with Handtop's pin (handtop-keyring) the pin protects them
-    instead, and a hold would keep FFmpeg updates back. dpkg's lock rules out the package's own
-    postinst for this."""
-    if not os.path.exists(PIN):
-        return
-    held = set(run(["apt-mark", "showhold"], timeout=60).stdout.split())
-    rel = [p for p in FFMPEG_FAMILY if p in held]
-    if rel:
-        run(["apt-mark", "unhold"] + rel, timeout=60, log=log)
-
-
-def remove_marker():
-    if os.path.lexists(MARKER):
-        os.unlink(MARKER)
+def our_marker():
+    """True: the marker is ours. None: no marker. False: someone else's offline update."""
+    if not os.path.lexists(MARKER):
+        return None
+    try:
+        return os.path.islink(MARKER) and os.readlink(MARKER) == STATE
+    except OSError:
+        return False
 
 
 def set_marker():
-    remove_marker()
-    os.symlink(STATE, MARKER)
+    if our_marker() is False:
+        raise Fail("another offline update is scheduled (/system-update); not touching it")
+    if our_marker() is None:
+        os.symlink(STATE, MARKER)
+    fsync_dir("/")
+
+
+def remove_marker():
+    if our_marker():
+        os.unlink(MARKER)
+        fsync_dir("/")
+
+
+def battery():
+    """(capacity or None, charging, has_battery)."""
+    def rd(p):
+        try:
+            with open(os.path.join(SYSFS, p)) as f:
+                return f.read().strip()
+        except OSError:
+            return None
+    has = os.path.isdir(os.path.join(SYSFS, "class/power_supply/battery"))
+    cap = rd("class/power_supply/battery/capacity")
+    cap = int(cap) if cap and cap.isdigit() and 0 <= int(cap) <= 100 else None
+    return cap, rd("class/power_supply/axp20x-usb/online") == "1", has
+
+
+def power_ok(minimum):
+    """None if fine, else the reason. Unknown is only fine on a machine without a battery."""
+    cap, charging, has = battery()
+    if charging or not has:
+        return None
+    if cap is None:
+        return "the battery level can't be read"
+    if cap < minimum:
+        return "battery at %d%%" % cap
+    return None
+
+
+def controller_mode_active():
+    if CHROOT_TEST:
+        return None
+    for u in CONTROLLER_UNITS:
+        p = subprocess.run(["systemctl", "is-active", u + ".service"], stdout=subprocess.PIPE,
+                           stderr=subprocess.DEVNULL, text=True, timeout=15)
+        state = p.stdout.strip()
+        if state in ("active", "activating", "reloading", "deactivating", "refreshing"):
+            return u
+        if state not in ("inactive", "failed", "unknown"):
+            raise Fail("can't tell whether %s is running (%s)" % (u, state or "no answer from systemd"))
+    return None
 
 
 # ---- what apt would do ----------------------------------------------------------------------------
 
-def simulate():
-    """[{name, old, new, origin}] for a full upgrade; refuses any removal."""
-    p = run(["apt-get", "-s", "-q"] + APT_CONF + ["dist-upgrade"], timeout=300)
+def apt_opts(frozen=False, held=False):
+    o = []
+    if frozen:
+        o += ["-o", "Dir::State::Lists=" + LISTS, "-o", "Dir::Cache::pkgcache=",
+              "-o", "Dir::Cache::srcpkgcache="]
+    if held:
+        o += ["-o", "Dir::Etc::PreferencesParts=" + PREFS]
+    return o + APT_CONF
+
+
+def parse_sim(text):
     inst, removes = [], []
-    for line in p.stdout.splitlines():
-        m = re.match(r"^Inst (\S+) (?:\[(\S+)\] )?\((\S+) (.*?)\)", line)
+    for line in text.splitlines():
+        m = re.match(r"^Inst (\S+) (?:\[(\S+)\] )?\((\S+) (.*?)(?: \[(\S+)\])?\)", line)
         if m:
-            inst.append({"name": m.group(1), "old": m.group(2), "new": m.group(3), "origin": m.group(4)})
-        m = re.match(r"^Remv (\S+)", line)
+            inst.append({"name": m.group(1), "old": m.group(2), "new": m.group(3),
+                         "origin": m.group(4), "arch": m.group(5)})
+        m = re.match(r"^(?:Remv|Purg) (\S+)", line)
         if m:
             removes.append(m.group(1))
+    return inst, removes
+
+
+def simulate(opts, extra=(), what=("dist-upgrade",)):
+    p = run(["apt-get", "-s", "-q"] + list(extra) + opts + list(what), timeout=300)
+    inst, removes = parse_sim(p.stdout)
     if removes:
         raise Fail("the update would remove packages (%s); not doing it" % ", ".join(removes))
     return inst
 
 
-def needs_new_image(inst):
-    """Planned modules packages built for another kernel than this card's: only a new image helps."""
-    kernel = boot_abi().get("kernel")
-    return [i["name"] for i in inst if i["name"].startswith("handtop-modules-")
-            and kernel and not i["name"].endswith("-" + kernel)]
+def is_handtop(name):
+    return name == "handtop" or name.startswith("handtop-")
+
+
+def write_held_prefs():
+    """Preferences for a Debian-only plan: Handtop's packages and FFmpeg build stay where they are."""
+    rmtree(PREFS)
+    os.makedirs(PREFS)
+    if os.path.isdir("/etc/apt/preferences.d"):
+        for f in os.listdir("/etc/apt/preferences.d"):
+            src = os.path.join("/etc/apt/preferences.d", f)
+            if os.path.isfile(src):
+                shutil.copy(src, os.path.join(PREFS, f))
+    # apt uses the first matching pin and reads the files in name order: this one must come first.
+    write_atomic(PREFS + "/00-handtop-new-image", (
+        "# handtop-update: this card needs a new image for the next Handtop release; until then\n"
+        "# only Debian's updates are installed.\n"
+        "Package: handtop handtop-* %s %s\nPin: release o=Handtop\nPin-Priority: -1\n")
+        % (" ".join(FFMPEG_FAMILY), " ".join(FFMPEG_DEV)))
+
+
+def modules_mismatch(inst, opts):
+    """Modules packages in the plan whose kernel (Handtop-Kernel-SHA256) isn't this card's."""
+    want = boot_abi().get("kernel_sha256")
+    bad = []
+    for i in inst:
+        if not i["name"].startswith("handtop-modules-"):
+            continue
+        tmp = STATE + "/modcheck"
+        rmtree(tmp)
+        os.makedirs(tmp)
+        stage_for_apt(tmp)
+        try:
+            run(["apt-get", "download", "-q"] + opts + ["%s=%s" % (i["name"], i["new"])], timeout=600, cwd=tmp)
+            debs = [f for f in os.listdir(tmp) if f.endswith(".deb")]
+            have = run(["dpkg-deb", "-f", os.path.join(tmp, debs[0]), "Handtop-Kernel-SHA256"],
+                       timeout=60).stdout.strip() if debs else ""
+        finally:
+            rmtree(tmp)
+        if not want or not have or have != want:
+            bad.append(i["name"])
+    return bad
+
+
+def plan_transaction(frozen):
+    """(updates, handtop_held, new_image_packages)."""
+    inst = simulate(apt_opts(frozen))
+    bad = modules_mismatch(inst, apt_opts(frozen))
+    if not bad:
+        return inst, False, []
+    write_held_prefs()
+    return simulate(apt_opts(frozen, held=True)), True, bad
+
+
+def ffmpeg_pin_effective():
+    """Debian's FFmpeg is at -1 (Handtop's pin works): only then may v0.4.x's holds go."""
+    p = run(["apt-cache", "policy", "ffmpeg"], timeout=60, check=False)
+    prios = [int(m.group(1)) for m in re.finditer(r"^\s+(-?\d+) \S*debian\.org", p.stdout, re.M)]
+    return all(x == -1 for x in prios)
+
+
+def release_ffmpeg_holds():
+    held = set(run(["apt-mark", "showhold"], timeout=60).stdout.split())
+    rel = [p for p in FFMPEG_FAMILY if p in held]
+    if not rel:
+        return None
+    if not ffmpeg_pin_effective():
+        return "FFmpeg stays held: Handtop's pin is not in effect (%s)" % "/etc/apt/preferences.d/handtop.pref"
+    run(["apt-mark", "unhold"] + rel, timeout=60)
+    return None
 
 
 def cmd_check():
     with lock():
-        release_ffmpeg_holds()
-        p = run(["apt-get", "update", "-q"], timeout=600, check=False)
+        warnings = [w for w in [release_ffmpeg_holds()] if w]
+        p = run(["apt-get", "update", "-q", "--error-on=any"], timeout=600, check=False)
         problems = [l for l in p.stdout.splitlines() if l.startswith(("E:", "W:", "Err:"))]
         if p.returncode != 0:
-            out({"ok": False, "error": "could not refresh the package lists", "details": problems})
+            write_json(CHECKED, {"ok": False, "time": int(time.time())})
+            out({"ok": False, "error": "could not refresh every package list", "details": problems})
             return 1
-        try:
-            inst = simulate()
-        except Fail as e:
-            out({"ok": False, "error": str(e), "details": problems})
-            return 1
-        handtop = [i for i in inst if "Handtop" in i["origin"] or i["name"].startswith("handtop")]
+        write_json(CHECKED, {"ok": True, "time": int(time.time())})
+        inst, held, bad = plan_transaction(frozen=False)
+        handtop = [i for i in inst if "Handtop" in i["origin"] or is_handtop(i["name"])]
         out({"ok": True, "updates": inst, "handtop": handtop, "debian": len(inst) - len(handtop),
-             "warnings": problems, "new_image_needed": needs_new_image(inst)})
+             "warnings": warnings + problems, "new_image_needed": bad, "handtop_held": held})
         return 0
 
 
 # ---- download -------------------------------------------------------------------------------------
 
-def deb_prefix(name, version):
-    # apt's file name: name_version_arch.deb with the epoch's colon written as %3a
-    return "%s_%s_" % (name.split(":")[0], version.replace(":", "%3a"))
-
-
-def cache_file(name, version, where=CACHE):
-    prefix = deb_prefix(name, version)
+def stage_for_apt(path):
+    """apt-get download keeps its network sandbox only where _apt can write."""
     try:
-        for f in os.listdir(where):
-            if f.startswith(prefix) and f.endswith(".deb"):
-                return os.path.join(where, f)
-    except OSError:
+        import pwd
+        os.chown(path, pwd.getpwnam("_apt").pw_uid, 0)
+    except (KeyError, OSError):
         pass
+
+
+def freeze_lists():
+    tmp = LISTS + ".new"
+    rmtree(tmp)
+    os.makedirs(tmp + "/partial")
+    src = "/var/lib/apt/lists"
+    for f in os.listdir(src):
+        p = os.path.join(src, f)
+        if os.path.isfile(p) and not os.path.islink(p) and f != "lock":
+            os.link(p, os.path.join(tmp, f))   # apt replaces lists by rename: the link keeps this copy
+    rmtree(LISTS)
+    os.rename(tmp, LISTS)
+
+
+def archive_info(opts, held):
+    """{(name, version, arch): {file, size, hash}} for every archive of the plan, from the signed
+    indexes (asked against an empty archive directory, so already-downloaded files count too)."""
+    rmtree(EMPTY)
+    os.makedirs(EMPTY + "/partial")
+    p = run(["apt-get", "-qq", "--print-uris", "-o", "Dir::Cache::archives=" + EMPTY] + opts
+            + ["dist-upgrade"], timeout=300)
+    rmtree(EMPTY)
+    res = {}
+    from urllib.parse import unquote
+    for line in p.stdout.splitlines():
+        m = re.match(r"^'(\S+)' (\S+) (\d+) (\S+)", line)
+        if not m:
+            continue
+        fname = m.group(2)
+        parts = fname[:-4].split("_") if fname.endswith(".deb") else []
+        if len(parts) != 3:
+            continue
+        algo, _, digest = m.group(4).partition(":")
+        res[(parts[0], unquote(parts[1]), parts[2])] = {"file": fname, "size": int(m.group(3)),
+                                                         "algo": algo.lower(), "hash": digest.lower()}
+    return res
+
+
+def file_ok(path, algo, digest):
+    if not os.path.isfile(path):
+        return False
+    if algo == "sha256":
+        return sha256(path) == digest
+    h = hashlib.new({"md5sum": "md5", "sha1": "sha1", "sha512": "sha512"}.get(algo, algo))
+    with open(path, "rb") as f:
+        for b in iter(lambda: f.read(1 << 20), b""):
+            h.update(b)
+    return h.hexdigest() == digest
+
+
+def verify_files(packages, where):
+    bad = [p["name"] for p in packages if not file_ok(os.path.join(where, p["file"]), p["algo"], p["hash"])]
+    if bad:
+        raise Fail("downloaded files missing or damaged: %s; download again" % ", ".join(bad))
+
+
+def rollback_set(have):
+    """Packages to keep for going back: Handtop's own (but the keyring) and Handtop's FFmpeg build."""
+    names = [n for n in have if is_handtop(n) and n not in NEVER_ROLLED_BACK]
+    names += [n for n in FFMPEG_FAMILY + FFMPEG_DEV if n in have and "+handtop" in have[n]]
+    return sorted(names)
+
+
+def stage_previous(plan_id, opts):
+    """Download the installed release into previous.next (previous/ stays as it is until the
+    install starts). Returns its manifest."""
+    have = installed()
+    names = rollback_set(have)
+    tmp = NEXT + ".tmp"
+    rmtree(tmp)
+    os.makedirs(tmp)
+    stage_for_apt(tmp)
+    want = ["%s=%s" % (n, have[n]) for n in names]
+    p = run(["apt-get", "download", "-q"] + opts + want, timeout=1800, check=False, cwd=tmp) if want else None
+    os.chown(tmp, 0, 0)
+    pkgs, missing = [], []
+    for n in names:
+        f = [x for x in os.listdir(tmp) if x.startswith(n + "_") and x.endswith(".deb")]
+        if not f:
+            missing.append(n)
+            continue
+        path = os.path.join(tmp, f[0])
+        os.chown(path, 0, 0)
+        ver = run(["dpkg-deb", "-f", path, "Version"], timeout=60).stdout.strip()
+        if ver != have[n]:
+            missing.append(n)
+            continue
+        pkgs.append({"name": n, "version": ver, "file": f[0], "algo": "sha256", "hash": sha256(path)})
+    manifest = {"for_plan": plan_id, "release": have.get("handtop"), "packages": pkgs,
+                "complete": not missing and bool(pkgs), "missing": missing,
+                "warnings": [l for l in (p.stdout.splitlines() if p else []) if l.startswith(("W:", "E:"))]}
+    write_json(tmp + "/manifest.json", manifest)
+    rmtree(NEXT)
+    os.rename(tmp, NEXT)
+    fsync_dir(STATE)
+    return manifest
+
+
+# ---- going back: trial (changes nothing) ----------------------------------------------------------
+
+def _vcmp(a, op, b):
+    try:
+        import apt_pkg
+        apt_pkg.init_system()
+        c = apt_pkg.version_compare(a, b)
+    except ImportError:
+        if subprocess.run(["dpkg", "--compare-versions", a, "eq", b]).returncode == 0:
+            c = 0
+        else:
+            c = -1 if subprocess.run(["dpkg", "--compare-versions", a, "lt", b]).returncode == 0 else 1
+    return {"<<": c < 0, "<=": c <= 0, "=": c == 0, ">=": c >= 0, ">>": c > 0}[op]
+
+
+def _deps(text):
+    res = []
+    for group in filter(None, (g.strip() for g in (text or "").split(","))):
+        alts = []
+        for a in group.split("|"):
+            m = re.match(r"^\s*([a-z0-9][a-z0-9+.-]*)(?::\S+)?\s*(?:\(\s*(<<|<=|=|>=|>>)\s*([^)\s]+)\s*\))?", a.strip())
+            if m:
+                alts.append((m.group(1), m.group(2), m.group(3)))
+        res.append(alts)
+    return res
+
+
+def _fields(deb):
+    p = run(["dpkg-deb", "-f", deb, "Package", "Version", "Depends", "Pre-Depends", "Provides"], timeout=60)
+    f = dict(re.findall(r"^(\S+): (.*)$", p.stdout, re.M))
+    return f.get("Package"), f.get("Version"), ", ".join(x for x in (f.get("Depends"), f.get("Pre-Depends")) if x), f.get("Provides", "")
+
+
+def trial_rollback(plan, manifest):
+    """Would installing the kept release on top of the planned state satisfy every dependency?
+    Static check of Depends / Pre-Depends; returns None or the reason."""
+    if not manifest or not manifest.get("complete"):
+        return "the release to go back to isn't complete (%s)" % ", ".join((manifest or {}).get("missing", []) or ["none kept"])
+    p = run(["dpkg-query", "-W", "-f", "${binary:Package}\\t${Version}\\t${Depends}, ${Pre-Depends}\\t${Provides}\\t${db:Status-Abbrev}\\n"], timeout=120)
+    state = {}
+    for line in p.stdout.splitlines():
+        n, v, d, pr, st = line.split("\t")
+        if len(st) > 1 and st[1] == "i":
+            state[n.split(":")[0]] = (v, d, pr)
+    for i in plan["packages"]:                                   # after the update
+        state[i["name"].split(":")[0]] = _fields(os.path.join(CACHE, i["file"]))[1:]
+    back = set()
+    for i in manifest["packages"]:                               # after going back
+        n, v, d, pr = _fields(os.path.join(NEXT, i["file"]))
+        state[n] = (v, d, pr)
+        back.add(n)
+    provides = {}
+    for n, (v, d, pr) in state.items():
+        for name, _, pv in sum(_deps(pr), []):
+            provides.setdefault(name, []).append(pv or v)
+    for n, (v, d, pr) in state.items():
+        deps = _deps(d)
+        if n not in back and not any(a[0] in back for g in deps for a in g):
+            continue
+        for g in deps:
+            ok = False
+            for name, op, ver in g:
+                if name in state and (not op or _vcmp(state[name][0], op, ver)):
+                    ok = True
+                elif name in provides and (not op or any(_vcmp(x, op, ver) for x in provides[name])):
+                    ok = True
+                if ok:
+                    break
+            if not ok:
+                return "after going back, %s would need %s" % (n, " | ".join(
+                    "%s%s" % (a[0], " (%s %s)" % (a[1], a[2]) if a[1] else "") for a in g))
     return None
-
-
-def free_mib(path):
-    st = os.statvfs(path)
-    return st.f_bavail * st.f_frsize // (1024 * 1024)
 
 
 def cmd_download():
     with lock():
-        release_ffmpeg_holds()
-        inst = simulate()
+        if our_marker():
+            raise Fail("an update is scheduled: cancel it first")
+        chk = read_json(CHECKED) or {}
+        if not chk.get("ok") or time.time() - chk.get("time", 0) > CHECK_MAX_AGE:
+            raise Fail("check for updates first")
+        hold_warning = release_ffmpeg_holds()
+        freeze_lists()
+        inst, held, bad = plan_transaction(frozen=True)
         if not inst:
-            out({"ok": True, "nothing": True})
+            out({"ok": True, "nothing": True, "new_image_needed": bad})
             return 0
-        bad = needs_new_image(inst)
-        if bad:
-            raise Fail("this update needs a new image (%s)" % ", ".join(bad))
+        opts = apt_opts(True, held)
+        info = archive_info(opts, held)
+        pkgs = []
+        for i in inst:
+            name = i["name"].split(":")[0]
+            arch = i["arch"] or (i["name"].split(":")[1] if ":" in i["name"] else None)
+            key = next((k for k in info if k[0] == name and k[1] == i["new"] and (arch is None or k[2] == arch)), None)
+            if not key:
+                raise Fail("no archive information for %s %s" % (i["name"], i["new"]))
+            pkgs.append(dict(i, **info[key]))
+        total = sum(p["size"] for p in pkgs) / (1 << 20)
+        mb, inodes = free_space(STATE)
+        need = 3 * total + 300
+        if mb < need or inodes < 5000:
+            raise Fail("not enough free space: about %d MB needed, %d MB free" % (need, mb))
         os.makedirs(CACHE + "/partial", exist_ok=True)
-        uris = run(["apt-get", "-qq", "--print-uris", "-o", "Dir::Cache::archives=" + CACHE]
-                   + APT_CONF + ["dist-upgrade"], timeout=300).stdout
-        need = sum(int(l.split()[2]) for l in uris.splitlines() if l.startswith("'")) / (1024 * 1024)
-        # downloads + unpacked files + dpkg's copies of replaced files, roughly
-        if free_mib(STATE) < 3 * need + 300:
-            raise Fail("not enough free space: about %d MB needed, %d MB free"
-                       % (3 * need + 300, free_mib(STATE)))
-        run(["apt-get", "-q", "-y", "-o", "Dir::Cache::archives=" + CACHE] + APT_CONF
+        stage_for_apt(CACHE + "/partial")
+        for p in pkgs:      # apt reuses a cached file of the right size even when it is damaged
+            f = os.path.join(CACHE, p["file"])
+            if os.path.exists(f) and not file_ok(f, p["algo"], p["hash"]):
+                os.unlink(f)
+        run(["apt-get", "-q", "-y", "--no-remove", "-o", "Dir::Cache::archives=" + CACHE] + opts
             + ["--download-only", "dist-upgrade"], timeout=3600)
-        missing = [i["name"] for i in inst if not cache_file(i["name"], i["new"])]
-        if missing:
-            raise Fail("download incomplete: %s" % ", ".join(missing))
-        kept = keep_previous()
-        write_atomic(PLAN, json.dumps({"kind": "update", "created": int(time.time()),
-                                       "packages": inst}, indent=1))
-        out({"ok": True, "packages": len(inst), "download_mb": round(need, 1), "previous_kept": kept})
+        verify_files(pkgs, CACHE)
+        autos = set(run(["apt-mark", "showauto"], timeout=60).stdout.split())
+        plan = {"id": uuid.uuid4().hex[:12], "kind": "update", "created": int(time.time()),
+                "packages": pkgs, "handtop_held": held, "new_image_needed": bad,
+                "size_mb": round(total, 1),
+                # installed as dependencies (or new ones a dist-upgrade pulls in): auto after the install
+                "auto": sorted(p["name"] for p in pkgs if p["name"] in autos or not p["old"])}
+        rmtree(NEXT)
+        if any(is_handtop(p["name"]) or p["name"] in FFMPEG_FAMILY + FFMPEG_DEV for p in pkgs):
+            # Plain apt options: the pins of a Debian-only plan must not stop this download.
+            manifest = stage_previous(plan["id"], apt_opts(True))
+            reason = None if os.path.exists(NO_PREDECESSOR) else trial_rollback(plan, manifest)
+            plan["rollback"] = {"needed": True, "possible": reason is None, "reason": reason,
+                                "no_predecessor": os.path.exists(NO_PREDECESSOR)}
+        else:       # Debian's packages only: going back to the kept Handtop release still works
+            plan["rollback"] = {"needed": False, "possible": True, "reason": None, "no_predecessor": False}
+        write_json(PLAN, plan)
+        unlink(SCHEDULE)
+        out({"ok": True, "plan": plan["id"], "packages": len(pkgs), "download_mb": round(total, 1),
+             "handtop_held": held, "new_image_needed": bad, "rollback": plan["rollback"],
+             "warnings": [w for w in [hold_warning] if w]})
         return 0
 
 
-def keep_previous():
-    """Download the installed Handtop packages again, for handtop=previous. False if not possible."""
-    want = ["%s=%s" % (n, v) for n, v in installed().items() if n == "handtop" or n.startswith("handtop-")]
-    tmp = PREVIOUS + ".new"
-    shutil.rmtree(tmp, ignore_errors=True)
-    os.makedirs(tmp)
-    p = run(["apt-get", "download", "-q"] + want, timeout=1800, check=False, cwd=tmp)
-    if p.returncode != 0:
-        shutil.rmtree(tmp, ignore_errors=True)
-        return False          # an older copy, if any, stays
-    shutil.rmtree(PREVIOUS, ignore_errors=True)
-    os.rename(tmp, PREVIOUS)
-    return True
-
-
-# ---- schedule / cancel / status -------------------------------------------------------------------
-
-def battery():
-    def rd(p):
-        try:
-            return open(p).read().strip()
-        except OSError:
-            return None
-    cap = rd("/sys/class/power_supply/battery/capacity")
-    online = rd("/sys/class/power_supply/axp20x-usb/online")
-    return (int(cap) if cap and cap.isdigit() else None), online == "1"
-
-
-def controller_mode_active():
-    for u in CONTROLLER_UNITS:
-        p = subprocess.run(["systemctl", "is-active", u + ".service"], stdout=subprocess.PIPE,
-                           stderr=subprocess.DEVNULL, text=True, timeout=10)
-        if p.stdout.strip() in ("active", "activating", "reloading", "deactivating"):
-            return u
-    return None
-
-
-def plan_missing(plan):
-    if plan.get("kind") == "recovery":
-        return [f for f in plan["files"] if not os.path.exists(f)]
-    return [i["name"] for i in plan["packages"] if not cache_file(i["name"], i["new"])]
-
+# ---- schedule / cancel / channel / status ---------------------------------------------------------
 
 def cmd_schedule(after="restart"):
     if after not in ("restart", "poweroff"):
         raise Fail("schedule: restart or poweroff")
     with lock():
         plan = read_json(PLAN)
-        if not plan:
+        if not plan or plan.get("kind") != "update":
             raise Fail("nothing downloaded")
-        missing = plan_missing(plan)
-        if missing:
-            raise Fail("downloaded files missing (%s): download again" % ", ".join(missing))
-        cap, charging = battery()
-        if not charging and cap is not None and cap < MIN_BATTERY:   # None: no battery (mains)
-            raise Fail("battery at %s%%: connect the charger or charge to %d%% first" % (cap, MIN_BATTERY))
+        mk = our_marker()
+        if mk is False:
+            raise Fail("another offline update is scheduled (/system-update); not touching it")
+        sched = read_json(SCHEDULE) or {}
+        if mk and sched.get("plan") == plan["id"]:
+            if sched.get("after") != after:
+                write_json(SCHEDULE, dict(sched, after=after))
+            out({"ok": True, "restart": True, "after": after, "plan": plan["id"]})
+            return 0
+        if not plan["rollback"]["possible"] and not plan["rollback"]["no_predecessor"]:
+            raise Fail("going back would not be possible: %s" % plan["rollback"]["reason"])
+        verify_files(plan["packages"], CACHE)
+        mb, _ = free_space(STATE)
+        if mb < 2 * plan["size_mb"] + 200:
+            raise Fail("not enough free space to install: %d MB free" % mb)
+        why = power_ok(MIN_BATTERY)
+        if why:
+            raise Fail("%s: connect the charger or charge to %d%% first" % (why, MIN_BATTERY))
         active = controller_mode_active()
         if active:
             raise Fail("a controller mode is running (%s): end it first" % active)
-        write_atomic(ATTEMPTS, "0\n")
-        write_atomic(AFTER, after + "\n")
+        en = subprocess.run(["systemctl", "is-enabled", APPLY_UNIT], stdout=subprocess.PIPE,
+                            stderr=subprocess.DEVNULL, text=True, timeout=15).stdout.strip()
+        if en != "enabled":
+            raise Fail("%s is not enabled (%s): the update could not be installed" % (APPLY_UNIT, en or "?"))
+        write_json(SCHEDULE, {"plan": plan["id"], "after": after, "attempts": 0, "deferrals": 0})
         set_marker()
-        out({"ok": True, "restart": True, "after": after})
+        out({"ok": True, "restart": True, "after": after, "plan": plan["id"]})
         return 0
+
+
+def forget_plan():
+    remove_marker()
+    for p in (PLAN, SCHEDULE):
+        unlink(p)
+    for d in (CACHE, LISTS, PREFS, NEXT):
+        rmtree(d)
 
 
 def cmd_cancel():
     with lock():
-        remove_marker()
-        for p in (PLAN, ATTEMPTS, AFTER):
-            if os.path.exists(p):
-                os.unlink(p)
-        shutil.rmtree(CACHE, ignore_errors=True)
+        if our_marker() is False:
+            raise Fail("the scheduled offline update is not Handtop's; not touching it")
+        forget_plan()
         out({"ok": True})
         return 0
 
 
 def cmd_channel(which=None):
-    """testing: an extra source for trixie-testing in a file of its own (handtop-keyring's
-    handtop.sources stays untouched, so dpkg never has an edited conffile to keep). Packages from
-    testing stay installed after 'channel stable' until stable has the same or newer versions."""
+    """testing: an extra source for trixie-testing in a file of its own (handtop.sources stays
+    untouched). Switching cancels a downloaded or scheduled update."""
     if which not in ("stable", "testing"):
         raise Fail("channel: stable or testing")
     with lock():
+        if our_marker() is False:
+            raise Fail("another offline update is scheduled (/system-update)")
+        cancelled = os.path.exists(PLAN)
+        forget_plan()
+        unlink(CHECKED)
         if which == "testing":
-            keep = [l for l in open(MAIN_SOURCES).read().splitlines()
-                    if re.match(r"^(Types|URIs|Components|Signed-By):", l)]
-            write_atomic(CHANNEL_SOURCES, "# Written by 'handtop-update channel testing' (Update app); "
-                         "'channel stable' removes it.\n" + "\n".join(keep) + "\nSuites: trixie-testing\n")
-            os.chmod(CHANNEL_SOURCES, 0o644)
-        elif os.path.exists(CHANNEL_SOURCES):
-            os.unlink(CHANNEL_SOURCES)
-        out({"ok": True, "channel": which})
+            write_atomic(CHANNEL_SOURCES, TESTING_STANZA)
+        else:
+            unlink(CHANNEL_SOURCES)
+        out({"ok": True, "channel": which, "cancelled_update": cancelled})
         return 0
+
+
+def joypad_override_active():
+    k = boot_abi().get("kernel") or os.uname().release
+    return os.path.exists("/usr/lib/modules/%s/updates/handtop-recovery/rocknix-singleadc-joypad.ko" % k)
 
 
 def cmd_status():
     plan = read_json(PLAN)
+    sched = read_json(SCHEDULE) or {}
+    prev = read_json(PREVIOUS + "/manifest.json")
     out({"downloaded": bool(plan), "kind": plan.get("kind") if plan else None,
-         "packages": len(plan["packages"]) if plan else 0, "scheduled": os.path.islink(MARKER),
-         "after": after_choice() if os.path.islink(MARKER) else None,
-         "previous_kept": os.path.isdir(PREVIOUS), "last_result": read_json(RESULT),
-         "joypad_override": joypad_override_active(),
+         "plan": plan.get("id") if plan else None, "packages": len(plan["packages"]) if plan else 0,
+         "rollback": plan.get("rollback") if plan else None,
+         "scheduled": bool(our_marker()) and sched.get("plan") == (plan or {}).get("id"),
+         "after": sched.get("after") if our_marker() else None,
+         "foreign_offline_update": our_marker() is False,
+         "previous_release": prev.get("release") if prev and prev.get("complete") else None,
+         "last_result": read_json(RESULT), "joypad_override": joypad_override_active(),
          "channel": "testing" if os.path.exists(CHANNEL_SOURCES) else "stable",
          "reboot_required": os.path.exists("/run/reboot-required")})
     return 0
 
 
-# ---- logs -------------------------------------------------------------------------------------------
+# ---- the release kept for going back ----------------------------------------------------------------
 
-def console(msg):
-    line = "Handtop: %s" % msg
-    print(line, flush=True)
-    try:
-        with open("/dev/tty1", "w") as t:
-            t.write(line + "\n")
-    except OSError:
-        pass
-
-
-def open_log(kind):
-    os.makedirs(LOGDIR, exist_ok=True)
-    path = os.path.join(LOGDIR, "%s-%s.log" % (kind, time.strftime("%Y%m%d-%H%M%S")))
-    f = open(path, "a")
-
-    def log(text):
-        f.write(time.strftime("%H:%M:%S ") + (text if text.endswith("\n") else text + "\n"))
-        f.flush()
-    return path, log
+def repair_previous():
+    """Finish promote_previous() after a cut: previous -> previous.old, previous.next -> previous."""
+    if not os.path.isdir(PREVIOUS):
+        if os.path.isdir(NEXT) and os.path.isdir(OLD):
+            os.rename(NEXT, PREVIOUS)
+        elif os.path.isdir(OLD):
+            os.rename(OLD, PREVIOUS)
+    if os.path.isdir(PREVIOUS) and os.path.isdir(OLD):
+        rmtree(OLD)
+    fsync_dir(STATE)
 
 
-def copy_log_to_fat(path, kind):
-    """A short copy on the boot partition (logs\\update-NNNN.txt), readable from any PC; 5 kept."""
-    if not os.path.ismount(FAT) or not os.access(FAT, os.W_OK):
+def promote_previous(plan_id):
+    m = read_json(NEXT + "/manifest.json")
+    if not m or m.get("for_plan") != plan_id:
         return
-    try:
-        os.makedirs(FAT + "/logs", exist_ok=True)
-        data = open(path, errors="replace").read()[-60000:].replace("\r", "").replace("\n", "\r\n")
-        old = sorted(f for f in os.listdir(FAT + "/logs") if re.match(kind + r"-\d{4}\.txt$", f))
-        n = int(old[-1][len(kind) + 1:len(kind) + 5]) + 1 if old else 1
-        write_atomic("%s/logs/%s-%04d.txt" % (FAT, kind, n % 10000), data)
-        for f in old[:-4]:
-            os.unlink(FAT + "/logs/" + f)
-    except (OSError, ValueError):
-        pass
+    if os.path.isdir(PREVIOUS):
+        rmtree(OLD)
+        os.rename(PREVIOUS, OLD)
+    os.rename(NEXT, PREVIOUS)
+    fsync_dir(STATE)
+    rmtree(OLD)
 
 
-# ---- apply (maintenance boot) ---------------------------------------------------------------------
+# ---- maintenance boot -----------------------------------------------------------------------------
 
 def policy_rc(on):
-    """A policy-rc.d denying service starts; one that was already there (not ours) is left alone."""
+    """A policy-rc.d denying service starts for the maintenance boot; an administrator's own is set
+    aside and put back. boot-check cleans up after a killed run."""
     if on:
-        if os.path.exists(POLICY_RC):
-            return
-        with open(POLICY_RC, "w") as f:
-            f.write("#!/bin/sh\n%s: no service starts during the maintenance boot\nexit 101\n" % POLICY_TAG)
-        os.chmod(POLICY_RC, 0o755)
-    elif os.path.exists(POLICY_RC) and POLICY_TAG in open(POLICY_RC).read():
-        os.unlink(POLICY_RC)
-
-
-def install_plan(plan, log):
-    # After a power cut some packages may be unpacked at the new version while the siblings they
-    # depend on are still old: this pass then fails, and installing the rest of the plan below is
-    # what repairs it. So it is not fatal here; the pass after the install is.
-    run(["dpkg"] + CONF + ["--configure", "-a"], timeout=1800, log=log, check=False)
-    if plan.get("kind") == "recovery":
-        run(["dpkg"] + CONF + ["-i"] + plan["files"], timeout=3600, log=log)
+        if os.path.lexists(POLICY_RC) and not ours_policy():
+            os.rename(POLICY_RC, POLICY_SAVED)
+        write_atomic(POLICY_RC, POLICY_BODY, 0o755)
     else:
-        # Packages left half-unpacked by a power cut are unpacked again by this install.
-        want = ["%s=%s" % (i["name"], i["new"]) for i in plan["packages"]]
-        run(["apt-get", "-q", "-y", "--no-download", "--allow-downgrades", "--allow-change-held-packages",
-             "-o", "Dir::Cache::archives=" + CACHE] + APT_CONF + ["install"] + want, timeout=5400, log=log)
-    run(["dpkg"] + CONF + ["--configure", "-a"], timeout=1800, log=log)
+        if ours_policy():
+            os.unlink(POLICY_RC)
+        if os.path.lexists(POLICY_SAVED) and not os.path.lexists(POLICY_RC):
+            os.rename(POLICY_SAVED, POLICY_RC)
+
+
+def ours_policy():
+    try:
+        with open(POLICY_RC) as f:
+            return f.read() == POLICY_BODY
+    except OSError:
+        return False
+
+
+class Budget:
+    def __init__(self, seconds):
+        self.end = time.time() + seconds
+
+    def __call__(self, want):
+        left = self.end - time.time() - 120
+        if left < 60:
+            raise Fail("out of time for this maintenance boot")
+        return min(want, left)
+
+
+def plan_targets(plan):
+    return ["%s=%s" % (p["name"], p["new"]) for p in plan["packages"]]
+
+
+def check_against_plan(plan, opts):
+    """What apt would do now must be (part of) the plan: same packages, same versions, no removals.
+    The plan's versions are named explicitly: after a power cut that is what lets apt repair the
+    half-installed set (a plain dist-upgrade refuses to start then)."""
+    inst = simulate(opts, ["--no-download", "--no-remove", "-o", "Dir::Cache::archives=" + CACHE],
+                    ["install"] + plan_targets(plan))
+    want = {(p["name"], p["new"]) for p in plan["packages"]}
+    extra = ["%s %s" % (i["name"], i["new"]) for i in inst if (i["name"], i["new"]) not in want]
+    if extra:
+        raise Drift("this card changed since the download (%s); download the update again" % ", ".join(extra))
+
+
+def install_update(plan, log, budget):
+    opts = apt_opts(True, plan.get("handtop_held"))
+    # After a power cut, packages unpacked at the new version may wait for siblings still at the old
+    # one: this pass then fails, and the install below completes the set.
+    run(["dpkg"] + CONF + ["--configure", "-a"], timeout=budget(1200), log=log, check=False)
+    check_against_plan(plan, opts)
+    run(["apt-get", "-q", "-y", "--no-download", "--no-remove", "-o", "Dir::Cache::archives=" + CACHE]
+        + opts + ["install"] + plan_targets(plan), timeout=budget(3600), log=log)
+    run(["dpkg"] + CONF + ["--configure", "-a"], timeout=budget(1200), log=log)
+    # Naming packages makes apt mark them manually installed: give back the marks of the plan
+    # (dependencies stay removable by autoremove).
+    if plan.get("auto"):
+        run(["apt-mark", "auto"] + plan["auto"], timeout=120, log=log)
     have = installed()
-    wrong = [i["name"] for i in plan["packages"] if have.get(i["name"]) != i["new"]]
+    wrong = [p["name"] for p in plan["packages"] if have.get(p["name"]) != p["new"]]
     if wrong:
         raise Fail("not at the planned version afterwards: %s" % ", ".join(wrong))
 
 
-def after_choice():
-    try:
-        return "poweroff" if open(AFTER).read().strip() == "poweroff" else "restart"
-    except OSError:
-        return "restart"
-
-
-def end_apply(ok, message, logpath, resume=False):
-    """Record the result, then restart or power off as chosen. resume: keep the plan and the
-    marker and power off (low battery); the next start continues."""
-    policy_rc(False)
-    action = "poweroff" if resume or after_choice() == "poweroff" else "reboot"
-    if not resume:
-        remove_marker()
-        for p in (PLAN, ATTEMPTS, AFTER):
-            if os.path.exists(p):
-                os.unlink(p)
-        if ok:
-            shutil.rmtree(CACHE, ignore_errors=True)
-    write_atomic(RESULT, json.dumps({"ok": ok, "message": message, "time": int(time.time()),
-                                     "log": logpath}))
-    copy_log_to_fat(logpath, "update")
-    console(message)
-    subprocess.run(["sync"], timeout=120)
-    power(action)
+def install_recovery(plan, log, budget):
+    run(["dpkg"] + CONF + ["--configure", "-a"], timeout=budget(1200), log=log, check=False)
+    files = [os.path.join(PREVIOUS, p["file"]) for p in plan["packages"]]
+    if files:
+        run(["dpkg"] + CONF + ["-i"] + files, timeout=budget(3600), log=log)
+    if plan.get("remove"):
+        run(["dpkg", "--remove"] + plan["remove"], timeout=budget(1200), log=log)
+    run(["dpkg"] + CONF + ["--configure", "-a"], timeout=budget(1200), log=log)
+    have = installed()
+    wrong = [p["name"] for p in plan["packages"] if have.get(p["name"]) != p["version"]]
+    wrong += [n for n in plan.get("remove", []) if n in have]
+    if wrong:
+        raise Fail("not as planned afterwards: %s" % ", ".join(wrong))
 
 
 def power(action):
+    """Request a restart or power-off; if systemd refuses, force it (everything is synced)."""
     if NO_POWER_ACTION:
         print("handtop-update: would %s now" % action, flush=True)
         return
-    # Queued while the unit still runs, so the shutdown cancels system-update-cleanup.service.
-    subprocess.run(["systemctl", action, "--no-block"], timeout=30)
+    try:
+        subprocess.run(["sync"], timeout=120)
+    except subprocess.SubprocessError:
+        pass
+    try:
+        # Queued while the unit still runs, so the shutdown cancels system-update-cleanup.service.
+        if subprocess.run(["systemctl", action, "--no-block"], timeout=60).returncode == 0:
+            return
+    except subprocess.SubprocessError:
+        pass
+    subprocess.run(["systemctl", "--force", "--force", action], timeout=60)
+
+
+def finish(plan, ok, message, log, resume=False, extra=None):
+    """Result first (synced), then the FAT copy, then the plan's files and the marker, then the
+    restart / power-off. A cut anywhere repeats only these steps (apply() sees the result)."""
+    policy_rc(False)
+    sched = read_json(SCHEDULE) or {}
+    action = "poweroff" if resume or sched.get("after") == "poweroff" else "reboot"
+    res = dict(extra or {}, plan=(plan or {}).get("id"), ok=ok, message=message, time=int(time.time()),
+               log=log.path, action=action, final=not resume)
+    write_json(RESULT, res)
+    console(message)
+    log(message)
+    log.sync()
+    copy_log_to_fat(log.path, "update")
+    if not resume:
+        complete(ok)
+    power(action)
+
+
+def complete(ok):
+    remove_marker()
+    for p in (SCHEDULE, PLAN, INPROGRESS):
+        unlink(p)
+    for d in (LISTS, PREFS, NEXT) + ((CACHE,) if ok else ()):
+        rmtree(d)
+    fsync_dir(STATE)
 
 
 def cmd_apply():
-    if not os.path.islink(MARKER):
-        return 0
-    logpath, log = open_log("update")
-    plan = read_json(PLAN)
-    try:
-        attempts = int(open(ATTEMPTS).read().strip() or 0)
-    except (OSError, ValueError):
-        attempts = 0
-    if not plan:
-        end_apply(False, "no downloaded update found; starting normally", logpath)
-        return 1
-    if attempts >= MAX_ATTEMPTS:
-        end_apply(False, "update stopped after %d attempts; Update app and logs\\update-NNNN.txt "
-                  "have the details, recovery.txt can go back" % attempts, logpath)
-        return 1
-    cap, charging = battery()
-    if not charging and cap is not None and cap < STOP_BATTERY:
-        log("battery %s%%, no charger: powering off; continuing at the next start" % cap)
-        end_apply(False, "battery low: switching off. Charge, then switch on: the update continues.",
-                  logpath, resume=True)
-        return 1
-    # Counted before the work, so power cuts count too.
-    write_atomic(ATTEMPTS, "%d\n" % (attempts + 1))
-    what = "going back to the previous Handtop release" if plan.get("kind") == "recovery" else \
-        "installing %d updates" % len(plan["packages"])
-    console("%s. Do not switch off (attempt %d of %d)." % (what, attempts + 1, MAX_ATTEMPTS))
-    log("plan: %s" % json.dumps(plan))
-    policy_rc(True)
-    error = None
-    for tries in range(2):    # one in-place retry after a failure (dpkg --configure -a first)
+    if not our_marker():
+        return 0                      # no marker, or another updater's: not ours to act on
+    log = Log("update")
+    with lock(wait=60):
+        plan, sched, res = read_json(PLAN), read_json(SCHEDULE), read_json(RESULT) or {}
         try:
-            missing = plan_missing(plan)
-            if missing:
-                raise Fail("downloaded files missing: %s" % ", ".join(missing))
-            install_plan(plan, log)
-            release_ffmpeg_holds(log)
+            repair_previous()
+            if res.get("final") and plan and res.get("plan") == plan.get("id"):
+                log("the result was recorded before a cut: finishing")       # idempotent end
+                complete(res.get("ok"))
+                power(res.get("action", "reboot"))
+                return 0
+            if not plan or not sched or sched.get("plan") != plan.get("id"):
+                finish(plan, False, "no matching downloaded update found; starting normally", log)
+                return 1
+            attempts = sched.get("attempts")
+            if not isinstance(attempts, int) or attempts >= MAX_ATTEMPTS:
+                finish(plan, False, "update stopped after %s attempts; recovery.txt can go back" % attempts, log)
+                return 1
+            for _ in range(20):        # the fuel gauge can take a moment after power-on
+                why = power_ok(STOP_BATTERY)
+                if not why or "can't be read" not in why:
+                    break
+                time.sleep(1)
+            if why:
+                deferrals = sched.get("deferrals", 0) + 1
+                if deferrals > MAX_DEFERRALS:
+                    finish(plan, False, "update cancelled: %s at %d starts in a row" % (why, MAX_DEFERRALS), log)
+                    return 1
+                write_json(SCHEDULE, dict(sched, deferrals=deferrals))
+                finish(plan, None, "%s: switching off. Charge, then switch on: the update continues." % why,
+                       log, resume=True)
+                return 1
+            write_json(SCHEDULE, dict(sched, attempts=attempts + 1, deferrals=0))
+            write_json(INPROGRESS, {"plan": plan["id"], "attempt": attempts + 1, "started": int(time.time())})
+            budget = Budget(APPLY_BUDGET)
+            try:
+                if plan["kind"] == "update":
+                    verify_files(plan["packages"], CACHE)
+                    mb, _ = free_space(STATE)
+                    if mb < plan.get("size_mb", 0) + 150:
+                        raise Fail("not enough free space to install (%d MB free)" % mb)
+                    promote_previous(plan["id"])
+                else:
+                    verify_files(plan["packages"], PREVIOUS)
+            except Fail as e:
+                finish(plan, False, "update not installed: %s" % e, log)
+                return 1
+            console("%s. Do not switch off (attempt %d of %d)." % (
+                "Going back to the previous Handtop release" if plan["kind"] == "recovery"
+                else "Installing %d updates" % len(plan["packages"]), attempts + 1, MAX_ATTEMPTS))
+            log("plan: %s" % json.dumps(plan))
+            log.sync()
+            policy_rc(True)
             error = None
-            break
-        except (Fail, OSError, subprocess.SubprocessError) as e:
-            error = e
-            log("FAILED: %s" % e)
-    if error:
-        end_apply(False, "update failed: %s" % error, logpath)
-        return 1
-    end_apply(True, "update installed; " + ("switching off" if after_choice() == "poweroff" else "restarting"),
-              logpath)
-    return 0
+            for _ in range(2):                    # one retry in place
+                try:
+                    (install_update if plan["kind"] == "update" else install_recovery)(plan, log, budget)
+                    error = None
+                    break
+                except Drift as e:
+                    error = e
+                    break
+                except (Fail, OSError, subprocess.SubprocessError) as e:
+                    error = e
+                    log("FAILED: %s" % e)
+            if error:
+                finish(plan, False, "update failed: %s" % error, log)
+                return 1
+            extra = {}
+            if plan["kind"] == "update":
+                manifest = read_json(PREVIOUS + "/manifest.json")
+                if manifest and manifest.get("for_plan") == plan["id"]:
+                    extra["rollback_available"] = manifest.get("complete", False)
+            finish(plan, True, ("back to the previous Handtop release; " if plan["kind"] == "recovery"
+                                else "update installed; ") + (
+                "switching off" if (read_json(SCHEDULE) or {}).get("after") == "poweroff" else "restarting"),
+                log, extra=extra)
+            return 0
+        except Exception as e:               # noqa: BLE001 - always end with a result and a restart
+            log("INTERNAL ERROR: %r" % e)
+            finish(plan, False, "update failed (internal error: %s)" % e, log)
+            return 1
 
 
-# ---- recovery.txt (early boot) --------------------------------------------------------------------
+# ---- normal boot --------------------------------------------------------------------------------
 
-def read_recovery():
+def self_test_ok(path):
     try:
-        raw = open(RECOVERY_TXT, "rb").read().decode("utf-8", "replace")
-    except OSError:
-        return {}
-    res = {}
-    for line in raw.lstrip("﻿").splitlines():
-        line = line.split("#", 1)[0].strip()
-        k, eq, v = line.partition("=")
-        if eq:
-            res[k.strip().lower()] = v.strip().strip('"').lower()
-    return res
-
-
-def module_tree():
-    k = boot_abi().get("kernel") or os.uname().release
-    return "/usr/lib/modules/" + k
-
-
-def joypad_override_active():
-    return os.path.exists(os.path.join(module_tree(), JOYPAD_OVERRIDE))
-
-
-def cmd_recovery():
-    req = read_recovery()
-    joypad, handtop = req.get("joypad", "none"), req.get("handtop", "none")
-    if joypad in ("", "none") and handtop in ("", "none"):
-        return 0
-    logpath, log = open_log("recovery")
-    restart = False
-    log("recovery.txt: joypad=%s handtop=%s" % (joypad, handtop))
-    # Reset first: whatever happens next, a mistake in the file can't loop.
-    try:
-        write_atomic(RECOVERY_TXT, RECOVERY_TEMPLATE.replace("\n", "\r\n"))
-    except OSError as e:
-        log("could not reset recovery.txt (%s); not acting on it" % e)
-        copy_log_to_fat(logpath, "recovery")
-        return 1
-    tree = module_tree()
-    override = os.path.join(tree, JOYPAD_OVERRIDE)
-    if joypad in ("previous", "rocknix-patched-fallback"):
-        if os.path.exists(JOYPAD_PREVIOUS):
-            os.makedirs(os.path.dirname(override), exist_ok=True)
-            shutil.copyfile(JOYPAD_PREVIOUS, override + ".new")
-            os.rename(override + ".new", override)
-            run(["depmod", "-a", os.path.basename(tree)], timeout=300, log=log)
-            log("joypad: the previous driver is used from the next start")
-            restart = True
-        else:
-            log("joypad: no previous driver kept (no update has replaced it yet); nothing changed")
-    elif joypad == "current":
-        if os.path.exists(override):
-            os.unlink(override)
-            run(["depmod", "-a", os.path.basename(tree)], timeout=300, log=log)
-            log("joypad: back to the installed release's driver from the next start")
-            restart = True
-        else:
-            log("joypad: already the installed release's driver")
-    elif joypad not in ("", "none"):
-        log("joypad=%s not understood (previous, current or none)" % joypad)
-    if handtop == "previous":
-        try:
-            restart = plan_previous(log) or restart
-        except (Fail, OSError, subprocess.SubprocessError) as e:
-            log("handtop=previous: %s" % e)
-    elif handtop not in ("", "none"):
-        log("handtop=%s not understood (previous or none)" % handtop)
-    copy_log_to_fat(logpath, "recovery")
-    if restart:
-        console("recovery.txt acted on; restarting")
-        subprocess.run(["sync"], timeout=120)
-        power("reboot")
-    return 0
-
-
-def plan_previous(log):
-    files = sorted(os.path.join(PREVIOUS, f) for f in os.listdir(PREVIOUS) if f.endswith(".deb")) \
-        if os.path.isdir(PREVIOUS) else []
-    if not files:
-        raise Fail("no previous release kept on this card (kept when an update is downloaded)")
-    have = installed()
-    pkgs, use = [], []
-    for f in files:
-        name, ver = run(["dpkg-deb", "-f", f, "Package", "Version"], timeout=60).stdout.split("\n")[:2]
-        name, ver = name.split(": ", 1)[1], ver.split(": ", 1)[1]
-        if have.get(name) != ver:
-            pkgs.append({"name": name, "old": have.get(name), "new": ver, "origin": "previous"})
-            use.append(f)
-    if not pkgs:
-        log("handtop=previous: the kept release is the one installed; nothing to do")
+        return subprocess.run([path, "--self-test"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                              timeout=60).returncode == 0
+    except (OSError, subprocess.SubprocessError):
         return False
-    write_atomic(PLAN, json.dumps({"kind": "recovery", "created": int(time.time()),
-                                   "files": use, "packages": pkgs}, indent=1))
-    write_atomic(ATTEMPTS, "0\n")
-    write_atomic(AFTER, "restart\n")
-    set_marker()
-    log("handtop=previous: %s go back at the next start" % ", ".join(
-        "%s %s" % (p["name"], p["new"]) for p in pkgs))
-    return True
+
+
+def cmd_boot_check():
+    """Every normal boot: report a maintenance boot that was stopped (time-out, crash), remove its
+    service blocker, finish a cut promotion of the kept release, keep working copies of the tools."""
+    log = None
+    with lock(wait=60):
+        repair_previous()
+        prog = read_json(INPROGRESS)
+        if prog and not our_marker():
+            log = Log("update")
+            audit = run(["dpkg", "--audit"], timeout=300, check=False).stdout.strip()
+            msg = ("the maintenance boot was stopped before the update finished (time-out or crash)%s"
+                   % ("; some packages need repair: run the update again or use recovery.txt" if audit else ""))
+            write_json(RESULT, {"plan": prog.get("plan"), "ok": False, "message": msg, "time": int(time.time()),
+                                "log": log.path, "interrupted": True, "final": True, "dpkg_audit": audit[-2000:]})
+            log(msg + ("\n" + audit if audit else ""))
+            unlink(INPROGRESS)
+            copy_log_to_fat(log.path, "update")
+        if not our_marker():
+            policy_rc(False)
+        os.makedirs(LKG, exist_ok=True)
+        for tool in ("handtop-update", "handtop-recovery"):
+            cur = "/usr/local/sbin/" + tool
+            keep = os.path.join(LKG, tool)
+            if os.path.isfile(cur) and self_test_ok(cur):
+                if not os.path.isfile(keep) or sha256(keep) != sha256(cur):
+                    shutil.copy2(cur, keep + ".new")
+                    os.chmod(keep + ".new", 0o755)
+                    os.rename(keep + ".new", keep)
+        fsync_dir(LKG)
+    return 0
+
+
+def self_test():
+    inst, rem = parse_sim("Inst a [1] (2 Handtop:trixie-stable [arm64])\nPurg b\n")
+    assert inst[0]["new"] == "2" and inst[0]["arch"] == "arm64" and rem == ["b"]
+    assert _deps("a (>= 1), b | c:any")[1][1][0] == "c"
+    return 0
 
 
 def main():
-    cmds = {"status": cmd_status, "check": cmd_check, "download": cmd_download,
-            "schedule": cmd_schedule, "cancel": cmd_cancel, "apply": cmd_apply,
-            "recovery": cmd_recovery, "channel": cmd_channel}
+    if sys.argv[1:] == ["--self-test"]:
+        return self_test()
+    cmds = {"status": cmd_status, "check": cmd_check, "download": cmd_download, "schedule": cmd_schedule,
+            "cancel": cmd_cancel, "apply": cmd_apply, "boot-check": cmd_boot_check, "channel": cmd_channel}
     args = sys.argv[2:]
     if len(sys.argv) < 2 or sys.argv[1] not in cmds or len(args) > (1 if sys.argv[1] in ("schedule", "channel") else 0):
         print(__doc__.strip(), file=sys.stderr)
@@ -650,6 +1127,12 @@ def main():
         return cmds[sys.argv[1]](*args)
     except Fail as e:
         out({"ok": False, "error": str(e)})
+        return 1
+    except subprocess.TimeoutExpired as e:
+        out({"ok": False, "error": "timed out: %s" % " ".join(e.cmd[:2])})
+        return 1
+    except Exception as e:                   # noqa: BLE001 - the app always gets JSON
+        out({"ok": False, "error": "internal error: %r" % e})
         return 1
 
 
