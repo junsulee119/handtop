@@ -197,11 +197,23 @@ def run(cmd, timeout, log=None, check=True, cwd=None):
     if log:
         log("$ " + " ".join(cmd))
         start = log.f.tell()
+        # Saved to the card every 2 s while the command runs: a power cut keeps what it printed so far.
+        p = subprocess.Popen(cmd, env=APT_ENV, cwd=cwd, stdout=log.f, stderr=subprocess.STDOUT)
+        deadline = time.monotonic() + timeout
         try:
-            p = subprocess.run(cmd, env=APT_ENV, cwd=cwd, stdout=log.f, stderr=subprocess.STDOUT,
-                               timeout=timeout)
+            while True:
+                try:
+                    p.wait(timeout=2)
+                    break
+                except subprocess.TimeoutExpired:
+                    log.sync()
+                    if time.monotonic() > deadline:
+                        p.kill()
+                        p.wait()
+                        raise subprocess.TimeoutExpired(cmd, timeout)
         finally:
             log.f.flush()
+            log.sync()
         with open(log.path, "rb") as f:
             f.seek(start)
             text = f.read()[-20000:].decode("utf-8", "replace")
@@ -871,7 +883,9 @@ def cmd_status():
          "scheduled": bool(our_marker()) and sched.get("plan") == (plan or {}).get("id"),
          "after": sched.get("after") if our_marker() else None,
          "foreign_offline_update": our_marker() is False,
-         "previous_release": prev.get("release") if prev and prev.get("complete") else None,
+         # The kept release counts only when it isn't the installed one (after handtop=previous it is).
+         "previous_release": prev.get("release") if prev and prev.get("complete")
+         and prev.get("release") != installed().get("handtop") else None,
          "last_result": read_json(RESULT), "joypad_override": joypad_override_active(),
          "channel": "testing" if os.path.exists(CHANNEL_SOURCES) else "stable",
          "reboot_required": os.path.exists("/run/reboot-required")})
@@ -1103,6 +1117,7 @@ def cmd_apply():
             console("%s. Do not switch off (attempt %d of %d)." % (
                 "Going back to the previous Handtop release" if plan["kind"] == "recovery"
                 else "Installing %d updates" % len(plan["packages"]), attempts + 1, MAX_ATTEMPTS))
+            log("attempt %d of %d" % (attempts + 1, MAX_ATTEMPTS))
             log("plan: %s" % json.dumps(plan))
             log.sync()
             policy_rc(True)
