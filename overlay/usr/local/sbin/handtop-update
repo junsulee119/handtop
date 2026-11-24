@@ -1674,7 +1674,9 @@ def cmd_apply():
                 return 1
             attempts = sched.get("attempts")
             if not isinstance(attempts, int) or attempts >= MAX_ATTEMPTS:
-                finish(plan, False, "update stopped after %s attempts; recovery.txt can go back" % attempts, log)
+                finish(plan, False, ("the move onto packages stopped after %s attempts; it is kept: run the same "
+                                     "command again to resume it" if plan.get("kind") == "migrate" else
+                                     "update stopped after %s attempts; recovery.txt can go back") % attempts, log)
                 return 1
             for _ in range(20):        # the fuel gauge can take a moment after power-on
                 why = power_ok(STOP_BATTERY)

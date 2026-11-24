@@ -130,3 +130,17 @@ FAT, release 1 kept for going back. Found two worker bugs the chroot test can't 
 off): apt 3.0's `--print-uris` gives no hash for Debian's security archive and only MD5 elsewhere (the plan
 now takes each archive's SHA-256 from `apt-cache show`), and the FFmpeg pin check read source priorities
 instead of the version's pin.
+
+Step 8 run (2026-11-24/25, RG35XX H DDR4, stock v0.4.1 card, final code after both review rounds):
+- Migration, power cut in attempts 1, 2 and 3: the fourth start gave up and booted to the desktop with
+  the plan kept (no package changed: the cuts came while the plan was being checked); the same command
+  resumed exactly that plan, which installed (7 packages + FFmpeg, holds released, recovery.txt added,
+  recovery unit fine with `WantsMountsFor`).
+- `sudo` takes `schedule restart <12 hex digits>` and refuses a bad id or an extra word; the app's
+  Restart and install sent the plan id.
+- Update through the app (Handtop + Debian), then `handtop=previous` with a power cut in the middle of
+  `dpkg -i` (6 packages unpacked): attempt 2 finished going back; keyring stayed new.
+- Install and power off: installed, switched off, result "switching off".
+- Observed: one attempt's log lost its text after the first line on a hard cut despite the 2 s fsync
+  (zeros; the state files written the same way were intact): likely the SD card's write cache.
+- Not tested on hardware: a DDR3 unit (none available; the image test covers its identification).
