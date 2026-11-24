@@ -10,7 +10,7 @@ DEST="${1:?usage: export.sh <handtop-apt checkout>}"
 for rel in "$APT_HOME"/public/dists/*/Release; do
 	[ -s "$(dirname "$rel")/InRelease" ] && [ "$(dirname "$rel")/InRelease" -nt "$rel" ] || { echo "not signed: $rel (run sign.sh)" >&2; exit 1; }
 done
-rsync -rL --delete --exclude=.git --exclude=README.md --exclude=.nojekyll --exclude=handtop-archive.asc \
+rsync -rL --delete --exclude=.git --exclude=README.md --exclude=.nojekyll --exclude=/handtop-archive.asc \
 	"$APT_HOME/public/" "$DEST/"
 touch "$DEST/.nojekyll"
 cp "$APT_HOME/handtop-archive-public.asc" "$DEST/handtop-archive.asc"

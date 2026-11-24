@@ -30,4 +30,11 @@ for rel in "$APT_HOME"/public/dists/*/Release; do
 	gpg --batch --verify "$d/Release.gpg" "$rel" 2>&1 | grep -q 'Good signature' || { echo "Release.gpg check failed: $d" >&2; exit 1; }
 	echo "signed $(basename "$d"): valid until $until"
 done
+# The script that moves v0.4.x cards onto packages (repo.sh migrate): a detached signature.
+M="$APT_HOME/public/migrate/handtop-migrate"
+if [ -f "$M" ]; then
+	g --detach-sign --armor -o "$M.asc" "$M"
+	gpg --batch --verify "$M.asc" "$M" 2>&1 | grep -q 'Good signature' || { echo "handtop-migrate signature check failed" >&2; exit 1; }
+	echo "signed migrate/handtop-migrate"
+fi
 unset P

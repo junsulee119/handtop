@@ -64,6 +64,16 @@ python3 -m pytest -q -p no:cacheprovider src/theme/tests || bad "pytest (src/the
 python3 -m pytest -q -p no:cacheprovider src/controls/tests || bad "pytest (src/controls)"
 python3 -m pytest -q -p no:cacheprovider src/media/tests || bad "pytest (src/media)"
 python3 -m pytest -q -p no:cacheprovider src/update/tests || bad "pytest (src/update)"
+# handtop-migrate carries handtop-keyring's source and pin for cards that don't have the package yet
+python3 - <<'MIG' || bad "tools/apt/handtop-migrate: source or pin differs from overlay/etc/apt"
+import re, sys
+s = open("tools/apt/handtop-migrate").read()
+for tag, path in (("SOURCES", "overlay/etc/apt/sources.list.d/handtop.sources"),
+                  ("PREF", "overlay/etc/apt/preferences.d/handtop.pref")):
+    m = re.search(r"<<'%s'\n(.*?)^%s$" % (tag, tag), s, re.S | re.M)
+    if not m or m.group(1) != open(path).read():
+        sys.exit(1)
+MIG
 if /usr/bin/python3 -c 'import gi; gi.require_version("GdkPixbuf", "2.0"); import pytest' 2>/dev/null; then
   /usr/bin/python3 -m pytest -q -p no:cacheprovider src/theme/tests/test_gdk.py || bad "pytest (src/theme, GdkPixbuf)"
 else

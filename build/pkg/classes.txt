@@ -42,6 +42,7 @@ handtop-keyring  /etc/apt/preferences.d/handtop.pref
 handtop-desktop  /usr/local/lib/rg35xxh-theme/*
 handtop-desktop  /usr/local/lib/rg35xxh-media/*
 handtop-desktop  /usr/local/lib/rg35xxh-update/*
+handtop-core     /usr/local/share/handtop/*
 handtop-desktop  /usr/local/share/*
 handtop-desktop  /usr/share/rg35xxh/*
 handtop-desktop  /usr/share/icons/Handtop/*

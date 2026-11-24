@@ -7,6 +7,8 @@
     handtop-update schedule [restart|poweroff]
                                after checks, install at the next restart; then start the desktop
                                (restart, default) or switch off
+    handtop-update migrate     v0.4.x card (no Handtop packages yet): check, download and save the plan
+                               that moves it onto packages (handtop-migrate runs it; schedule next)
     handtop-update cancel      forget the downloaded update
     handtop-update channel stable|testing
                                where Handtop's packages come from (cancels a downloaded update)
@@ -47,7 +49,12 @@ PREVIOUS = STATE + "/previous"          # the release to go back to (handtop=pre
 NEXT = PREVIOUS + ".next"               # staged by download, becomes PREVIOUS when the install starts
 OLD = PREVIOUS + ".old"
 LKG = STATE + "/lkg"                    # last copies of the worker and handtop-recovery that worked
-NO_PREDECESSOR = STATE + "/no-predecessor"   # step 7 (migration) writes it: first update can't go back
+NO_PREDECESSOR = STATE + "/no-predecessor"   # a plan whose installed release can't be kept for going back
+RELEASES = "/usr/local/share/handtop/releases.tsv"   # files Handtop put on v0.4.x cards (tools/release-data.py)
+BOOT_TEMPLATES = "/usr/local/share/handtop/boot"     # recovery.txt, rg35xxh-input.conf as images write them
+BACKUP = "/var/backups/handtop-migrate"              # files the user changed that the migration replaced
+MIGRATE_TARGETS = ("handtop", "handtop-platform-h700")
+MODEL = "/etc/handtop/model"
 FATSEQ = STATE + "/fat-seq"
 MARKER = "/system-update"
 LOCK = "/run/handtop-update.lock"
@@ -116,7 +123,7 @@ def fsync_dir(path):
 def write_atomic(path, data, mode=0o644):
     tmp = path + ".new"
     fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, mode)
-    with os.fdopen(fd, "w") as f:
+    with os.fdopen(fd, "wb" if isinstance(data, bytes) else "w") as f:      # text or bytes
         f.write(data)
         f.flush()
         os.fsync(f.fileno())
@@ -423,9 +430,9 @@ def write_held_prefs():
         % (" ".join(FFMPEG_FAMILY), " ".join(FFMPEG_DEV)))
 
 
-def modules_mismatch(inst, opts):
+def modules_mismatch(inst, opts, want=None):
     """Modules packages in the plan whose kernel (Handtop-Kernel-SHA256) isn't this card's."""
-    want = boot_abi().get("kernel_sha256")
+    want = want or boot_abi().get("kernel_sha256")
     bad = []
     for i in inst:
         if not i["name"].startswith("handtop-modules-"):
@@ -558,7 +565,7 @@ def freeze_lists():
     os.rename(tmp, LISTS)
 
 
-def archive_info(opts, held, hashes=True):
+def archive_info(opts, held, hashes=True, what=("dist-upgrade",)):
     """{(name, version, arch): {file, size, algo, hash}} for every archive of the plan. Names and sizes
     come from apt's download list (asked against an empty archive directory, so already-downloaded
     files count too); the SHA-256 from the signed package indexes (apt-cache show), because the
@@ -566,7 +573,7 @@ def archive_info(opts, held, hashes=True):
     rmtree(EMPTY)
     os.makedirs(EMPTY + "/partial")
     p = run(["apt-get", "-qq", "--print-uris", "-o", "Dir::Cache::archives=" + EMPTY] + opts
-            + ["dist-upgrade"], timeout=300)
+            + list(what), timeout=300)
     rmtree(EMPTY)
     res = {}
     from urllib.parse import unquote
@@ -732,6 +739,35 @@ def trial_rollback(plan, manifest):
     return None
 
 
+def fetch_plan(inst, opts, held, what=("dist-upgrade",)):
+    """Download the archives of a simulated transaction into the cache; each one's SHA-256 from the
+    signed indexes is checked. Returns (packages with file/size/hash, MB)."""
+    info = archive_info(opts, held, what=what)
+    pkgs = []
+    for i in inst:
+        name = i["name"].split(":")[0]
+        arch = i["arch"] or (i["name"].split(":")[1] if ":" in i["name"] else None)
+        key = next((k for k in info if k[0] == name and k[1] == i["new"] and (arch is None or k[2] == arch)), None)
+        if not key:
+            raise Fail("no archive information for %s %s" % (i["name"], i["new"]))
+        pkgs.append(dict(i, **info[key]))
+    total = sum(p["size"] for p in pkgs) / (1 << 20)
+    mb, inodes = free_space(STATE)
+    need = 3 * total + 300
+    if mb < need or inodes < 5000:
+        raise Fail("not enough free space: about %d MB needed, %d MB free" % (need, mb))
+    os.makedirs(CACHE + "/partial", exist_ok=True)
+    stage_for_apt(CACHE + "/partial")
+    for p in pkgs:      # apt reuses a cached file of the right size even when it is damaged
+        f = os.path.join(CACHE, p["file"])
+        if os.path.exists(f) and not file_ok(f, p["algo"], p["hash"]):
+            os.unlink(f)
+    run(["apt-get", "-q", "-y", "--no-remove", "-o", "Dir::Cache::archives=" + CACHE] + opts
+        + ["--download-only"] + list(what), timeout=3600)
+    verify_files(pkgs, CACHE)
+    return pkgs, total
+
+
 def cmd_download():
     with lock():
         if our_marker():
@@ -746,29 +782,7 @@ def cmd_download():
             out({"ok": True, "nothing": True, "new_image_needed": bad})
             return 0
         opts = apt_opts(True, held)
-        info = archive_info(opts, held)
-        pkgs = []
-        for i in inst:
-            name = i["name"].split(":")[0]
-            arch = i["arch"] or (i["name"].split(":")[1] if ":" in i["name"] else None)
-            key = next((k for k in info if k[0] == name and k[1] == i["new"] and (arch is None or k[2] == arch)), None)
-            if not key:
-                raise Fail("no archive information for %s %s" % (i["name"], i["new"]))
-            pkgs.append(dict(i, **info[key]))
-        total = sum(p["size"] for p in pkgs) / (1 << 20)
-        mb, inodes = free_space(STATE)
-        need = 3 * total + 300
-        if mb < need or inodes < 5000:
-            raise Fail("not enough free space: about %d MB needed, %d MB free" % (need, mb))
-        os.makedirs(CACHE + "/partial", exist_ok=True)
-        stage_for_apt(CACHE + "/partial")
-        for p in pkgs:      # apt reuses a cached file of the right size even when it is damaged
-            f = os.path.join(CACHE, p["file"])
-            if os.path.exists(f) and not file_ok(f, p["algo"], p["hash"]):
-                os.unlink(f)
-        run(["apt-get", "-q", "-y", "--no-remove", "-o", "Dir::Cache::archives=" + CACHE] + opts
-            + ["--download-only", "dist-upgrade"], timeout=3600)
-        verify_files(pkgs, CACHE)
+        pkgs, total = fetch_plan(inst, opts, held)
         autos = set(run(["apt-mark", "showauto"], timeout=60).stdout.split())
         plan = {"id": uuid.uuid4().hex[:12], "kind": "update", "created": int(time.time()),
                 "packages": pkgs, "handtop_held": held, "new_image_needed": bad,
@@ -792,6 +806,270 @@ def cmd_download():
         return 0
 
 
+
+# ---- migration: a v0.4.x card (files copied by the image, no Handtop packages) onto packages ------
+# handtop-migrate (published with each release) sets up Handtop's key and source, takes this worker
+# out of the release's handtop-core package and runs 'migrate' and 'schedule'. The maintenance boot
+# installs the packages; afterwards config files the user never changed get the package's version
+# and the ones they changed stay (the package's next to them), other changed files are backed up.
+
+def release_data():
+    """{release: {path: {variant: (type, value)}}} from releases.tsv."""
+    data = {}
+    with open(RELEASES) as f:
+        for line in f:
+            if line.startswith("#") or not line.strip():
+                continue
+            rel, var, path, typ, val = line.rstrip("\n").split("\t")
+            data.setdefault(rel, {}).setdefault(path, {})[var] = (typ, val)
+    return data
+
+
+def card_value(path):
+    """(type, sha256 or link target) of a file on this card, as releases.tsv records it; None if absent."""
+    try:
+        if os.path.islink(path):
+            return ("l", os.readlink(path))
+        if os.path.isfile(path):
+            return ("f", sha256(path))
+    except OSError:
+        pass
+    return None
+
+
+def identify(data):
+    """(release, variant or None, share of its files that match). The release whose files this card
+    matches best; the variant (DDR3 / DDR4) from the boot partition's rootfix.cpio."""
+    best = None
+    for rel, paths in data.items():
+        files = [p for p in paths if p.startswith("/") and not p.startswith(FAT + "/")]
+        ok = sum(1 for p in files if card_value(p) in paths[p].values())
+        share = ok / max(1, len(files))
+        if not best or share > best[2]:
+            best = (rel, None, share)
+    if not best or best[2] < 0.9:
+        raise Fail("this card doesn't look like Handtop v0.4.x (best match %s, %d%% of its files)"
+                   % (best[0] if best else "none", 100 * best[2] if best else 0))
+    if not os.path.ismount(FAT):
+        raise Fail("the boot partition is not mounted (%s)" % FAT)
+    have = card_value(FAT + "/rootfix.cpio")
+    variants = data[best[0]].get(FAT + "/rootfix.cpio", {})
+    var = next((v for v, tv in variants.items() if tv == have and v != "*"), None)
+    return best[0], var, best[2]
+
+
+def identity_files(data, rel, variant):
+    abi = data[rel]["@boot-abi"]["*"][1].replace(";", "\n") + "\n"
+    model = "model=rg35xx-h\nram=%s\n" % (variant or "unknown")
+    return {BOOT_ABI: abi, MODEL: model}
+
+
+def deb_control(path):
+    """(conffiles, {path: md5}) of a package file."""
+    import tarfile
+    import io
+    data = subprocess.run(["dpkg-deb", "--ctrl-tarfile", path], stdout=subprocess.PIPE, check=True,
+                          timeout=120).stdout
+    conff, sums = set(), {}
+    with tarfile.open(fileobj=io.BytesIO(data)) as tf:
+        for m in tf.getmembers():
+            n = os.path.basename(m.name)
+            if n == "conffiles":
+                conff = {l.strip() for l in tf.extractfile(m).read().decode().splitlines() if l.strip()}
+            elif n == "md5sums":
+                for l in tf.extractfile(m).read().decode("utf-8", "replace").splitlines():
+                    md5, _, f = l.partition("  ")
+                    if f:
+                        sums["/" + f.strip()] = md5.strip()
+    return conff, sums
+
+
+def md5(path):
+    h = hashlib.md5()
+    with open(path, "rb") as f:
+        for b in iter(lambda: f.read(1 << 20), b""):
+            h.update(b)
+    return h.hexdigest()
+
+
+def adoption(plan, data):
+    """What the migration does with each file the plan's Handtop packages ship that is already on
+    the card: {"replace": config files never changed (they get the package's version), "keep":
+    config files the user changed (stay; the package's next to them), "backup": other files the
+    user changed (the package replaces them; a copy goes to BACKUP)}."""
+    known = data.get(plan["from"]["release"], {})
+    res = {"replace": [], "keep": [], "backup": []}
+    for p in plan["packages"]:
+        if not is_handtop(p["name"]):
+            continue
+        conff, sums = deb_control(os.path.join(CACHE, p["file"]))
+        for path, pkg_md5 in sorted(sums.items()):
+            cur = card_value(path)
+            if not cur or cur[0] != "f":
+                continue
+            if cur in known.get(path, {}).values():
+                if path in conff and md5(path) != pkg_md5:
+                    res["replace"].append(path)
+            elif md5(path) != pkg_md5:
+                res["keep" if path in conff and not diverted_by_debian(path) else "backup"].append(path)
+    return res
+
+
+def diverted_by_debian(path):
+    """A Debian conffile Handtop's package diverts (diversions.txt): its preinst moves the card's copy
+    to <path>.debian, so a change the user made there is backed up rather than kept in place."""
+    return subprocess.run(["dpkg-query", "-S", path], stdout=subprocess.DEVNULL,
+                          stderr=subprocess.DEVNULL, timeout=60).returncode == 0
+
+
+def backup(paths, log):
+    for path in paths:
+        dst = BACKUP + path
+        if os.path.exists(dst):
+            continue                    # an earlier attempt kept the user's copy already
+        os.makedirs(os.path.dirname(dst), exist_ok=True)
+        shutil.copy2(path, dst)
+        log("backed up (changed by the user): %s" % path)
+    fsync_dir(BACKUP) if os.path.isdir(BACKUP) else None
+
+
+def fat_write(name, data, log):
+    """Write a file on the boot partition (temp file, sync, rename); only when it is really mounted."""
+    if not os.path.ismount(FAT) or not os.access(FAT, os.W_OK):
+        log("boot partition not writable: %s not written" % name)
+        return False
+    write_atomic(os.path.join(FAT, name), data)
+    return True
+
+
+def migrate_boot_files(plan, data, log):
+    """recovery.txt where it's missing; v0.4.0's active rg35xxh-input.conf (unchanged by the user)
+    becomes the rescue template, the old one kept next to it."""
+    notes = []
+    tpl = lambda n: open(os.path.join(BOOT_TEMPLATES, n), "rb").read()
+    if not os.path.exists(FAT + "/recovery.txt") and fat_write("recovery.txt", tpl("recovery.txt"), log):
+        notes.append("recovery.txt added to the boot partition")
+    known = data.get(plan["from"]["release"], {}).get(FAT + "/rg35xxh-input.conf", {})
+    cur = card_value(FAT + "/rg35xxh-input.conf")
+    new = tpl("rg35xxh-input.conf")
+    if cur and cur in known.values() and cur[1] != hashlib.sha256(new).hexdigest():
+        if plan["from"]["release"] == "v0.4.0":
+            fat_write("rg35xxh-input.conf.v0.4.0", open(FAT + "/rg35xxh-input.conf", "rb").read(), log)
+            notes.append("rg35xxh-input.conf is now the rescue file (all commented out; the old one is "
+                         "rg35xxh-input.conf.v0.4.0)")
+        fat_write("rg35xxh-input.conf", new, log)
+    elif cur and cur not in known.values():
+        notes.append("rg35xxh-input.conf was changed by you and stays as it is: its settings override "
+                     "the Controls app")
+    return notes
+
+
+def add_missing_settings(path, log):
+    """A settings file the user changed (/etc/rg35xxh/*.conf, KEY=value) stays as it is; settings the
+    release added since (v0.4.0's power.conf has no MUSIC_SCREEN_OFF_MINUTES, which then reads as 0)
+    are appended with Handtop's default from the package's copy next to it."""
+    new = path + ".dpkg-dist"
+    if not (path.startswith("/etc/rg35xxh/") and path.endswith(".conf") and os.path.isfile(new)):
+        return
+    key = re.compile(r"^\s*([A-Z][A-Z0-9_]*)=")
+    have = {m.group(1) for m in map(key.match, open(path, errors="replace")) if m}
+    add = [line.rstrip("\n") for line in open(new, errors="replace")
+           if key.match(line) and key.match(line).group(1) not in have]
+    if add:
+        with open(path, "a") as f:
+            f.write("# Added when this card moved onto packages (Handtop's default; yours above are kept):\n"
+                    + "\n".join(add) + "\n")
+            f.flush()
+            os.fsync(f.fileno())
+        log("%s: added %s" % (path, ", ".join(a.split("=")[0] for a in add)))
+
+
+def install_migrate(plan, log, budget):
+    data = release_data()
+    opts = apt_opts(True)
+    run(["dpkg"] + CONF + ["--configure", "-a"], timeout=budget(1200), log=log, check=False)
+    plan_ad = adoption(plan, data)
+    backup(plan_ad["backup"], log)
+    # Before the packages: the modules package's preinst checks /etc/handtop/boot-abi (the card's
+    # KERNEL was matched against this release's when the plan was made).
+    for path, text in identity_files(data, plan["from"]["release"], plan["from"]["variant"]).items():
+        if not os.path.exists(path):
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            write_atomic(path, text.encode())
+    check_against_plan(plan, opts)
+    run(["apt-get", "-q", "-y", "--no-download", "--no-remove", "-o", "Dir::Cache::archives=" + CACHE]
+        + opts + ["install"] + plan_targets(plan), timeout=budget(3600), log=log)
+    run(["dpkg"] + CONF + ["--configure", "-a"], timeout=budget(1200), log=log)
+    if plan.get("auto"):
+        run(["apt-mark", "auto"] + plan["auto"], timeout=120, log=log)
+    have = installed()
+    wrong = [p["name"] for p in plan["packages"] if have.get(p["name"]) != p["new"]]
+    if wrong:
+        raise Fail("not at the planned version afterwards: %s" % ", ".join(wrong))
+    # dpkg kept the card's copy of each config file (--force-confold) and wrote the package's next to
+    # it: where the card's copy was the old release's, the package's takes its place.
+    for path in plan_ad["replace"]:
+        for ext in (".dpkg-dist", ".dpkg-new"):
+            if os.path.exists(path + ext):
+                os.replace(path + ext, path)
+                log("config file from the package: %s" % path)
+                break
+    for path in plan_ad["keep"]:
+        add_missing_settings(path, log)
+    unlink(NO_PREDECESSOR)
+    return migrate_boot_files(plan, data, log) + (
+        ["%d changed file(s) backed up in %s" % (len(plan_ad["backup"]), BACKUP)] if plan_ad["backup"] else [])
+
+
+def cmd_migrate():
+    with lock():
+        if our_marker():
+            raise Fail("an update is scheduled: cancel it first")
+        have = installed()
+        if any(is_handtop(n) for n in have):
+            raise Fail("this card has Handtop's packages already: use the Update app")
+        data = release_data()
+        rel, var, share = identify(data)
+        ids = identity_files(data, rel, var)
+        ksha = re.search(r"^kernel_sha256=(\S+)$", ids[BOOT_ABI], re.M).group(1)
+        if card_value(FAT + "/KERNEL") != ("f", ksha):
+            raise Fail("this card's kernel is not %s's: flash the new image instead" % rel)
+        warnings = [w for w in [release_ffmpeg_holds()] if w]
+        p = run(["apt-get", "update", "-q", "--error-on=any"], timeout=600, check=False)
+        if p.returncode != 0:
+            raise Fail("could not refresh every package list: %s" % "; ".join(
+                l for l in p.stdout.splitlines() if l.startswith(("E:", "Err:")))[-600:])
+        write_json(CHECKED, {"ok": True, "time": int(time.time())})
+        freeze_lists()
+        opts = apt_opts(True)
+        what = ("install",) + MIGRATE_TARGETS
+        inst = simulate(opts, what=what)
+        if not any(i["name"] == "handtop" for i in inst):
+            raise Fail("Handtop's packages are not in the package lists (is Handtop's source set up?)")
+        bad = modules_mismatch(inst, opts, want=ksha)
+        if bad:
+            raise Fail("the release's kernel modules don't fit this card's kernel (%s): flash the new image"
+                       % ", ".join(bad))
+        pkgs, total = fetch_plan(inst, opts, False, what=what)
+        autos = set(run(["apt-mark", "showauto"], timeout=60).stdout.split())
+        plan = {"id": uuid.uuid4().hex[:12], "kind": "migrate", "created": int(time.time()),
+                "packages": pkgs, "handtop_held": False, "new_image_needed": [], "size_mb": round(total, 1),
+                "from": {"release": rel, "variant": var, "match": round(100 * share)},
+                # the two targets stay manually installed; new dependencies and upgraded auto ones are auto
+                "auto": sorted(p["name"] for p in pkgs if p["name"] not in MIGRATE_TARGETS
+                               and (p["name"] in autos or not p["old"])),
+                # nothing packaged to go back to: the release before is the image's copied files
+                "rollback": {"needed": False, "possible": True, "reason": None, "no_predecessor": True}}
+        ad = adoption(plan, data)
+        write_json(PLAN, plan)
+        unlink(SCHEDULE)
+        rmtree(NEXT)
+        out({"ok": True, "plan": plan["id"], "from": plan["from"], "packages": len(pkgs),
+             "download_mb": round(total, 1), "warnings": warnings,
+             "config_kept": ad["keep"], "config_replaced": len(ad["replace"]), "backed_up": ad["backup"]})
+        return 0
+
+
 # ---- schedule / cancel / channel / status ---------------------------------------------------------
 
 def cmd_schedule(after="restart"):
@@ -799,7 +1077,7 @@ def cmd_schedule(after="restart"):
         raise Fail("schedule: restart or poweroff")
     with lock():
         plan = read_json(PLAN)
-        if not plan or plan.get("kind") != "update":
+        if not plan or plan.get("kind") not in ("update", "migrate"):
             raise Fail("nothing downloaded")
         mk = our_marker()
         if mk is False:
@@ -1103,12 +1381,13 @@ def cmd_apply():
             write_json(INPROGRESS, {"plan": plan["id"], "attempt": attempts + 1, "started": prog_start})
             budget = Budget(APPLY_BUDGET)
             try:
-                if plan["kind"] == "update":
+                if plan["kind"] in ("update", "migrate"):
                     verify_files(plan["packages"], CACHE)
                     mb, _ = free_space(STATE)
                     if mb < plan.get("size_mb", 0) + 150:
                         raise Fail("not enough free space to install (%d MB free)" % mb)
-                    promote_previous(plan["id"])
+                    if plan["kind"] == "update":
+                        promote_previous(plan["id"])
                 else:
                     verify_files(plan["packages"], PREVIOUS)
             except Fail as e:
@@ -1116,15 +1395,18 @@ def cmd_apply():
                 return 1
             console("%s. Do not switch off (attempt %d of %d)." % (
                 "Going back to the previous Handtop release" if plan["kind"] == "recovery"
+                else "Moving Handtop %s onto packages (%d to install)" % (plan["from"]["release"], len(plan["packages"]))
+                if plan["kind"] == "migrate"
                 else "Installing %d updates" % len(plan["packages"]), attempts + 1, MAX_ATTEMPTS))
             log("attempt %d of %d" % (attempts + 1, MAX_ATTEMPTS))
             log("plan: %s" % json.dumps(plan))
             log.sync()
             policy_rc(True)
-            error = None
+            error, notes = None, []
+            installer = {"update": install_update, "recovery": install_recovery, "migrate": install_migrate}
             for _ in range(2):                    # one retry in place
                 try:
-                    (install_update if plan["kind"] == "update" else install_recovery)(plan, log, budget)
+                    notes = installer[plan["kind"]](plan, log, budget) or []
                     error = None
                     break
                 except Drift as e:
@@ -1136,13 +1418,16 @@ def cmd_apply():
             if error:
                 finish(plan, False, "update failed: %s" % error, log)
                 return 1
-            extra = {"kept_config": kept_config(prog_start)}
+            extra = {"kept_config": kept_config(prog_start), "notes": notes}
+            if plan["kind"] == "migrate":
+                extra["migrated_from"] = plan["from"]["release"]
             if plan["kind"] == "update":
                 manifest = read_json(PREVIOUS + "/manifest.json")
                 if manifest and manifest.get("for_plan") == plan["id"]:
                     extra["rollback_available"] = manifest.get("complete", False)
             finish(plan, True, ("back to the previous Handtop release; " if plan["kind"] == "recovery"
-                                else "update installed; ") + (
+                                else "Handtop moved onto packages (updates from now on); "
+                                if plan["kind"] == "migrate" else "update installed; ") + (
                 "switching off" if (read_json(SCHEDULE) or {}).get("after") == "poweroff" else "restarting"),
                 log, extra=extra)
             return 0
@@ -1205,6 +1490,7 @@ def main():
     if sys.argv[1:] == ["--self-test"]:
         return self_test()
     cmds = {"status": cmd_status, "check": cmd_check, "download": cmd_download, "schedule": cmd_schedule,
+            "migrate": cmd_migrate,
             "cancel": cmd_cancel, "apply": cmd_apply, "boot-check": cmd_boot_check, "channel": cmd_channel}
     args = sys.argv[2:]
     if len(sys.argv) < 2 or sys.argv[1] not in cmds or len(args) > (1 if sys.argv[1] in ("schedule", "channel") else 0):

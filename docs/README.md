@@ -46,6 +46,7 @@ How Handtop works on the RG35XX H. One document per app or background service; g
 | [services/panel.md](services/panel.md) | Screen panel check: picks the regular or rev6 device tree at boot |
 | [services/boot-services.md](services/boot-services.md) | Boot and system services (hardware setup, first boot, Wi-Fi import, boot logs, ...) |
 | [services/update.md](services/update.md) | Updates: the worker, the maintenance boot and recovery.txt |
+| [migrate.md](migrate.md) | Moving a v0.4.0 / v0.4.1 card onto updates (one command, no reflash) |
 
 ## System
 
