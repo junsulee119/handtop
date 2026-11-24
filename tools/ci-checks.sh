@@ -64,12 +64,13 @@ python3 -m pytest -q -p no:cacheprovider src/theme/tests || bad "pytest (src/the
 python3 -m pytest -q -p no:cacheprovider src/controls/tests || bad "pytest (src/controls)"
 python3 -m pytest -q -p no:cacheprovider src/media/tests || bad "pytest (src/media)"
 python3 -m pytest -q -p no:cacheprovider src/update/tests || bad "pytest (src/update)"
-# handtop-migrate carries handtop-keyring's source and pin for cards that don't have the package yet
-python3 - <<'MIG' || bad "tools/apt/handtop-migrate: source or pin differs from overlay/etc/apt"
+# handtop-migrate carries handtop-keyring's source, pin and key for cards that don't have the package yet
+python3 - <<'MIG' || bad "tools/apt/handtop-migrate: source, pin or key differs from the overlay"
 import re, sys
 s = open("tools/apt/handtop-migrate").read()
 for tag, path in (("SOURCES", "overlay/etc/apt/sources.list.d/handtop.sources"),
-                  ("PREF", "overlay/etc/apt/preferences.d/handtop.pref")):
+                  ("PREF", "overlay/etc/apt/preferences.d/handtop.pref"),
+                  ("KEY", "overlay/usr/share/keyrings/handtop-archive.asc")):
     m = re.search(r"<<'%s'\n(.*?)^%s$" % (tag, tag), s, re.S | re.M)
     if not m or m.group(1) != open(path).read():
         sys.exit(1)

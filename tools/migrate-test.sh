@@ -68,6 +68,18 @@ echo "== the user's changes before migrating"
 CONF=/etc/rg35xxh/power.conf; OTHER=/usr/local/bin/rg35xxh-theme
 echo "# changed by the user (migrate-test)" >> "$ROOTFS$CONF"
 echo "# changed by the user (migrate-test)" >> "$ROOTFS$OTHER"
+chroot "$ROOTFS" apt-mark hold nano >/dev/null                       # the user's own hold
+chroot "$ROOTFS" systemctl disable rg35xxh-bootlog.timer >/dev/null 2>&1   # a service the user turned off
+holds0=$(chroot "$ROOTFS" apt-mark showhold | sort | xargs)
+
+echo "== answering No puts everything back"
+out=$(echo n | chroot "$ROOTFS" "${ENVV[@]}" HANDTOP_MIGRATE_SOURCE=$'URIs: copy:/srv/handtop-test\nSuites: ./' \
+        HANDTOP_MIGRATE_NO_RESTART=1 bash /root/m/handtop-migrate 2>&1 || true)
+grep -q "cancelled: nothing installed" <<<"$out" && ok "No: cancelled" || bad "No: $(echo "$out" | tail -3)"
+[ ! -e "$ROOTFS/etc/apt/sources.list.d/handtop.sources" ] && [ ! -e "$ROOTFS/etc/systemd/system/handtop-update-apply.service" ] &&
+  [ ! -e "$ROOTFS/var/lib/handtop-update/plan.json" ] && ok "No: source, apply unit and plan gone" || bad "No: leftovers"
+[ "$(chroot "$ROOTFS" apt-mark showhold | sort | xargs)" = "$holds0" ] && ok "No: holds as before ($holds0)" ||
+  bad "No: holds $(chroot "$ROOTFS" apt-mark showhold | sort | xargs), were $holds0"
 V1=$(sed -n 's/^Version: //p' "$ARCH_DIR"/Packages | grep -v '^7:' | sort -u | grep -m1 '+')
 
 echo "== handtop-migrate (plan, download, schedule)"
@@ -90,7 +102,12 @@ for p in handtop handtop-core handtop-desktop handtop-video handtop-keyring hand
 done
 [ "$(ver handtop)" = "$V1" ] && ok "Handtop's packages at $V1"
 [ "$(ver libavcodec61)" = "$FFMPEG_HANDTOP_VERSION" ] && ok "FFmpeg at Handtop's build" || bad "libavcodec61 is $(ver libavcodec61)"
-[ -z "$(chroot "$ROOTFS" apt-mark showhold)" ] && ok "no holds left" || bad "holds: $(chroot "$ROOTFS" apt-mark showhold | tr '\n' ' ')"
+[ "$(chroot "$ROOTFS" apt-mark showhold | xargs)" = nano ] && ok "v0.4.x's FFmpeg holds released, the user's own kept" ||
+  bad "holds: $(chroot "$ROOTFS" apt-mark showhold | xargs)"
+[ "$(chroot "$ROOTFS" systemctl is-enabled rg35xxh-bootlog.timer 2>/dev/null)" = disabled ] && ok "a service the user disabled stays disabled" ||
+  bad "rg35xxh-bootlog.timer: $(chroot "$ROOTFS" systemctl is-enabled rg35xxh-bootlog.timer 2>&1)"
+[ "$(chroot "$ROOTFS" systemctl is-enabled handtop-update-boot-check.service 2>/dev/null)" = enabled ] && ok "new units enabled" ||
+  bad "boot-check unit not enabled"
 [ -z "$(chroot "$ROOTFS" dpkg --audit)" ] && ok "dpkg --audit clean" || bad "dpkg --audit: $(chroot "$ROOTFS" dpkg --audit | head -3)"
 # Allowed: the test's own config change, and the source file the test pointed at its archive.
 v=$(chroot "$ROOTFS" dpkg --verify handtop-core handtop-desktop handtop-video handtop-keyring 2>&1 |

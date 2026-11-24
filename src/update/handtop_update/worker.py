@@ -3,6 +3,7 @@ an unprivileged app may read. HANDTOP_UPDATE_FAKE=<scenario> replaces the worker
 (screenshots in every theme without a real update: tools/update-app-shots.sh)."""
 import json
 import os
+import signal
 import subprocess
 import time
 
@@ -87,10 +88,26 @@ def clock():
 
 
 def signal_badge():
-    """Tell the taskbar's update badge to look again (Waybar image#update, signal 11)."""
-    if not FAKE:
-        subprocess.run(["pkill", "-RTMIN+11", "-x", "waybar"], stdout=subprocess.DEVNULL,
-                       stderr=subprocess.DEVNULL)
+    """Tell the taskbar's update badge to look again (Waybar image#update, signal 11). Only a Waybar
+    that has been up for 3 s or more: the real-time signal would kill one still starting (after a
+    theme change); its 2-minute poll catches up instead (as rg35xxh-theme does)."""
+    if FAKE:
+        return
+    try:
+        pids = subprocess.run(["pgrep", "-x", "-u", str(os.getuid()), "waybar"], stdout=subprocess.PIPE,
+                              stderr=subprocess.DEVNULL, text=True, timeout=10).stdout.split()
+    except (OSError, subprocess.SubprocessError):
+        return
+    for pid in pids:
+        try:
+            with open("/proc/%s/stat" % pid) as f:
+                start = int(f.read().rsplit(")", 1)[1].split()[19]) / os.sysconf("SC_CLK_TCK")
+            with open("/proc/uptime") as f:
+                age = float(f.read().split()[0]) - start
+            if age >= 3:
+                os.kill(int(pid), signal.SIGRTMIN + 11)
+        except (OSError, ValueError, IndexError):
+            pass
 
 
 # ---- canned answers for screenshots ---------------------------------------------------------------

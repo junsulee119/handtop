@@ -35,8 +35,9 @@ All print JSON (errors too) and take a lock (`/run/handtop-update.lock`); apt's 
 - `check`: `apt-get update --error-on=any` (any list that can't be refreshed makes the check fail), then a
   simulated `dist-upgrade`. If the plan has a modules package whose `Handtop-Kernel-SHA256` is not this card's
   `KERNEL` (`/etc/handtop/boot-abi`; a missing stamp counts as different), Handtop's packages and FFmpeg build
-  are held back (`prefs.d/`) and only Debian's updates are planned: `new_image_needed` lists why. v0.4.x's
-  FFmpeg holds are released only when the pin is in effect (Debian's FFmpeg at -1).
+  are held back (`prefs.d/`) and only Debian's updates are planned (checked: the plan may then contain none of
+  them): `new_image_needed` lists why. Holds are never changed by a check or download; held FFmpeg packages
+  are reported as held. (Only `migrate` releases v0.4.x's FFmpeg holds, see docs/migrate.md.)
 - `download`: needs a successful check from the last 24 h, and no scheduled update. Freezes the package
   lists, plans with them, refuses any removal, records every archive's size and hash from the signed
   indexes, checks free space (3 x the archives + 300 MB, and inodes), deletes damaged cached files (apt would
@@ -44,9 +45,10 @@ All print JSON (errors too) and take a lock (`/run/handtop-update.lock`); apt's 
   build, it downloads the installed ones (but the keyring) into `previous.next/` and checks, without
   changing anything, that going back to them would satisfy every dependency after the update (`rollback`).
 - `schedule [restart|poweroff]`: same plan again: only the choice changes. Refused when going back would not
-  be possible (except the first update after a migration, `no-predecessor`), a file is damaged, space is short,
-  the battery is under 40 % without the charger (an unreadable level counts as too low; only a machine without a
-  battery skips this), a controller mode runs or systemd can't say, `handtop-update-apply.service` isn't enabled,
+  be possible, the release kept for going back is missing, incomplete or damaged (checked file by file, again
+  right before the install starts), a file is damaged, space is short, the battery is under 40 % without the
+  charger (an unreadable level counts as too low, and on the handheld a battery that hasn't shown up yet is
+  unreadable; only a machine without a battery skips this), a controller mode runs or systemd can't say, `handtop-update-apply.service` isn't enabled,
   or `/system-update` belongs to another updater. Then the link, synced: the next start is the maintenance boot.
 - `cancel`: forgets the plan, its archives, lists and staged release; `previous/` stays.
 - `channel stable|testing`: cancels a downloaded or scheduled update, then writes or removes

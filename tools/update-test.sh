@@ -114,7 +114,9 @@ no_marker() { [ ! -L "$ROOTFS/system-update" ] && [ ! -e "$ROOTFS/system-update"
 policy_back() { [ "$(cat "$ROOTFS/usr/sbin/policy-rc.d" 2>/dev/null)" = "$BUILD_POLICY" ] && [ ! -e "$ROOTFS/usr/sbin/policy-rc.d.handtop-saved" ]; }
 dl() { hu check >/dev/null || true; hu download; }
 # The boot partition: recovery reads recovery.txt only from a mounted filesystem.
-fat_on()  { mkdir -p "$ROOTFS/boot/firmware"; mount -t tmpfs -o size=4m handtop-test-fat "$ROOTFS/boot/firmware"; }
+# The boot partition as a small tmpfs with the build's KERNEL (an update with the modules package checks it).
+fat_on()  { mkdir -p "$ROOTFS/boot/firmware"; mount -t tmpfs -o size=96m handtop-test-fat "$ROOTFS/boot/firmware"
+            cp "$ROCKNIX_EX/boot/KERNEL" "$ROOTFS/boot/firmware/KERNEL"; }
 fat_off() { umount "$ROOTFS/boot/firmware"; }
 
 echo "== FFmpeg holds released (09b), units"
@@ -151,7 +153,7 @@ out2=$(hu schedule || true)
 hu download >/dev/null 2>&1 && bad "download replaced a scheduled plan" || ok "download refused while scheduled"
 
 echo "== apply"
-hu apply || true
+fat_on; hu apply || true; fat_off
 # (captured first: with pipefail, grep -q closing the pipe early would fail the pipeline)
 autos=$(chroot "$ROOTFS" apt-mark showauto)
 grep -qx libavutil59 <<<"$autos" && ok "a dependency stays marked automatic" || bad "libavutil59 became manual"
@@ -227,7 +229,7 @@ for p in handtop handtop-desktop libavcodec61; do
   chroot "$ROOTFS" dpkg --unpack "$(ls "$ROOTFS$S"/cache/${p}_*.deb | sed "s|^$ROOTFS||")" >/dev/null 2>&1 || true
 done
 [ -n "$(chroot "$ROOTFS" dpkg --audit)" ] && ok "half-installed state made" || bad "could not make a half-installed state"
-hu apply || true
+fat_on; hu apply || true; fat_off
 expect_versions "$V2" "$FF2"
 clean_dpkg "after resuming"
 
@@ -235,7 +237,8 @@ echo "== a cut after the result was written: the next maintenance boot only fini
 fat_on; printf 'handtop=previous\n' > "$ROOTFS/boot/firmware/recovery.txt"; hr >/dev/null || true; fat_off
 pid=$(hu status | js 'd["plan"]')
 python3 - "$ROOTFS$S/last-result.json" "$pid" <<'P'
-import json, sys; json.dump({"plan": sys.argv[2], "ok": True, "final": True, "action": "reboot", "message": "test"}, open(sys.argv[1], "w"))
+import json, sys, time; json.dump({"plan": sys.argv[2], "ok": True, "final": True, "action": "reboot", "message": "test",
+                                  "time": int(time.time()) + 1}, open(sys.argv[1], "w"))
 P
 out=$(hu apply || true)
 expect_versions "$V2" "$FF2"
@@ -304,7 +307,7 @@ hu channel stable >/dev/null || true
 echo "== then a normal update still works (install and power off)"
 dl >/dev/null || true; hu schedule poweroff >/dev/null || true
 [ "$(hu status | js 'd["after"]')" = poweroff ] && ok "power off chosen" || bad "after: $(hu status | js 'd["after"]')"
-out=$(hu apply || true); echo "$out" | tail -3
+fat_on; out=$(hu apply || true); fat_off; echo "$out" | tail -3
 grep -q "would poweroff" <<<"$out" && ok "powers off after the install" || bad "did not power off"
 expect_versions "$V2" "$FF2"
 clean_dpkg "final"

@@ -1,51 +1,120 @@
 #!/bin/bash
 # handtop-migrate: move a Handtop v0.4.0 or v0.4.1 card onto packages, so it gets updates from the
 # Update app from then on (docs/migrate.md). Wi-Fi, the home folder, settings, SSH keys and
-# Tailscale stay. Run with sudo, after checking its signature (the command in the release notes):
-#
-#   sudo bash handtop-migrate
+# Tailscale stay. Started by the one-line command in the release notes (it checks this script's
+# signature first), as root.
 #
 # It checks the card (Debian 13 arm64 on an RG35XX H, Handtop v0.4.x, no Handtop packages yet),
-# adds Handtop's archive key, package source and FFmpeg pin (as the handtop-keyring package ships
-# them; the key is handtop-archive.asc next to this script, checked against the fingerprint below),
-# takes the update worker out of the release's handtop-core package and lets it plan, download and
-# check the move. Nothing else on the card changes before the restart: the packages are installed in
-# the maintenance boot (text on the screen, a few minutes; a power cut resumes at the next start).
+# adds Handtop's archive key (the one inside this signed script), package source and FFmpeg pin (as
+# the handtop-keyring package ships them), takes the update worker out of the release's handtop-core
+# package and lets it plan, download and check the move. The packages are installed in the
+# maintenance boot (text on the screen, a few minutes; a power cut resumes at the next start).
+# If it doesn't get that far (No, Ctrl+C, an error), everything it changed is put back.
+# A move that failed in the maintenance boot keeps its plan: running this again resumes it.
 #
 # Tests only: HANDTOP_MIGRATE_SOURCE=<deb822 URIs/Suites lines> replaces Handtop's source (Trusted),
 # HANDTOP_MIGRATE_YES=1 skips the question, HANDTOP_MIGRATE_NO_RESTART=1 doesn't restart.
 set -euo pipefail
 FPR=EF04B02F6569FB6FC8EAF9C5F5962C429E9C69FF
-HERE=$(dirname "$(realpath "$0")")
 LOG=/var/log/handtop-migrate.log
+W=/usr/local/sbin/handtop-update
+STATE=/var/lib/handtop-update
+KEYRING=/usr/share/keyrings/handtop-archive.asc
+SRC=/etc/apt/sources.list.d/handtop.sources
+PREF=/etc/apt/preferences.d/handtop.pref
+UNIT=/etc/systemd/system/handtop-update-apply.service
+DROPIN=handtop-migrate-maintenance.conf
 die() { printf '\nhandtop-migrate: %s\n' "$*" >&2; exit 1; }
+json() { python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print(eval(sys.argv[2]))' "$@" 2>/dev/null; }
+ask() {
+  [ "${HANDTOP_MIGRATE_YES:-}" = 1 ] && return 0
+  local a=""
+  read -r -p "$1 [y/N] " a || true
+  case "$a" in y|Y|yes) return 0 ;; *) return 1 ;; esac
+}
 
-[ "$(id -u)" = 0 ] || die "run it with sudo: sudo bash $0"
+[ "$(id -u)" = 0 ] || die "run it as root (the command in the release notes uses sudo)"
 # shellcheck disable=SC1091
 . /etc/os-release
 [ "${VERSION_CODENAME:-}" = trixie ] || die "this is not Debian 13 (trixie)"
 [ "$(dpkg --print-architecture)" = arm64 ] || die "this is not an arm64 system"
 tr '\0' '\n' < /proc/device-tree/compatible 2>/dev/null | grep -qx 'anbernic,rg35xx-h' ||
   [ -n "${HANDTOP_MIGRATE_SOURCE:-}" ] || die "this is not an Anbernic RG35XX H"
-! dpkg-query -W -f '${db:Status-Abbrev}' handtop 2>/dev/null | grep -q '^ii' ||
-  die "this card has Handtop's packages already: open Apps > Update instead"
 [ -x /usr/local/bin/rg35xxh-theme ] || die "this does not look like a Handtop card"
 mountpoint -q /boot/firmware || die "the boot partition (/boot/firmware) is not mounted"
-[ -f "$HERE/handtop-archive.asc" ] || die "handtop-archive.asc must be next to this script"
+[ -L /system-update ] || [ -L /etc/system-update ] &&
+  die "an update or move is already scheduled: restart the handheld to install it"
 
 exec > >(tee -a "$LOG") 2>&1
 echo "== handtop-migrate $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
 T=$(mktemp -d /var/tmp/handtop-migrate.XXXXXX)
-trap 'rm -rf "$T"' EXIT
+
+# ---- a move that failed in the maintenance boot: resume its plan ---------------------------------
+if [ -x "$W" ] && [ "$(json "$STATE/plan.json" 'd.get("kind")')" = migrate ]; then
+  trap 'rm -rf "$T"' EXIT
+  echo "A move onto packages was downloaded before and didn't finish:"
+  echo "  $(json "$STATE/last-result.json" 'd.get("message")' || echo "(no result recorded)")"
+  ask "Install it at the next start (the handheld restarts now)?" || die "not resumed; run this again when ready"
+  "$W" schedule restart > "$T/sched.json" || die "$(json "$T/sched.json" 'd.get("error")' || cat "$T/sched.json")"
+  sync
+  if [ "${HANDTOP_MIGRATE_NO_RESTART:-}" = 1 ]; then echo "scheduled (no restart: test)"; exit 0; fi
+  echo "Restarting in 10 s."; sleep 10; systemctl reboot; exit 0
+fi
+! dpkg-query -W -f '${db:Status-Abbrev}' handtop 2>/dev/null | grep -q '^ii' ||
+  die "this card has Handtop's packages already: open Apps > Update instead"
+
+# ---- from here on, everything this script changes is put back unless the move gets scheduled -----
+SCHEDULED=0
+mkdir -p "$T/orig"
+SHARE_NEW=0; [ -e /usr/local/share/handtop ] || SHARE_NEW=1
+for f in "$KEYRING" "$SRC" "$PREF" "$UNIT" /usr/local/sbin/handtop-run /usr/local/sbin/handtop-recovery "$W"; do
+  if [ -e "$f" ]; then cp -a "$f" "$T/orig/$(echo "$f" | tr / _)"; else echo "$f" >> "$T/orig/ABSENT"; fi
+done
+undo() {
+  [ "$SCHEDULED" = 1 ] && { rm -rf "$T"; return; }
+  echo "Putting back what this script changed (nothing was installed)."
+  [ -x "$W" ] && "$W" cancel >/dev/null 2>&1 || true        # plan, downloads; FFmpeg holds back
+  systemctl disable handtop-update-apply.service >/dev/null 2>&1 || true
+  for u in rg35xxh-bootlogo.service rg35xxh-bt-check.service; do rm -f "/etc/systemd/system/$u.d/$DROPIN"; done
+  for f in "$KEYRING" "$SRC" "$PREF" "$UNIT" /usr/local/sbin/handtop-run /usr/local/sbin/handtop-recovery "$W"; do
+    o="$T/orig/$(echo "$f" | tr / _)"
+    if [ -e "$o" ]; then cp -a "$o" "$f"; elif grep -qx "$f" "$T/orig/ABSENT" 2>/dev/null; then rm -f "$f"; fi
+  done
+  [ "$SHARE_NEW" = 1 ] && rm -rf /usr/local/share/handtop
+  systemctl daemon-reload 2>/dev/null || true
+  apt-get update -qq >/dev/null 2>&1 || true                # the lists without Handtop's source
+  rm -rf "$T"
+}
+trap undo EXIT
+put() { cat > "$1.handtop-new"; mv -f "$1.handtop-new" "$1"; }   # whole file or nothing
 
 echo "1/4 Handtop's archive key, package source and FFmpeg pin"
-got=$(gpg --batch --show-keys --with-colons "$HERE/handtop-archive.asc" 2>/dev/null | awk -F: '/^fpr:/ {print $10; exit}')
-[ "$got" = "$FPR" ] || die "handtop-archive.asc is not Handtop's archive key (fingerprint $got)"
-install -D -m644 "$HERE/handtop-archive.asc" /usr/share/keyrings/handtop-archive.asc
+# The key apt will trust is the one inside this (signed) script: exactly one primary key, Handtop's.
+cat > "$T/key.asc" <<'KEY'
+-----BEGIN PGP PUBLIC KEY BLOCK-----
+
+mDMEav13+RYJKwYBBAHaRw8BAQdAU5DiJZaVH7IryW+1hX4DIVvxGhNL8ozn3fjx
+gUQs6jS0G0hhbmR0b3AgYXJjaGl2ZSBzaWduaW5nIGtleYiZBBMWCgBBFiEE7wSw
+L2Vp+2/I6vnF9ZYsQp6caf8FAmr9d/kCGwEFCRLMAwAFCwkIBwICIgIGFQoJCAsC
+BBYCAwECHgcCF4AACgkQ9ZYsQp6caf+EvAEAp/TMe5PEZQJBw9iVfHALf5+H9iRF
+jOlYoxy5FXGsu0cBANWzCh1GVY/GfM7Ha7+UeSPrLkczoaoYIqAWkMTo/88AuDME
+av13+xYJKwYBBAHaRw8BAQdAO92wKJSCckfVIy5f1YOOchpnDVgAc2vhglYDYjtr
+XJSI9QQYFgoAJhYhBO8EsC9laftvyOr5xfWWLEKenGn/BQJq/Xf7AhsCBQkDwmcA
+AIEJEPWWLEKenGn/diAEGRYKAB0WIQSZkM4o5A7O1iUJpfpTwkcuHCmzlAUCav13
++wAKCRBTwkcuHCmzlA+rAQDvhxq/KJN5wMdAM2JEjsQ4ZFr3IWz0vDxZkpM051F+
+ZAD+LM59YUm9zqsk3iLVWRm62mP3nyy6iH0oiU50Er0+VAi48AD9FXEfMXr4ugo5
+obQ6ilV0xOFRI7VLmpdokj2fl9gEGBwBAIFkhE+atiHT9A8MjJ9bkW7ODLAGcyLS
+WpDgf1KHWRgP
+=+Du7
+-----END PGP PUBLIC KEY BLOCK-----
+KEY
+keys=$(gpg --batch --show-keys --with-colons "$T/key.asc" 2>/dev/null | awk -F: '/^pub:/ {getline; print $10}')
+[ "$keys" = "$FPR" ] || die "the archive key inside this script is not Handtop's (found: ${keys:-none})"
+install -D -m644 "$T/key.asc" "$KEYRING"
 if [ -n "${HANDTOP_MIGRATE_SOURCE:-}" ]; then
-  printf 'Types: deb\n%s\nTrusted: yes\n' "$HANDTOP_MIGRATE_SOURCE" > /etc/apt/sources.list.d/handtop.sources
+  printf 'Types: deb\n%s\nTrusted: yes\n' "$HANDTOP_MIGRATE_SOURCE" | put "$SRC"
 else
-  cat > /etc/apt/sources.list.d/handtop.sources <<'SOURCES'
+  put "$SRC" <<'SOURCES'
 # Handtop's own packages (updates without reflashing). Signed by the Handtop archive key,
 # fingerprint EF04B02F6569FB6FC8EAF9C5F5962C429E9C69FF (README, release notes).
 # Shipped by the handtop-keyring package. Don't edit: the Update app's testing channel is a
@@ -57,7 +126,7 @@ Components: main
 Signed-By: /usr/share/keyrings/handtop-archive.asc
 SOURCES
 fi
-cat > /etc/apt/preferences.d/handtop.pref <<'PREF'
+put "$PREF" <<'PREF'
 # Handtop's FFmpeg replaces Debian's packages of the same names (V4L2 request API decoders for
 # the video engine). Only Handtop's repository may provide them: Debian's versions are never
 # installed, so a Debian security update cannot silently drop hardware decoding. Handtop's
@@ -76,23 +145,32 @@ Pin-Priority: 995
 PREF
 
 echo "2/4 The update worker from this release"
-apt-get update -q || die "could not refresh the package lists (Wi-Fi?)"
-chown _apt "$T" 2>/dev/null || true
-(cd "$T" && apt-get download -q handtop-core) || die "could not download handtop-core"
-dpkg-deb -x "$T"/handtop-core_*.deb "$T/x"
+apt-get update -q --error-on=any || { echo "(trying once more)"; sleep 5; apt-get update -q --error-on=any; } ||
+  die "could not refresh every package list (Wi-Fi?)"
+install -d -m755 "$T/dl" && chown _apt "$T/dl" 2>/dev/null || true   # only the download folder is apt's
+(cd "$T/dl" && apt-get download -q handtop-core) || die "could not download handtop-core"
+CORE=$(dpkg-deb -f "$T"/dl/handtop-core_*.deb Version)
+dpkg-deb -x "$T"/dl/handtop-core_*.deb "$T/x"
 for f in handtop-update handtop-run handtop-recovery; do
   install -m755 "$T/x/usr/local/sbin/$f" "/usr/local/sbin/$f"
 done
 install -d /usr/local/share/handtop
 cp -a "$T/x/usr/local/share/handtop/." /usr/local/share/handtop/
-install -m644 "$T/x/etc/systemd/system/handtop-update-apply.service" /etc/systemd/system/
+install -m644 "$T/x/etc/systemd/system/handtop-update-apply.service" "$UNIT"
+# The first maintenance boot still has v0.4.x's boot splash and Bluetooth check: keep them out of it.
+for u in rg35xxh-bootlogo.service rg35xxh-bt-check.service; do
+  mkdir -p "/etc/systemd/system/$u.d"
+  printf '[Unit]\nConditionPathIsSymbolicLink=!/system-update\n' | put "/etc/systemd/system/$u.d/$DROPIN"
+done
 systemctl daemon-reload 2>/dev/null || true    # (no systemd in a chroot test)
 systemctl enable handtop-update-apply.service >/dev/null 2>&1 || true
 
 echo "3/4 Planning and downloading (a few minutes)"
-if ! /usr/local/sbin/handtop-update migrate > "$T/plan.json"; then
-  die "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("error"))' "$T/plan.json" 2>/dev/null || cat "$T/plan.json")"
+if ! "$W" migrate > "$T/plan.json"; then
+  die "$(json "$T/plan.json" 'd.get("error")' || cat "$T/plan.json")"
 fi
+[ "$(json "$T/plan.json" 'd.get("core")')" = "$CORE" ] ||
+  die "the release changed while downloading (handtop-core $CORE vs $(json "$T/plan.json" 'd.get("core")')): run this again"
 python3 - "$T/plan.json" <<'SUMMARY'
 import json, sys
 d = json.load(open(sys.argv[1]))
@@ -103,19 +181,19 @@ for p in d["config_kept"]:
     print("  kept, you changed it: %s (Handtop's new version goes next to it as .dpkg-dist)" % p)
 for p in d["backed_up"]:
     print("  you changed %s: Handtop's version replaces it, your copy goes to /var/backups/handtop-migrate" % p)
+if d.get("ffmpeg_backed_up"):
+    print("  %d file(s) of v0.4.x's own FFmpeg build differ from Handtop's FFmpeg packages: copies go to "
+          "/var/backups/handtop-migrate" % d["ffmpeg_backed_up"])
 for w in d.get("warnings", []):
     print("  note: " + w)
 SUMMARY
 
 echo
 echo "4/4 Install at the next start"
-if [ "${HANDTOP_MIGRATE_YES:-}" != 1 ]; then
-  read -r -p "The handheld restarts and installs for a few minutes (keep it charged; don't switch it off). Go ahead? [y/N] " a
-  case "$a" in y|Y|yes) ;; *) /usr/local/sbin/handtop-update cancel >/dev/null; die "cancelled: nothing installed" ;; esac
-fi
-if ! /usr/local/sbin/handtop-update schedule restart > "$T/sched.json"; then
-  die "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("error"))' "$T/sched.json")"
-fi
+ask "The handheld restarts and installs for a few minutes (keep it charged; don't switch it off). Go ahead?" ||
+  die "cancelled: nothing installed"
+"$W" schedule restart > "$T/sched.json" || die "$(json "$T/sched.json" 'd.get("error")' || cat "$T/sched.json")"
+SCHEDULED=1
 sync
 if [ "${HANDTOP_MIGRATE_NO_RESTART:-}" = 1 ]; then echo "scheduled (no restart: test)"; exit 0; fi
 echo "Restarting in 10 s. After the install the desktop starts again; Apps > Update shows the result."
