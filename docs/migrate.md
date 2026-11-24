@@ -51,8 +51,8 @@ During the install it also writes `/etc/handtop/boot-abi` and `/etc/handtop/mode
 `rg35xxh-input.conf` into the commented-out rescue file of v0.4.1 (the old one is kept as
 `rg35xxh-input.conf.v0.4.0`; a file you edited stays as it is).
 
-The first update after the move has no earlier packaged release to go back to (`handtop=previous` in
-`recovery.txt` needs one); from the second update on it has.
+`handtop=previous` in `recovery.txt` can't go back to v0.4.x (it had no packages): it goes back to the
+release the move installed, from the first update after the move on (tested on a real v0.4.1 card).
 
 ## If something goes wrong
 

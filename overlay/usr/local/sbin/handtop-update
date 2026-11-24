@@ -1335,7 +1335,8 @@ def kept_config(since):
             if f.endswith((".dpkg-dist", ".dpkg-new")):
                 p = os.path.join(top, f)
                 try:
-                    if os.lstat(p).st_mtime >= since - 1:
+                    # ctime: dpkg gives the file the package's modification time, not the install's
+                    if os.lstat(p).st_ctime >= since - 1:
                         res.append(p)
                 except OSError:
                     pass
