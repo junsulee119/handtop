@@ -11,6 +11,7 @@ worked). Standalone on purpose: it doesn't use the update worker it may need to 
 The request is saved on ext4 before recovery.txt is set back to none, and the saved request is
 finished after a power cut; each step can be repeated safely. docs/services/update.md.
 """
+import fcntl
 import hashlib
 import json
 import os
@@ -28,6 +29,10 @@ PLAN = STATE + "/plan.json"
 SCHEDULE = STATE + "/schedule.json"
 FATSEQ = STATE + "/fat-seq"
 MARKER = "/system-update"
+MARKER_ETC = "/etc/system-update"          # systemd's second marker (another updater's)
+LOCK = "/run/handtop-update.lock"          # the update worker's lock
+NEXT = PREVIOUS + ".next"
+OLD = PREVIOUS + ".old"
 FAT = "/boot/firmware"
 RECOVERY_TXT = FAT + "/recovery.txt"
 LOGDIR = "/var/log/handtop-update"
@@ -188,8 +193,11 @@ def joypad(want, log):
     if run(["depmod", "-a", os.path.basename(tree)], log).returncode != 0:
         log("joypad: depmod failed; ask again in recovery.txt")
         return False
-    path = run(["modinfo", "-k", os.path.basename(tree), "-n", JOYPAD_KO[:-3]], log).stdout.strip()
-    ok = (path == override) if want == "previous" else (OVERRIDE_DIR not in path)
+    p = run(["modinfo", "-k", os.path.basename(tree), "-n", JOYPAD_KO[:-3]], log)
+    path = p.stdout.strip() if p.returncode == 0 else ""
+    # The lookup must succeed and name a file that exists: an error text isn't "the packaged driver".
+    found = bool(path) and path.startswith("/") and os.path.isfile(path)
+    ok = found and ((path == override) if want == "previous" else (OVERRIDE_DIR not in path))
     log("joypad: %s driver from the next start (%s)%s" % (want, path or "?", "" if ok else ": NOT as asked"))
     return ok
 
@@ -197,10 +205,22 @@ def joypad(want, log):
 def installed():
     p = subprocess.run(["dpkg-query", "-W", "-f", "${Package}\\t${Version}\\t${db:Status-Abbrev}\\n"],
                        env=ENV, stdout=subprocess.PIPE, text=True, timeout=60)
-    return {n: v for n, v, st in (l.split("\t") for l in p.stdout.splitlines()) if len(st) > 1 and st[1] == "i"}
+    # Also packages a cut left unpacked or half-configured: going back must replace or remove them too.
+    return {n: v for n, v, st in (l.split("\t") for l in p.stdout.splitlines()) if len(st) > 1 and st[1] in "iUHFWt"}
+
+
+def repair_previous():
+    """A cut between the worker's two renames (previous -> previous.old, previous.next -> previous)."""
+    if not os.path.isdir(PREVIOUS) and os.path.isdir(OLD):
+        if os.path.isdir(NEXT):
+            os.rename(NEXT, PREVIOUS)
+        else:
+            os.rename(OLD, PREVIOUS)
+        fsync_dir(STATE)
 
 
 def handtop_previous(log):
+    repair_previous()
     m = read_json(PREVIOUS + "/manifest.json")
     if not m or not m.get("complete"):
         log("handtop=previous: no complete earlier release is kept on this card (it is kept when an "
@@ -219,7 +239,8 @@ def handtop_previous(log):
     if not change and not remove:
         log("handtop=previous: release %s is already installed; nothing to do" % m.get("release"))
         return False
-    if os.path.lexists(MARKER) and not (os.path.islink(MARKER) and os.readlink(MARKER) == STATE):
+    if os.path.lexists(MARKER_ETC) or (os.path.lexists(MARKER) and
+                                       not (os.path.islink(MARKER) and os.readlink(MARKER) == STATE)):
         log("handtop=previous: another offline update is scheduled (/system-update); not touching it")
         return False
     # A downloaded update is dropped (its files and plan), the kept release isn't.
@@ -257,15 +278,20 @@ def main():
         log = Log()
         for line in probe:
             log(line)
-        req = {"joypad": fat.get("joypad", "none"), "handtop": fat.get("handtop", "none")}
+        req = {"joypad": fat.get("joypad", "none"), "handtop": fat.get("handtop", "none"), "acked": False}
         write_json(REQUEST, req)                         # saved before recovery.txt is set back
+    log = log or Log()
+    if not req.get("acked", True):
+        # Set recovery.txt back to none before acting (also after a cut right after saving the
+        # request), so the same line can't be acted on twice.
         try:
             write_atomic(RECOVERY_TXT, TEMPLATE.replace("\n", "\r\n"))
         except OSError as e:
-            log("could not set recovery.txt back to none (%s): not acting on it" % e)
-            os.unlink(REQUEST)
+            log("could not set recovery.txt back to none (%s): not acting on it; asked again at the "
+                "next start" % e)
             return 1
-    log = log or Log()
+        req["acked"] = True
+        write_json(REQUEST, req)
     log("request: joypad=%s handtop=%s" % (req.get("joypad"), req.get("handtop")))
     restart = False
     j = req.get("joypad", "none")
@@ -275,7 +301,9 @@ def main():
         log("joypad=%s not understood (previous, current or none)" % j)
     h = req.get("handtop", "none")
     if h == "previous":
-        restart |= handtop_previous(log)
+        with open(LOCK, "a") as lk:                  # the update worker's lock: one writer of the plan
+            fcntl.flock(lk, fcntl.LOCK_EX)
+            restart |= handtop_previous(log)
     elif h not in ("", "none"):
         log("handtop=%s not understood (previous or none)" % h)
     os.unlink(REQUEST)

@@ -10,7 +10,8 @@ import time
 WORKER = "/usr/local/sbin/handtop-update"
 STATE = "/var/lib/handtop-update"
 FAKE = os.environ.get("HANDTOP_UPDATE_FAKE")
-TIMEOUTS = {"status": 60, "check": 900, "download": 4000, "schedule": 300, "cancel": 300, "channel": 300}
+# Longer than the worker's own limits (download: 3600 s for the plan + 1800 s for the kept release).
+TIMEOUTS = {"status": 60, "check": 900, "download": 6000, "schedule": 300, "cancel": 300, "channel": 300}
 
 
 def call(*args):
@@ -38,9 +39,10 @@ def installed_release():
     if FAKE:
         return None
     try:
-        p = subprocess.run(["dpkg-query", "-W", "-f", "${Handtop-Release}", "handtop"], stdout=subprocess.PIPE,
-                           stderr=subprocess.DEVNULL, text=True, timeout=30)
-        return p.stdout.strip() or None
+        p = subprocess.run(["dpkg-query", "-W", "-f", "${db:Status-Abbrev}\t${Handtop-Release}", "handtop"],
+                           stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, timeout=30)
+        st, _, rel = p.stdout.partition("\t")
+        return rel.strip() or None if st.startswith("ii") else None     # only a fully installed release
     except (OSError, subprocess.SubprocessError):
         return None
 
@@ -49,11 +51,27 @@ def installed_version():
     if FAKE:
         return "0.5.0"
     try:
-        p = subprocess.run(["dpkg-query", "-W", "-f", "${Version}", "handtop"], stdout=subprocess.PIPE,
-                           stderr=subprocess.DEVNULL, text=True, timeout=30)
-        return p.stdout.strip() or None
+        p = subprocess.run(["dpkg-query", "-W", "-f", "${db:Status-Abbrev}\t${Version}", "handtop"],
+                           stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, timeout=30)
+        st, _, ver = p.stdout.partition("\t")
+        if not ver.strip():
+            return None
+        return ver.strip() if st.startswith("ii") else "%s (not fully installed)" % ver.strip()
     except (OSError, subprocess.SubprocessError):
         return None
+
+
+def reboot():
+    """Ask systemd to restart (after a short pause for the screen to show it). None, or why it was refused."""
+    if FAKE:
+        return None
+    time.sleep(0.8)
+    try:
+        p = subprocess.run(["systemctl", "reboot"], stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                           text=True, timeout=60)
+    except (OSError, subprocess.SubprocessError) as e:
+        return str(e)
+    return None if p.returncode == 0 else (p.stdout.strip().splitlines() or ["exit %d" % p.returncode])[-1]
 
 
 def downloaded_mb():

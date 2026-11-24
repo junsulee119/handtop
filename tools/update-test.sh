@@ -15,6 +15,7 @@ source "$(dirname "$(realpath "$0")")/../build/config.sh"
 source "$TOP/build/lib/chroot.sh"
 SRC_WORK="$(realpath "${SRC_WORK:?SRC_WORK: the work directory of a finished build}")"
 [ "$(realpath -m "$WORK")" != "$SRC_WORK" ] || die "WORK must be a scratch directory, not SRC_WORK"
+assert_scratch_copy "$SRC_WORK"
 [ -d "$SRC_WORK/rootfs/usr" ] || die "no finished rootfs in $SRC_WORK"
 ls "$SRC_WORK"/pkg-ffmpeg/*.deb >/dev/null || die "no FFmpeg packages in $SRC_WORK/pkg-ffmpeg"
 trap 'mountpoint -q "$ROOTFS/boot/firmware" && umount "$ROOTFS/boot/firmware"; chroot_umount' EXIT
@@ -311,6 +312,13 @@ fat_on; out=$(hu apply || true); fat_off; echo "$out" | tail -3
 grep -q "would poweroff" <<<"$out" && ok "powers off after the install" || bad "did not power off"
 expect_versions "$V2" "$FF2"
 clean_dpkg "final"
+
+echo "== another updater's /etc/system-update: not ours, not touched"
+ln -s /var/cache/other-updater "$ROOTFS/etc/system-update"
+[ "$(hu status | js 'd["foreign_offline_update"]')" = True ] && ok "foreign marker in /etc seen" || bad "foreign /etc marker not seen"
+hu apply >/dev/null 2>&1 || true
+[ ! -e "$ROOTFS/system-update" ] && [ -L "$ROOTFS/etc/system-update" ] && ok "apply leaves it alone" || bad "apply touched the markers"
+safe_rm "$ROOTFS/etc/system-update"
 
 echo; echo "update-test: $pass passed, $fail failed"
 [ "$fail" = 0 ]

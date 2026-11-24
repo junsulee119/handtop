@@ -222,9 +222,14 @@ class App:
         title, body, err = res
         if err:
             box, col = self._error_box(body, title)
-            col.pack_start(_label("If the handheld no longer works properly, recovery.txt on the SD card's "
-                                  "boot partition can go back to the previous release (Advanced explains how).",
-                                  dim=True), False, False, 0)
+            if self.status.get("previous_release"):
+                col.pack_start(_label("If the handheld no longer works properly, recovery.txt on the SD card's "
+                                      "boot partition can go back to the previous release (Advanced explains how).",
+                                      dim=True), False, False, 0)
+            else:
+                col.pack_start(_label("Run the update again. If the handheld no longer works properly, flashing "
+                                      "the current image is the way back (no earlier release is kept).",
+                                      dim=True), False, False, 0)
         else:
             box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
             box.get_style_context().add_class("rg-card")
@@ -299,6 +304,8 @@ class App:
             body.pack_start(_label("Handtop %s and all of Debian's packages are the newest available on the %s "
                                 "channel." % (M.short_version(W.installed_version(), W.installed_release()),
                                               self.status.get("channel") or "stable"), dim=True), False, False, 0)
+            for w in s["warnings"]:
+                body.pack_start(_label(w, dim=True), False, False, 0)
             p.pack_end(_button("Done", self.refresh), False, False, 0)
             self._set("results", p)
             return
@@ -337,8 +344,9 @@ class App:
         p.pack_start(_scrolled(body), True, True, 0)
         row = Gtk.Box(spacing=8)
         row.pack_start(_button("Back", self.refresh), False, False, 0)
-        row.pack_end(_button("Download (%s)" % M.mb(s["download_mb"]), self._do_download, suggested=True),
-                     False, False, 0)
+        if not s["nothing"]:            # e.g. a new image is needed and Debian has nothing new
+            row.pack_end(_button("Download (%s)" % M.mb(s["download_mb"]), self._do_download, suggested=True),
+                         False, False, 0)
         p.pack_end(row, False, False, 0)
         self._set("results", p)                       # shows everything ...
         if s["debian"] and not show_list:
@@ -388,9 +396,10 @@ class App:
         row = Gtk.Box(spacing=8)
         row.pack_start(_button("Cancel update", self._do_cancel), False, False, 0)
         row.pack_start(_button("Advanced ›", self._advanced), False, False, 0)
-        row.pack_end(_button("Restart and install", lambda: self._do_schedule("restart"), suggested=True),
-                     False, False, 0)
-        row.pack_end(_button("Install and power off", lambda: self._do_schedule("poweroff")), False, False, 0)
+        if M.can_install(st):
+            row.pack_end(_button("Restart and install", lambda: self._do_schedule("restart"), suggested=True),
+                         False, False, 0)
+            row.pack_end(_button("Install and power off", lambda: self._do_schedule("poweroff")), False, False, 0)
         p.pack_end(row, False, False, 0)
         self._set("ready", p)
 
@@ -403,17 +412,27 @@ class App:
                 return
             W.signal_badge()
             self._restart_now()
-        self._run(lambda: W.call("schedule", after), done)
+        plan = (self.status or {}).get("plan")
+        self._run(lambda: W.call("schedule", after, *([plan] if plan else [])), done)
 
     def _restart_now(self):
         self._show_busy("Restarting to install the update…")
-        if not W.FAKE:
-            GLib.timeout_add(800, lambda: os.system("systemctl reboot") and False)
 
-    def _scheduled(self):
+        def done(err):
+            if err:                      # refused (e.g. by policy): say so, the update stays scheduled
+                def back(st):
+                    self.status = st if st.get("ok", True) else self.status
+                    self._scheduled(error="The handheld couldn't restart (%s). The update stays scheduled: "
+                                          "restart it from the power menu." % err)
+                self._run(lambda: W.call("status"), back)
+        self._run(W.reboot, done)
+
+    def _scheduled(self, error=None):
         st = self.status
         p, body = _framed()
         body.pack_start(_title("The update installs at the next restart"), False, False, 0)
+        if error:
+            body.pack_start(self._error_box(error)[0], False, False, 0)
         after = "then the handheld switches off" if st.get("after") == "poweroff" else "then the desktop starts again"
         body.pack_start(_label("%d packages; %s." % (st.get("packages") or 0, after)), False, False, 0)
         body.pack_start(_label(M.rollback_text(st, st.get("previous_release")), dim=True), False, False, 0)

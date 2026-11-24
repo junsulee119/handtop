@@ -6,8 +6,11 @@ DefaultDependencies=no
 After=local-fs.target
 Before=sysinit.target system-update-pre.target shutdown.target
 Conflicts=shutdown.target
-RequiresMountsFor=/boot/firmware
-ConditionPathExists=/boot/firmware/recovery.txt
+# Wants, not Requires: a saved request is acted on even when the boot partition fails to mount (nofail).
+WantsMountsFor=/boot/firmware
+ConditionPathExists=|/boot/firmware/recovery.txt
+# or a request saved before a cut (acted on even if the boot partition is missing now)
+ConditionPathExists=|/var/lib/handtop-update/recovery-request.json
 
 [Service]
 Type=oneshot

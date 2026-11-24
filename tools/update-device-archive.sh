@@ -15,6 +15,7 @@ source "$(dirname "$(realpath "$0")")/../build/config.sh"
 source "$TOP/build/lib/chroot.sh"
 SRC_WORK="$(realpath "${SRC_WORK:?SRC_WORK: the work directory of a finished build}")"
 [ "$(realpath -m "$WORK")" != "$SRC_WORK" ] || die "WORK must be a scratch directory, not SRC_WORK"
+assert_scratch_copy "$SRC_WORK"
 [ -d "$SRC_WORK/rootfs/usr" ] || die "no finished rootfs in $SRC_WORK"
 ls "$SRC_WORK"/pkg-ffmpeg/*.deb >/dev/null || die "no FFmpeg packages in $SRC_WORK/pkg-ffmpeg"
 trap chroot_umount EXIT

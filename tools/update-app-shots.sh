@@ -11,6 +11,7 @@ source "$(dirname "$(realpath "$0")")/../build/config.sh"
 source "$TOP/build/lib/chroot.sh"
 SRC_WORK="$(realpath "${SRC_WORK:?SRC_WORK: the work directory of a finished build}")"
 [ "$(realpath -m "$WORK")" != "$SRC_WORK" ] || die "WORK must be a scratch directory, not SRC_WORK"
+assert_scratch_copy "$SRC_WORK"
 trap chroot_umount EXIT
 mkdir -p "$WORK"
 assert_no_mounts "$SRC_WORK/rootfs" "$ROOTFS"

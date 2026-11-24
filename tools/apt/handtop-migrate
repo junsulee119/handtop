@@ -181,6 +181,11 @@ for p in d["config_kept"]:
     print("  kept, you changed it: %s (Handtop's new version goes next to it as .dpkg-dist)" % p)
 for p in d["backed_up"]:
     print("  you changed %s: Handtop's version replaces it, your copy goes to /var/backups/handtop-migrate" % p)
+for p in d.get("config_deleted", []):
+    print("  you deleted %s: it stays deleted" % p)
+for p in d.get("links", []):
+    print("  you made %s a link: Handtop's file replaces it; where it pointed is noted in "
+          "/var/backups/handtop-migrate/links.json" % p)
 if d.get("ffmpeg_backed_up"):
     print("  %d file(s) of v0.4.x's own FFmpeg build differ from Handtop's FFmpeg packages: copies go to "
           "/var/backups/handtop-migrate" % d["ffmpeg_backed_up"])

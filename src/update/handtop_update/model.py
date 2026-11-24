@@ -68,13 +68,20 @@ def result_text(res):
         body = ""
         if res.get("kept_config"):
             body = ("These settings files were kept because you had edited them; the new version "
-                    "of each is saved next to it:\n" + "\n".join("  " + p for p in res["kept_config"][:8]))
+                    "of each is saved next to it:\n" + "\n".join("  " + p for p in res["kept_config"][:8])
+                    + ("\n  and %d more" % (len(res["kept_config"]) - 8) if len(res["kept_config"]) > 8 else ""))
         return title, body, False
     if res.get("ok") is None:
         return "Update waiting", msg[:1].upper() + msg[1:], False
     title = "The update stopped (%s)" % when if res.get("interrupted") else "The update failed (%s)" % when
     msg = re.sub(r"^update (failed|not installed): ", "", msg)
     return title, (msg[:1].upper() + msg[1:]) if msg else "", True
+
+
+def can_install(plan_status):
+    """The worker would schedule this plan as far as going back is concerned (it checks the rest)."""
+    rb = (plan_status or {}).get("rollback") or {}
+    return bool(rb.get("possible", True) or rb.get("no_predecessor"))
 
 
 def rollback_text(plan_status, previous_release):
@@ -107,6 +114,11 @@ def friendly_error(err, details=None):
     e = err.strip()
     low = e.lower()
     if "could not refresh" in low:
+        text = " ".join(details or []).lower()
+        if any(k in text for k in ("no_pubkey", "badsig", "is not signed", "expkeysig", "not valid yet",
+                                   "is expired", "invalid signature", "weak security")):
+            return ("The update server's signature couldn't be checked. Check that the date and time are "
+                    "right, then try again; if it keeps happening, the server may have a problem.")
         names = sorted({n for n in (source_name(d) for d in details or [] if d.startswith(("Err", "E:")))
                         if n})
         which = (" (%s)" % ", ".join(names)) if names else ""

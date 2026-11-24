@@ -30,7 +30,9 @@ safe_rm() {
   w="$(realpath -m -- "$WORK")"
   for p in "$@"; do
     [ -n "$p" ] || die "safe_rm: empty path"
-    rp="$(realpath -m -- "$p")"
+    # The folder it is in is resolved, not the name itself: a symlink is deleted as a link, never
+    # followed to where it points (which may be outside $WORK).
+    rp="$(realpath -m -- "$(dirname -- "$p")")/$(basename -- "$p")"
     case "$rp" in
       "$w"/?*) ;;
       *) die "safe_rm: refusing to delete outside the build directory ($w): $rp" ;;
@@ -52,4 +54,15 @@ assert_no_mounts() {
       die "something is still mounted under $r (a chroot left by a killed run?); unmount it first"
     fi
   done
+}
+
+# assert_scratch_copy SRC   before a test copies SRC (a finished build's work directory or rootfs)
+# into this checkout's $WORK: WORK and ROOTFS are inside this project, and SRC and WORK don't overlap
+# in either direction (rsync --delete into the wrong tree; external review 2026-11-24, #55).
+assert_scratch_copy() {
+  assert_build_paths
+  local s w
+  s="$(realpath -m -- "${1:?assert_scratch_copy: no source}")"; w="$(realpath -m -- "$WORK")"
+  case "$s/" in "$w"/*) die "the source ($s) is inside this checkout's WORK ($w)";; esac
+  case "$w/" in "$s"/*) die "WORK ($w) is inside the source ($s)";; esac
 }

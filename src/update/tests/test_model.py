@@ -59,3 +59,18 @@ def test_friendly_error():
                           "Err:2 https://security.debian.org/debian-security trixie-security InRelease"])
     assert "(Debian security, Handtop)" in e
     assert M.friendly_error("battery at 31%: connect") == "Battery at 31%: connect"
+
+
+def test_can_install():
+    assert M.can_install({"rollback": {"needed": True, "possible": True}})
+    assert M.can_install({"rollback": {"needed": True, "possible": False, "no_predecessor": True}})
+    assert not M.can_install({"rollback": {"needed": True, "possible": False, "reason": "x"}})
+    assert M.can_install({})
+
+
+def test_signature_errors_are_not_wifi():
+    msg = M.friendly_error("could not refresh every package list",
+                           ["E: The repository 'https://x trixie InRelease' is not signed."])
+    assert "signature" in msg and "Wi-Fi" not in msg
+    assert "Wi-Fi" in M.friendly_error("could not refresh every package list",
+                                       ["Err:1 https://deb.debian.org/debian trixie InRelease"])

@@ -28,6 +28,8 @@ cleanup() {
 trap cleanup EXIT
 mkdir -p "$WORK" "$MNT"
 echo "== $(basename "$IMG"): root filesystem and boot partition"
+assert_build_paths
+[ -z "$(losetup -j "$WORK/migrate.img" 2>/dev/null)" ] || die "$WORK/migrate.img is still attached to a loop device (a killed run?): losetup -d it first"
 xz -dc "$IMG" > "$WORK/migrate.img"
 LOOP=$(losetup -P --show -f "$WORK/migrate.img")
 assert_no_mounts "$ROOTFS"
