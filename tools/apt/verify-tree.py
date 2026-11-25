@@ -146,12 +146,17 @@ def check_suite(tree, suite, a, now, pool_refs):
             if "%s/binary-%s/Packages" % (comp, arch) not in present:
                 bad("%s: %s/binary-%s/Packages is missing" % (suite, comp, arch))
     # Acquire-By-Hash: each published index's current object is there under its SHA256 name.
+    for arch in ("arm64", "all"):                  # what Handtop's cards ask for, whatever Release says
+        if "main/binary-%s/Packages" % arch not in present:
+            bad("%s: main/binary-%s/Packages is missing" % (suite, arch))
     if f.get("Acquire-By-Hash", "").lower() == "yes":
-        for name, (h, _) in sha.items():
-            if os.path.isfile(os.path.join(d, name)):
-                bh = os.path.join(d, os.path.dirname(name), "by-hash", "SHA256", h)
-                if not os.path.isfile(bh):
-                    bad("%s: by-hash object of %s is missing" % (suite, name))
+        # apt asks for the strongest hash's object first (SHA512): every strong one must be there (#109)
+        for alg in ("SHA256", "SHA512"):
+            for name, (h, _) in lst.get(alg, {}).items():
+                if os.path.isfile(os.path.join(d, name)):
+                    bh = os.path.join(d, os.path.dirname(name), "by-hash", alg, h)
+                    if not os.path.isfile(bh):
+                        bad("%s: %s by-hash object of %s is missing" % (suite, alg, name))
     # Nothing unlisted in the suite's folder.
     for root, dirs, files in os.walk(d):
         for fn in files:

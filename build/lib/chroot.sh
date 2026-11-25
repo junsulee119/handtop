@@ -14,8 +14,7 @@ chroot_mount() {
   mount --make-rslave "$ROOTFS/dev"
   mountpoint -q "$ROOTFS/dev/pts" || mount --bind /dev/pts "$ROOTFS/dev/pts"
   mount --make-rslave "$ROOTFS/dev/pts"
-  [ "$(findmnt -n -o PROPAGATION "$ROOTFS/dev")" != shared ] && [ "$(findmnt -n -o PROPAGATION "$ROOTFS/dev/pts")" != shared ] ||
-    die "chroot /dev mounts still propagate to the host"
+  chroot_dev_private || die "chroot /dev mounts still propagate to the host"
   mountpoint -q "$ROOTFS/dev/shm" || mount -t tmpfs -o mode=1777 shm "$ROOTFS/dev/shm"
   mountpoint -q "$ROOTFS/run"     || mount -t tmpfs tmpfs "$ROOTFS/run"
   cp -L /etc/resolv.conf "$ROOTFS/etc/resolv.conf"
@@ -32,6 +31,15 @@ chroot_mount() {
   chmod +x "$ROOTFS/usr/sbin/policy-rc.d"
 }
 
+# True when the chroot's /dev and /dev/pts binds can't pass mounts or unmounts to the host (#97).
+chroot_dev_private() {
+  local m p
+  for m in dev dev/pts; do
+    mountpoint -q "$ROOTFS/$m" || continue
+    p=$(findmnt -n -o PROPAGATION "$ROOTFS/$m" 2>/dev/null) || return 1
+    case "$p" in ""|*shared*) return 1 ;; esac
+  done
+}
 chroot_umount() {
   [ -n "${ROOTFS:-}" ] || return 0
   assert_build_paths
@@ -43,6 +51,11 @@ chroot_umount() {
   for m in dev dev/pts sys; do                   # never let an unmount reach the host (#97)
     mountpoint -q "$ROOTFS/$m" && mount --make-rslave "$ROOTFS/$m" 2>/dev/null || true
   done
+  if ! chroot_dev_private; then
+    echo "SAFETY: $ROOTFS/dev still propagates to the host: not unmounting below it (umount -l it by hand after making it rslave)" >&2
+    for m in run sys proc; do mountpoint -q "$ROOTFS/$m" && umount -l "$ROOTFS/$m" || true; done
+    return 0
+  fi
   for m in run dev/shm dev/pts dev sys proc; do
     mountpoint -q "$ROOTFS/$m" && umount -l "$ROOTFS/$m" || true
   done

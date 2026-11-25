@@ -60,28 +60,33 @@ installed() { dpkg-query -W -f '${db:Status-Abbrev}' handtop 2>/dev/null | grep 
 
 undo() {   # put back what $U records (nothing was installed: the move was never scheduled)
   echo "Putting back what this script changed (nothing was installed)."
-  # plan, downloads; FFmpeg holds back. If that fails, the record stays for the next run (#85).
-  if [ -x "$W" ] && [ -e "$STATE/plan.json" ] && ! "$W" cancel >/dev/null 2>&1; then
-    echo "could not cancel the downloaded move; run this command again later"; return 1
+  local ok=1
+  # Plan, downloads and FFmpeg's holds: also when no plan was saved yet (holds may already have been
+  # released). If that fails, the record stays for the next run (#85, #98).
+  if [ -x "$W" ] && ! "$W" cancel >/dev/null 2>&1; then
+    echo "could not cancel the move or put FFmpeg's holds back; run this command again later"; return 1
   fi
+  [ ! -e "$STATE/migrate-holds.json" ] || { echo "FFmpeg's holds are not back yet"; ok=0; }
   [ -f "$U/apply-enabled" ] || systemctl disable handtop-update-apply.service >/dev/null 2>&1 || true
   for u in $DROPIN_UNITS; do
-    if [ -f "$U/dropin-$u" ]; then cp -a "$U/dropin-$u" "/etc/systemd/system/$u.d/$DROPIN"
-    else rm -f "/etc/systemd/system/$u.d/$DROPIN"; fi
+    if [ -f "$U/dropin-$u" ]; then cp -a "$U/dropin-$u" "/etc/systemd/system/$u.d/$DROPIN" || ok=0
+    else rm -f "/etc/systemd/system/$u.d/$DROPIN" || ok=0; fi
   done
   for f in $FILES; do
     o="$U/orig/$(echo "$f" | tr / _)"
-    if [ -e "$o" ]; then cp -a "$o" "$f"; elif grep -qx "$f" "$U/ABSENT" 2>/dev/null; then rm -f "$f"; fi
+    if [ -e "$o" ] || [ -L "$o" ]; then rm -f "$f"; cp -a "$o" "$f" || ok=0
+    elif grep -qx "$f" "$U/ABSENT" 2>/dev/null; then rm -f "$f" || ok=0; fi
   done
-  if [ -f "$U/share-new" ]; then rm -rf /usr/local/share/handtop
+  if [ -f "$U/share-new" ]; then rm -rf /usr/local/share/handtop || ok=0
   elif [ -d "$U/share" ]; then         # the folder was there: each file as it was, new ones removed (#85)
-    (cd "$U/share" && find . -type f -print0) | while IFS= read -r -d '' f; do
-      cp -a "$U/share/$f" "/usr/local/share/handtop/$f"; done
-    while IFS= read -r f; do [ -n "$f" ] && rm -f "/usr/local/share/handtop/$f"; done < "$U/share-absent"
+    while IFS= read -r -d '' f; do
+      rm -f "/usr/local/share/handtop/$f"; cp -a "$U/share/$f" "/usr/local/share/handtop/$f" || ok=0
+    done < <(cd "$U/share" && find . ! -type d -print0)
+    while IFS= read -r f; do [ -n "$f" ] && { rm -f "/usr/local/share/handtop/$f" || ok=0; }; done < "$U/share-absent"
   fi
   systemctl daemon-reload 2>/dev/null || true
   apt-get update -qq >/dev/null 2>&1 || true                # the lists without Handtop's source
-  rm -rf "$U"; sync
+  if [ "$ok" = 1 ]; then rm -rf "$U"; sync; else echo "not everything could be put back; run this command again"; return 1; fi
 }
 if [ -d "$U" ]; then
   # Only a move that was never agreed to is put back. Once it was (or it is scheduled, or installed),
@@ -115,7 +120,7 @@ SCHEDULED=0
 mkdir -p "$STATE"; rm -rf "$U.tmp"; mkdir -p "$U.tmp/orig"
 [ -e /usr/local/share/handtop ] || touch "$U.tmp/share-new"
 for f in $FILES; do
-  if [ -e "$f" ]; then cp -a "$f" "$U.tmp/orig/$(echo "$f" | tr / _)"; else echo "$f" >> "$U.tmp/ABSENT"; fi
+  if [ -e "$f" ] || [ -L "$f" ]; then cp -a "$f" "$U.tmp/orig/$(echo "$f" | tr / _)"; else echo "$f" >> "$U.tmp/ABSENT"; fi
 done
 for u in $DROPIN_UNITS; do                       # a drop-in of that name the card had already
   [ -f "/etc/systemd/system/$u.d/$DROPIN" ] && cp -a "/etc/systemd/system/$u.d/$DROPIN" "$U.tmp/dropin-$u"
@@ -197,8 +202,8 @@ done
 install -d /usr/local/share/handtop
 if [ ! -f "$U/share-new" ]; then       # the folder was there: keep what each file was first (#85)
   mkdir -p "$U/share"; : > "$U/share-absent"
-  (cd "$T/x/usr/local/share/handtop" && find . -type f) | while IFS= read -r f; do
-    if [ -e "/usr/local/share/handtop/$f" ]; then
+  (cd "$T/x/usr/local/share/handtop" && find . ! -type d) | while IFS= read -r f; do
+    if [ -e "/usr/local/share/handtop/$f" ] || [ -L "/usr/local/share/handtop/$f" ]; then
       mkdir -p "$U/share/$(dirname "$f")"; cp -a "/usr/local/share/handtop/$f" "$U/share/$f"
     else echo "$f" >> "$U/share-absent"; fi
   done
@@ -248,7 +253,9 @@ ask "The handheld restarts and installs for a few minutes (keep it charged; don'
   die "cancelled: nothing installed"
 PID=$(json "$T/plan.json" 'd.get("plan")')     # exactly the plan shown above (review 2026-11-26 #63)
 echo "$PID" > "$U/consented"; sync               # from here on, a cut never undoes the move (#84)
-"$W" schedule restart "$PID" > "$T/sched.json" || die "$(json "$T/sched.json" 'd.get("error")' || cat "$T/sched.json")"
+# Refused (battery, space, ...): not agreed to after all, so everything is put back, holds too (#98).
+"$W" schedule restart "$PID" > "$T/sched.json" ||
+  { rm -f "$U/consented"; die "$(json "$T/sched.json" 'd.get("error")' || cat "$T/sched.json")"; }
 SCHEDULED=1
 rm -rf "$U"
 sync

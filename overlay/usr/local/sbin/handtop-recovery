@@ -57,6 +57,11 @@ handtop=none
 """
 
 
+def template_for(rid):
+    """The reset recovery.txt, marked with the request it acknowledges."""
+    return TEMPLATE + ("# (reset after request %s)\n" % rid if rid else "")
+
+
 def fsync_dir(path):
     d = os.open(path, os.O_RDONLY)
     try:
@@ -137,13 +142,23 @@ def parse(raw):
     return res
 
 
-def read_fat_request(log):
+def read_fat_raw():
+    """recovery.txt's bytes on the mounted boot partition, or None (missing, too large, unreadable)."""
     if not os.path.ismount(FAT) or not os.path.isfile(RECOVERY_TXT):
-        return {}
-    with open(RECOVERY_TXT, "rb") as f:
-        raw = f.read(MAX_READ + 1)
-    if len(raw) > MAX_READ:
-        log("recovery.txt is larger than %d KiB: ignored" % (MAX_READ // 1024))
+        return None
+    try:
+        with open(RECOVERY_TXT, "rb") as f:
+            raw = f.read(MAX_READ + 1)
+    except OSError:
+        return None
+    return raw if len(raw) <= MAX_READ else None
+
+
+def read_fat_request(log):
+    raw = read_fat_raw()
+    if raw is None:
+        if os.path.isfile(RECOVERY_TXT):
+            log("recovery.txt is larger than %d KiB or unreadable: ignored" % (MAX_READ // 1024))
         return {}
     return parse(raw.decode("utf-8", "replace"))
 
@@ -219,6 +234,12 @@ def installed():
 
 def repair_previous():
     """A cut between the worker's two renames (previous -> previous.old, previous.next -> previous)."""
+    drop = PREVIOUS + ".drop"
+    if os.path.isdir(drop):
+        if not os.path.isdir(PREVIOUS) and not os.path.isdir(OLD):
+            os.rename(drop, PREVIOUS)
+        elif os.path.isdir(PREVIOUS):
+            shutil.rmtree(drop)
     if not os.path.isdir(PREVIOUS) and os.path.isdir(OLD):
         if os.path.isdir(NEXT):
             os.rename(NEXT, PREVIOUS)
@@ -230,12 +251,26 @@ def repair_previous():
 def handtop_previous(log):
     repair_previous()
     m = read_json(PREVIOUS + "/manifest.json")
+    # An update that failed before changing Handtop leaves the newer kept release equal to what is
+    # installed, the useful one set aside (previous.old) until the worker settles it: use that (#102).
+    mo = read_json(OLD + "/manifest.json")
+    if m and mo and mo.get("complete"):
+        have0 = installed()
+        if all(have0.get(p["name"]) == (p["version"], True) for p in m.get("packages", [])):
+            drop = PREVIOUS + ".drop"            # the same swap as the worker's settle_previous()
+            os.rename(PREVIOUS, drop)
+            os.rename(OLD, PREVIOUS)
+            fsync_dir(STATE)
+            shutil.rmtree(drop)
+            m = mo
+            log("handtop=previous: the update didn't change Handtop; going back to the release kept before it")
+    base = PREVIOUS
     if not m or not m.get("complete"):
         log("handtop=previous: no complete earlier release is kept on this card (it is kept when an "
             "update that changes Handtop is installed)")
         return False
     for p in m["packages"]:
-        f = os.path.join(PREVIOUS, p["file"])
+        f = os.path.join(base, p["file"])
         if not os.path.isfile(f) or sha256(f) != p["hash"]:
             log("handtop=previous: %s is missing or damaged; can't go back" % p["file"])
             return False
@@ -245,6 +280,21 @@ def handtop_previous(log):
     change = [p for p in m["packages"] if have.get(p["name"]) != (p["version"], True)]
     remove = sorted(n for n in have if (n == "handtop" or n.startswith("handtop-"))
                     and n not in names and n not in NEVER_ROLLED_BACK)
+    # Only from a healthy card (decision 2026-11-25, review round 5): dpkg may have unfinished work
+    # only on the packages going back replaces or removes. An update a cut interrupted resumes by itself
+    # at the next start; anything else needs a reflash. Refused here, before anything changes.
+    other = sorted(n for n, (v, ok) in have.items() if not ok and n not in names and n not in remove
+                   and not (n == "handtop" or n.startswith("handtop-")))
+    if other:
+        log("handtop=previous: dpkg has unfinished work on other packages (%s): not going back. If an update "
+            "was cut off, it finishes at the next start; otherwise flash the current image" % ", ".join(other[:8]))
+        return False
+    foreign = subprocess.run(["dpkg", "--print-foreign-architectures"], env=ENV, stdout=subprocess.PIPE,
+                             text=True, timeout=60).stdout.split()
+    if foreign:
+        log("handtop=previous: this card has packages for other architectures (%s): going back isn't "
+            "supported there" % " ".join(foreign))
+        return False
     if not change and not remove:
         log("handtop=previous: release %s is already installed; nothing to do" % m.get("release"))
         return False
@@ -252,18 +302,19 @@ def handtop_previous(log):
                                        not (os.path.islink(MARKER) and os.readlink(MARKER) == STATE)):
         log("handtop=previous: another offline update is scheduled (/system-update); not touching it")
         return False
-    # A downloaded update is dropped, the kept release isn't. An update a cut interrupted keeps its
-    # archives and package list: its unfinished Debian work is finished from them (review #87).
-    fwd = read_json(PLAN) or {}
-    forward = fwd.get("packages", []) if fwd.get("kind") == "update" else []
-    for d in (STATE + "/lists", STATE + "/prefs.d", PREVIOUS + ".next") + (() if forward else (STATE + "/cache",)):
-        if os.path.isdir(d):
-            shutil.rmtree(d)
-    pid = uuid.uuid4().hex[:12]
-    write_json(PLAN, {"id": pid, "kind": "recovery", "created": int(time.time()),
-                      "release": m.get("release"), "packages": change, "remove": remove,
-                      "forward": [{"name": p["name"], "old": p.get("old"), "new": p.get("new"), "file": p.get("file"),
-                                   "algo": p.get("algo"), "hash": p.get("hash")} for p in forward]})
+    # A recovery plan already written for this request (a cut before the request was done): reused.
+    old = read_json(PLAN) or {}
+    if old.get("kind") == "recovery" and old.get("release") == m.get("release") and old.get("packages") == change \
+            and old.get("remove") == remove:
+        pid = old["id"]
+    else:
+        # A downloaded update is dropped (its files and plan), the kept release isn't.
+        for d in (STATE + "/cache", STATE + "/lists", STATE + "/prefs.d", PREVIOUS + ".next"):
+            if os.path.isdir(d):
+                shutil.rmtree(d)
+        pid = uuid.uuid4().hex[:12]
+        write_json(PLAN, {"id": pid, "kind": "recovery", "created": int(time.time()),
+                          "release": m.get("release"), "packages": change, "remove": remove})
     write_json(SCHEDULE, {"plan": pid, "after": "restart", "attempts": 0, "deferrals": 0,
                           "at": int(time.time()), "gen": uuid.uuid4().hex[:12]})
     if not os.path.lexists(MARKER):
@@ -293,16 +344,28 @@ def main():
         log = Log()
         for line in probe:
             log(line)
-        req = {"joypad": fat.get("joypad", "none"), "handtop": fat.get("handtop", "none"), "acked": False}
+        raw = read_fat_raw() or b""
+        # The file it came from (to tell a later PC edit from this request) and an id for the reset.
+        req = {"joypad": fat.get("joypad", "none"), "handtop": fat.get("handtop", "none"), "acked": False,
+               "src": hashlib.sha256(raw).hexdigest(), "id": uuid.uuid4().hex[:12]}
         write_json(REQUEST, req)                         # saved before recovery.txt is set back
     log = log or Log()
     if not req.get("acked", True) and os.path.ismount(FAT):
-        # Edited again on a PC since it was saved (and not yet acknowledged): the live one counts (#71).
-        live = read_fat_request(log)
-        live = {"joypad": live.get("joypad", "none"), "handtop": live.get("handtop", "none")}
-        if any(v not in ("", "none") for v in live.values()) and live != {k: req.get(k) for k in live}:
+        # Not yet acknowledged: if recovery.txt is no longer the file the request came from (nor this
+        # request's own reset), it was edited on a PC since: the newer content counts, also when it
+        # cancels everything (none) (#71, #106).
+        raw = read_fat_raw()
+        mine = template_for(req.get("id")).replace("\n", "\r\n").encode()
+        if raw is not None and req.get("src") and hashlib.sha256(raw).hexdigest() != req["src"] and raw != mine:
+            live = parse(raw.decode("utf-8", "replace"))
+            live = {"joypad": live.get("joypad", "none"), "handtop": live.get("handtop", "none")}
+            if not any(v not in ("", "none") for v in live.values()):
+                log("recovery.txt was set back to none on a PC before the request ran: cancelled")
+                os.unlink(REQUEST)
+                fsync_dir(STATE)
+                return 0
             log("recovery.txt changed since the request was saved: using the newer one")
-            req = dict(live, acked=False)
+            req = dict(live, acked=False, src=hashlib.sha256(raw).hexdigest(), id=uuid.uuid4().hex[:12])
             write_json(REQUEST, req)
     if not req.get("acked", True):
         # Set recovery.txt back to none before acting (also after a cut right after saving the
@@ -314,7 +377,7 @@ def main():
                 "waits for the next start")
             return 1
         try:
-            write_atomic(RECOVERY_TXT, TEMPLATE.replace("\n", "\r\n"))
+            write_atomic(RECOVERY_TXT, template_for(req.get("id")).replace("\n", "\r\n"))
         except OSError as e:
             log("could not set recovery.txt back to none (%s): not acting on it; asked again at the "
                 "next start" % e)

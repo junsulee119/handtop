@@ -111,7 +111,15 @@ the empty folder under the mount point).
 | `joypad=current` | Removes that override, re-indexes (always), checks; one restart. A later modules update does not remove it by itself. |
 | `handtop=previous` | Schedules a maintenance boot that removes the Handtop packages the kept release doesn't have (first: one may Break the older packages), then reinstalls the kept release (Handtop's packages and FFmpeg build, hashes checked; also packages at the same version a cut left unfinished) with `dpkg -i`, then `apt-get check`. The keyring stays. A downloaded update is dropped. One restart. Before an update is scheduled, a trial checks the end state (versioned and virtual dependencies, Breaks / Conflicts both ways, the same removals); a Debian-only update checks the release already kept and the app says when going back won't work after it. |
 
-Not covered: a broken `apt` / `dpkg` or a card that doesn't boot to userspace: reflash.
+`handtop=previous` runs only from a healthy card (decision 2026-11-25): dpkg may have unfinished work only on
+the packages going back replaces or removes (a cut while going back resumes); other unfinished work (for
+example an update a cut interrupted: it finishes by itself at the next start) or packages of another
+architecture make it refuse before anything changes. Right before its first change the worker checks the
+end state again against the card as it is (dependencies, virtual names, Breaks / Conflicts, and each kept
+package's pre-dependencies at the moment it is installed).
+
+Not covered: a broken `apt` / `dpkg`, an interrupted update that can't finish, or a card that doesn't boot to
+userspace: reflash.
 
 ## boot-check (every normal boot)
 

@@ -212,11 +212,28 @@ modpath=$(chroot "$ROOTFS" modinfo -k "$KVER" -n rocknix-singleadc-joypad || tru
 grep -q "would reboot now" <<<"$out" && [ -n "$modpath" ] && [[ "$modpath" != */updates/* ]] &&
   ok "joypad=current alone: packaged driver, restart asked" || bad "joypad=current alone: $modpath; $(echo "$out" | tail -2)"
 echo "== a request edited again on a PC before it was acknowledged: the newer one counts (#71)"
-printf '{"joypad": "previous", "handtop": "none", "acked": false}' > "$ROOTFS$S/recovery-request.json"
+src=$(printf 'joypad=previous\r\n' | sha256sum | cut -d' ' -f1)          # the file the saved request came from
+printf '{"joypad": "previous", "handtop": "none", "acked": false, "src": "%s", "id": "t1"}' "$src" > "$ROOTFS$S/recovery-request.json"
 printf 'joypad=current\r\n' > "$ROOTFS/boot/firmware/recovery.txt"
 hr >/dev/null 2>&1 || true
 modpath=$(chroot "$ROOTFS" modinfo -k "$KVER" -n rocknix-singleadc-joypad || true)
 [ -n "$modpath" ] && [[ "$modpath" != */updates/* ]] && ok "the newer request (current) was acted on" || bad "acted on the saved one: $modpath"
+echo "== ... and set back to none on a PC: the saved request is cancelled (#106)"
+printf '{"joypad": "none", "handtop": "previous", "acked": false, "src": "%s", "id": "t2"}' "$src" > "$ROOTFS$S/recovery-request.json"
+printf 'joypad=none\r\nhandtop=none\r\n' > "$ROOTFS/boot/firmware/recovery.txt"
+out=$(hr 2>&1 || true)
+[ ! -e "$ROOTFS$S/recovery-request.json" ] && no_marker && grep -q "cancelled" <<<"$out" &&
+  ok "cancelled on the PC: nothing scheduled" || bad "cancel: $(echo "$out" | tail -2)"
+echo "== handtop=previous with unfinished dpkg work on another package: refused, nothing scheduled (round 5)"
+x="$WORK/ut-pending2"; mkdir -p "$x/DEBIAN"
+printf 'Package: ut-pending2\nVersion: 1\nArchitecture: all\nMaintainer: t <t@t>\nDescription: t\n' > "$x/DEBIAN/control"
+dpkg-deb --root-owner-group -b "$x" "$ROOTFS/root/ut-pending2.deb" >/dev/null
+chroot "$ROOTFS" dpkg --unpack /root/ut-pending2.deb >/dev/null 2>&1
+printf 'handtop=previous\r\n' > "$ROOTFS/boot/firmware/recovery.txt"
+out=$(hr 2>&1 || true)
+no_marker && grep -q "unfinished work on other packages" <<<"$out" && ok "refused before anything changed" ||
+  bad "handtop=previous with unfinished work: $(echo "$out" | tail -2)"
+chroot "$ROOTFS" dpkg --purge ut-pending2 >/dev/null 2>&1; safe_rm "$ROOTFS/root/ut-pending2.deb"
 echo "== the boot partition missing: a request not yet acknowledged waits (review 2026-11-26 #71)"
 fat_off
 under=$(md5sum < "$ROOTFS/boot/firmware/recovery.txt" 2>/dev/null || echo none)
