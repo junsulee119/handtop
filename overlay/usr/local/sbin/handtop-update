@@ -956,16 +956,35 @@ def cmd_download():
 # installs the packages; afterwards config files the user never changed get the package's version
 # and the ones they changed stay (the package's next to them), other changed files are backed up.
 
-def release_data():
-    """{release: {path: {variant: (type, value)}}} from releases.tsv."""
-    data = {}
+def _release_rows():
     with open(RELEASES) as f:
         for line in f:
             if line.startswith("#") or not line.strip():
                 continue
-            rel, var, path, typ, val = line.rstrip("\n").split("\t")
+            cols = line.rstrip("\n").split("\t")
+            yield cols[:5] + [cols[5] if len(cols) > 5 else ""]
+
+
+def release_data():
+    """{release: {path: {variant: (type, value)}}} of Handtop's files, from releases.tsv."""
+    data = {}
+    for rel, var, path, typ, val, _mode in _release_rows():
+        if typ != "x":
             data.setdefault(rel, {}).setdefault(path, {})[var] = (typ, val)
     return data
+
+
+def release_extras(rel):
+    """(modes {path: {octal mode as the release shipped it}}, old FFmpeg files {path: {sha256}})."""
+    modes, legacy = {}, {}
+    for r, _var, path, typ, val, mode in _release_rows():
+        if r != rel:
+            continue
+        if typ == "x":
+            legacy.setdefault(path, set()).add(val)
+        elif typ == "f" and mode:
+            modes.setdefault(path, set()).add(mode)
+    return modes, legacy
 
 
 def card_value(path):
@@ -1060,7 +1079,8 @@ def adoption(plan, data):
     "keep": config files the user changed: they stay, the package's copy next to them (.dpkg-dist);
     "backup": [path, sha256] other files the user changed: copied to BACKUP, then replaced."""
     known = data.get(plan["from"]["release"], {})
-    res = {"replace": [], "keep": [], "backup": [], "ffmpeg_backup": [], "deleted": [], "links": []}
+    res = {"replace": [], "keep": [], "backup": [], "ffmpeg_backup": [], "deleted": [], "links": [], "modes": []}
+    modes, legacy = release_extras(plan["from"]["release"])
     owned = None
     for p in plan["packages"]:
         ffmpeg = p["name"] in FFMPEG_FAMILY + FFMPEG_DEV
@@ -1079,20 +1099,45 @@ def adoption(plan, data):
                 continue
             if ffmpeg:
                 # v0.4.x's own FFmpeg build put files no package owns (the ffmpeg binary, headers,
-                # BUILDINFO); Handtop's FFmpeg packages replace them: keep a copy of any that differ.
+                # BUILDINFO); Handtop's FFmpeg packages replace them: keep a copy of any the user
+                # changed (one still as the release shipped it needs none).
                 owned = owned if owned is not None else dpkg_owned()
-                if path not in owned and md5(path) != pkg_md5:
+                if path not in owned and cur[1] not in legacy.get(path, ()) and md5(path) != pkg_md5:
                     res["ffmpeg_backup"].append([path, cur[1]])
                 continue
             if cur in known.get(path, {}).values():
                 if path in conff and md5(path) != pkg_md5:
                     res["replace"].append([path, pkg_md5])
+                m = "%o" % stat.S_IMODE(os.stat(path).st_mode)
+                if modes.get(path) and m not in modes[path]:
+                    res["modes"].append([path, m])       # same content, permissions changed by the user
             elif md5(path) != pkg_md5:
                 if path in conff:
                     res["keep"].append(path)
                 else:
                     res["backup"].append([path, cur[1]])
     return res
+
+
+def remove_old_ffmpeg_files(rel, log):
+    """After the packages: files of v0.4.x's own FFmpeg build that are still no package's and unchanged
+    (old header location, examples, BUILDINFO) go, with folders left empty. Changed ones stay."""
+    _, legacy = release_extras(rel)
+    owned = dpkg_owned()
+    gone = 0
+    for path, sums in sorted(legacy.items()):
+        if path in owned or not os.path.isfile(path) or os.path.islink(path) or sha256(path) not in sums:
+            continue
+        os.unlink(path)
+        gone += 1
+        d = os.path.dirname(path)
+        while d not in ("/", "/usr", "/usr/include", "/usr/share", "/usr/bin") and os.path.isdir(d) \
+                and not os.listdir(d) and d not in owned:
+            os.rmdir(d)
+            d = os.path.dirname(d)
+    if gone:
+        log("removed %d unchanged file(s) of v0.4.x's own FFmpeg build that no package owns" % gone)
+    return gone
 
 
 def dpkg_owned():
@@ -1265,6 +1310,10 @@ def install_migrate(plan, log, budget):
                 break
     for path in plan_ad["keep"]:
         add_missing_settings(path, log)
+    if plan_ad.get("modes"):                             # the package's mode is back; note the user's
+        os.makedirs(BACKUP, exist_ok=True)
+        write_json(BACKUP + "/modes.json", dict(plan_ad["modes"]))
+    removed = remove_old_ffmpeg_files(plan["from"]["release"], log)
     for path in plan_ad.get("deleted", []):              # stays deleted (dpkg won't bring it back later)
         if os.path.lexists(path):
             os.unlink(path)
@@ -1272,7 +1321,10 @@ def install_migrate(plan, log, budget):
     unlink(MIGRATE_HOLDS)                # the released v0.4.x holds stay released
     unlink(NO_PREDECESSOR)
     return migrate_boot_files(plan, data, log) + (
-        ["%d changed file(s) backed up in %s" % (len(plan_ad["backup"]), BACKUP)] if plan_ad["backup"] else [])
+        ["%d changed file(s) backed up in %s" % (len(plan_ad["backup"]), BACKUP)] if plan_ad["backup"] else []) + (
+        ["%d leftover file(s) of v0.4.x's own FFmpeg build removed" % removed] if removed else []) + (
+        ["permissions you changed on %d file(s) are back to Handtop's; yours are noted in %s/modes.json"
+         % (len(plan_ad["modes"]), BACKUP)] if plan_ad.get("modes") else [])
 
 
 def cmd_migrate():

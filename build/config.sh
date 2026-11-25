@@ -52,7 +52,7 @@ CMA_SIZE="256M"                    # contiguous memory for the decoder (no IOMMU
 # - Base: the FFmpeg release Debian ships (trixie: 7.1.5), so the security fixes Debian has are
 #   in ours too and the libav ABI matches the one mpv, Chromium and VLC were built against.
 #   The source is Debian's own source package of that version (fetched and verified by apt in the
-#   rootfs, Debian's patches applied); our packages carry Debian's names and version + "+handtop1".
+#   rootfs, Debian's patches applied); our packages carry Debian's names and version + "+handtop<rev>".
 #   When Debian moves on (deb13u2, 7.1.6, ...), bump FFMPEG_VERSION / FFMPEG_DEBIAN_VERSION:
 #   docs/video-decode.md, "Updating FFmpeg". A superseded version disappears from trixie-security,
 #   so an old pin stops the build with a message saying so.
@@ -60,7 +60,11 @@ CMA_SIZE="256M"                    # contiguous memory for the decoder (no IOMMU
 #   (KWIBOO_BASE); the build applies diff KWIBOO_BASE..KWIBOO_PIN onto the base.
 FFMPEG_VERSION="7.1.5"
 FFMPEG_DEBIAN_VERSION="7:7.1.5-0+deb13u1"   # Debian's ffmpeg source package the build starts from
-FFMPEG_HANDTOP_VERSION="${FFMPEG_DEBIAN_VERSION}+handtop1"   # our packages: newer than Debian's for apt
+# Raise FFMPEG_HANDTOP_REV whenever our FFmpeg build changes but Debian's version doesn't (our patch,
+# the patchset pin, 04c, the packaging): apt only installs a new build under a new version. CI checks
+# it against build/pkg/ffmpeg-inputs.txt (tools/ffmpeg-inputs.sh). Back to 1 when Debian's changes.
+FFMPEG_HANDTOP_REV=1
+FFMPEG_HANDTOP_VERSION="${FFMPEG_DEBIAN_VERSION}+handtop${FFMPEG_HANDTOP_REV}"   # newer than Debian's for apt
 KWIBOO_URL="https://github.com/Kwiboo/FFmpeg"
 KWIBOO_BASE="f46e514491172d15bd74b4abb1814cd2f05a763e"     # tag n7.1.3
 KWIBOO_PIN="fad85d9c76611c09b561167ab405c667a0dcdeb7"      # head of v4l2-request-n7.1.3

@@ -223,6 +223,23 @@ def main():
                 raise SystemExit("%s would lack %s (from overlay/): refusing to build it" % (pkg, p))
     else:
         print("build-debs: not a git checkout, overlay completeness not checked", file=sys.stderr)
+    # No empty package, and the files other build steps generate must be there (required.txt).
+    short = []
+    for pkg in want:
+        if not files.get(pkg):
+            short.append("%s would be empty" % pkg)
+    with open(os.path.join(HERE, "required.txt")) as f:
+        for line in f:
+            parts = line.split("#", 1)[0].split()
+            if len(parts) < 2 or parts[0] not in want:
+                continue
+            need = int(parts[2]) if len(parts) > 2 else 1
+            have = sum(1 for p in files.get(parts[0], []) if fnmatch.fnmatchcase(p, parts[1]))
+            if have < need:
+                short.append("%s has %d file(s) matching %s, needs %d" % (parts[0], have, parts[1], need))
+    if short:
+        raise SystemExit("refusing to build packages missing generated files (an earlier step failed?):\n  "
+                         + "\n  ".join(short))
     unit_policy = units()
     for pkg in want:
         build(root, outdir, version, pkg, files.get(pkg, []), unit_policy)

@@ -70,6 +70,9 @@ echo "== the user's changes before migrating"
 CONF=/etc/rg35xxh/power.conf; OTHER=/usr/local/bin/rg35xxh-theme
 echo "# changed by the user (migrate-test)" >> "$ROOTFS$CONF"
 echo "# changed by the user (migrate-test)" >> "$ROOTFS$OTHER"
+MODEF=/usr/local/bin/rg35xxh-battery; chmod 700 "$ROOTFS$MODEF"     # permissions only (review #44)
+OLDH=/usr/include/libavutil/avutil.h; KEEPH=/usr/include/libavutil/common.h   # v0.4.x's own FFmpeg (#42)
+echo "/* changed by the user (migrate-test) */" >> "$ROOTFS$KEEPH"
 chroot "$ROOTFS" apt-mark hold nano >/dev/null                       # the user's own hold
 chroot "$ROOTFS" systemctl disable rg35xxh-bootlog.timer >/dev/null 2>&1   # a service the user turned off
 holds0=$(chroot "$ROOTFS" apt-mark showhold | sort | xargs)
@@ -125,6 +128,13 @@ if [ "$REL" = v0.4.0 ]; then
   grep -q '^\[rescue\]' "$ROOTFS/boot/firmware/rg35xxh-input.conf" && [ -f "$ROOTFS/boot/firmware/rg35xxh-input.conf.v0.4.0" ] &&
     ok "v0.4.0 input file is the rescue template, old one kept" || bad "v0.4.0 input file not replaced"
 fi
+grep -q "\"$MODEF\": \"700\"" "$ROOTFS/var/backups/handtop-migrate/modes.json" 2>/dev/null &&
+  [ "$(stat -c %a "$ROOTFS$MODEF")" = 755 ] && ok "changed permissions noted, Handtop's back" ||
+  bad "permissions: $(stat -c %a "$ROOTFS$MODEF"), modes.json: $(cat "$ROOTFS/var/backups/handtop-migrate/modes.json" 2>&1)"
+[ ! -e "$ROOTFS$OLDH" ] && grep -q "changed by the user" "$ROOTFS$KEEPH" &&
+  grep -q "removed [0-9]* unchanged file(s) of v0.4.x's own FFmpeg" "$WORK/migrate-apply.out" "$ROOTFS"/var/log/handtop-update/*.log 2>/dev/null &&
+  ok "old FFmpeg leftovers removed, the user's changed one kept" ||
+  bad "old FFmpeg files: $OLDH $([ -e "$ROOTFS$OLDH" ] && echo still there || echo gone), $KEEPH $(grep -c "changed by the user" "$ROOTFS$KEEPH" 2>&1)"
 [ ! -L "$ROOTFS/system-update" ] && ok "marker removed" || bad "marker still there"
 [ -f "$ROOTFS/usr/local/lib/rg35xxh-update/handtop_update/app.py" ] && ok "Update app installed" || bad "no Update app"
 [ "$(cat "$ROOTFS/usr/sbin/policy-rc.d" 2>/dev/null)" = "$(printf '#!/bin/sh\nexit 101')" ] && ok "policy-rc.d as before" || bad "policy-rc.d changed"

@@ -28,12 +28,16 @@ ln -sfn "$SRC_WORK/rocknix" "$ROCKNIX_EX"
 rsync -a --chown=root:root --chmod=D755,F644 "$TOP/overlay/" "$ROOTFS/"
 chmod 755 "$ROOTFS"/usr/local/sbin/* "$ROOTFS"/usr/local/bin/*
 chmod 0440 "$ROOTFS"/etc/sudoers.d/rg35xxh-*
+# The steps that install from src/ and changed since the finished build (its rootfs may be older):
+# without them the packages would lack generated files (build-debs.py refuses that).
+"$TOP/build/07d-theme.sh" >/dev/null
+"$TOP/build/07f-update-app.sh" >/dev/null
 
 echo "== release 1: the packages 09b builds and installs"
 "$TOP/build/09b-packages.sh"
 V1=$(chroot "$ROOTFS" dpkg-query -W -f '${Version}' handtop)
 FF1="$FFMPEG_HANDTOP_VERSION"
-FF2="${FF1%+handtop1}+handtop2"
+FF2="${FFMPEG_DEBIAN_VERSION}+handtop$((FFMPEG_HANDTOP_REV + 1))"
 
 echo "== FFmpeg $FF2: the same build repacked under a newer version"
 FFD="$WORK/ff2"; [ -e "$FFD" ] && safe_rm -r "$FFD"; mkdir -p "$FFD/x"

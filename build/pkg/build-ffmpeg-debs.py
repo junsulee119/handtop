@@ -4,7 +4,7 @@
 Takes the files `make install` put into <stage> and splits them into the packages Debian's ffmpeg
 source builds, using Debian's .debs of the same version as the reference for which file belongs
 to which package, and for each package's control fields, shlibs, symbols, triggers, copyright and
-changelogs. Our version is Debian's plus "+handtop1", so apt treats ours as the newer one.
+changelogs. Our version is Debian's plus "+handtop<rev>" (FFMPEG_HANDTOP_REV), so apt treats ours as the newer one.
 
     python3 build/pkg/build-ffmpeg-debs.py <stage> <reference-debs dir> <rootfs> <outdir> <version>
 

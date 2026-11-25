@@ -36,7 +36,7 @@
 #
 # The build installs into a staging folder; build/pkg/build-ffmpeg-debs.py turns that into
 # packages with Debian's names (libavcodec61, ..., ffmpeg, the -dev packages) and version
-# FFMPEG_HANDTOP_VERSION (Debian's + "+handtop1"), split and described like Debian's own .debs of
+# FFMPEG_HANDTOP_VERSION (Debian's + "+handtop<rev>"), split and described like Debian's own .debs of
 # the same version, and dpkg installs them over Debian's (updates without reflashing, step 3).
 #
 # Debian's ffmpeg is built against ~60 external libraries; a build with only
@@ -173,6 +173,16 @@ export PKG_CONFIG_LIBDIR="$ROOTFS/usr/lib/aarch64-linux-gnu/pkgconfig:$ROOTFS/us
 (cd "$SRC" && make -j"$(nproc)" > "$WORK/ffmpeg-build.log" 2>&1)
 
 (cd "$SRC" && make DESTDIR="$STAGE" install >> "$WORK/ffmpeg-build.log" 2>&1)
+# The cross-build's library paths (-L<rootfs>/usr/lib/...) end up in Libs.private of the .pc files:
+# they are the standard library directories on the handheld anyway, so they go (review #28).
+ROOTFS="$ROOTFS" python3 - "$STAGE"/usr/lib/aarch64-linux-gnu/pkgconfig/*.pc <<'PC'
+import os, re, sys
+root = re.escape(os.environ["ROOTFS"])
+for p in sys.argv[1:]:
+    t = open(p).read()
+    t = re.sub(r"[ \t]*-L" + root + r"\S*", "", t)
+    open(p, "w").write(t)
+PC
 
 file "$STAGE/usr/bin/ffmpeg" | grep -q "ARM aarch64" || die "ffmpeg is not arm64"
 grep -q "#define CONFIG_V4L2_REQUEST 1" "$SRC/config.h" || die "v4l2_request not compiled in"
@@ -211,6 +221,12 @@ mkdir -p "$STAGE/usr/share/doc/handtop-ffmpeg"
 } > "$STAGE/usr/share/doc/handtop-ffmpeg/BUILDINFO"
 chmod -R u=rwX,go=rX "$STAGE"
 python3 "$TOP/build/pkg/build-ffmpeg-debs.py" "$STAGE" "$DEB/ref" "$ROOTFS" "$WORK/pkg-ffmpeg" "$FFMPEG_HANDTOP_VERSION"
+# No packaged file may mention the build machine's paths (they leak the build account and point nowhere).
+for d in "$WORK"/pkg-ffmpeg/*.deb; do
+  if dpkg-deb --fsys-tarfile "$d" | tar -xO 2>/dev/null | grep -a -q -F "$ROOTFS"; then
+    die "$(basename "$d") contains the build root path ($ROOTFS)"
+  fi
+done
 
 # A reused rootfs still has the files earlier builds copied in without a package: headers in the
 # old /usr/include location, examples, BUILDINFO. The packages put everything else in place.

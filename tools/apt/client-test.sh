@@ -20,9 +20,9 @@ SRC
 : > "$T/etc/apt/sources.list"
 out=$(apt-get -o Dir::Etc="$T/etc/apt" -o Dir::State="$T/state" -o Dir::Cache="$T/cache" \
 	-o Dir::Etc::SourceList="$T/etc/apt/sources.list" -o APT::Architecture=arm64 \
-	-o Debug::NoLocking=1 update 2>&1) || true
+	-o Debug::NoLocking=1 update 2>&1) && rc=0 || rc=$?
 echo "$out"
-if echo "$out" | grep -E -q '^(W|E):|NO_PUBKEY|not signed|expired|invalid'; then
+if [ "$rc" != 0 ] || echo "$out" | grep -E -q '^(W|E):|NO_PUBKEY|not signed|expired|invalid'; then
 	echo "client-test: FAILED" >&2; exit 1
 fi
 echo "client-test: OK"

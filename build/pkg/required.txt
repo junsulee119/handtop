@@ -1,0 +1,19 @@
+# Files built by other steps (not in overlay/) that each Handtop package must contain, so a step that
+# silently produced nothing can't yield a package without them: dpkg would delete them from cards on
+# upgrade (review 2026-11-19 #9). Read by build-debs.py.
+# package          glob (fnmatch: * also matches /)                              at least
+handtop-core       /usr/local/sbin/handtop-update                                1
+handtop-core       /usr/local/sbin/handtop-recovery                              1
+handtop-core       /usr/local/lib/rg35xxh-inputd/rg35xxh_inputd/*.py             8
+handtop-core       /usr/local/lib/rg35xxh-controls/handtop_controls/*.py         9
+handtop-core       /usr/local/share/handtop/releases.tsv                         1
+handtop-core       /usr/local/share/handtop/boot/recovery.txt                    1
+handtop-core       /usr/local/share/handtop/boot/rg35xxh-input.conf              1
+handtop-desktop    /usr/local/lib/rg35xxh-update/handtop_update/*.py             4
+handtop-desktop    /usr/local/lib/rg35xxh-theme/handtop_theme/*.py              17
+handtop-desktop    /usr/local/lib/rg35xxh-media/handtop_media/*.py               7
+handtop-desktop    /usr/share/rg35xxh/themes/*/theme.json                        9
+handtop-desktop    /usr/share/icons/Handtop/index.theme                          1
+handtop-desktop    /usr/local/bin/nwg-drawer                                     1
+handtop-video      /usr/lib/aarch64-linux-gnu/dri/v4l2_request_drv_video.so      1
+handtop-keyring    /usr/share/keyrings/handtop-archive.asc                       1

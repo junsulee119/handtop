@@ -64,6 +64,7 @@ python3 -m pytest -q -p no:cacheprovider src/theme/tests || bad "pytest (src/the
 python3 -m pytest -q -p no:cacheprovider src/controls/tests || bad "pytest (src/controls)"
 python3 -m pytest -q -p no:cacheprovider src/media/tests || bad "pytest (src/media)"
 python3 -m pytest -q -p no:cacheprovider src/update/tests || bad "pytest (src/update)"
+bash tools/ffmpeg-inputs.sh || bad "FFmpeg build changed without a new FFMPEG_HANDTOP_REV"
 # handtop-migrate carries handtop-keyring's source, pin and key for cards that don't have the package yet
 python3 - <<'MIG' || bad "tools/apt/handtop-migrate: source, pin or key differs from the overlay"
 import re, sys
