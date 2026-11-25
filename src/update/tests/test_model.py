@@ -47,6 +47,7 @@ def test_result_text():
 def test_rollback_text():
     assert "first update" in M.rollback_text({"rollback": {"no_predecessor": True}}, None)
     assert "Debian" in M.rollback_text({"rollback": {"needed": False}}, None)
+    assert "won't be possible afterwards: y" in M.rollback_text({"rollback": {"needed": False, "kept_after": "y"}}, None)
     assert "recovery.txt" in M.rollback_text({"rollback": {"needed": True, "possible": True}}, "0.5.0")
     assert "not be possible: x" in M.rollback_text({"rollback": {"needed": True, "possible": False,
                                                                   "reason": "x"}}, None)

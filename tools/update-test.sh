@@ -200,6 +200,29 @@ printf 'joypad=current\n' > "$ROOTFS/boot/firmware/recovery.txt"
 hr || true
 modpath=$(chroot "$ROOTFS" modinfo -k "$KVER" -n rocknix-singleadc-joypad || true)
 [[ "$modpath" != */updates/* ]] && ok "joypad=current again: re-indexed, still the packaged driver" || bad "joypad $modpath"
+echo "== each joypad request alone restarts once (review 2026-11-26 #70: /lib is /usr/lib)"
+printf 'joypad=previous\r\n' > "$ROOTFS/boot/firmware/recovery.txt"
+out=$(hr 2>&1 || true)
+modpath=$(chroot "$ROOTFS" modinfo -k "$KVER" -n rocknix-singleadc-joypad || true)
+grep -q "would reboot now" <<<"$out" && [[ "$modpath" == */updates/handtop-recovery/* ]] &&
+  ok "joypad=previous alone: override used, restart asked" || bad "joypad=previous alone: $modpath; $(echo "$out" | tail -2)"
+printf 'joypad=current\r\n' > "$ROOTFS/boot/firmware/recovery.txt"
+out=$(hr 2>&1 || true)
+modpath=$(chroot "$ROOTFS" modinfo -k "$KVER" -n rocknix-singleadc-joypad || true)
+grep -q "would reboot now" <<<"$out" && [ -n "$modpath" ] && [[ "$modpath" != */updates/* ]] &&
+  ok "joypad=current alone: packaged driver, restart asked" || bad "joypad=current alone: $modpath; $(echo "$out" | tail -2)"
+echo "== the boot partition missing: a request not yet acknowledged waits (review 2026-11-26 #71)"
+fat_off
+under=$(md5sum < "$ROOTFS/boot/firmware/recovery.txt" 2>/dev/null || echo none)
+printf '{"joypad": "current", "handtop": "none", "acked": false}' > "$ROOTFS$S/recovery-request.json"
+hr >/dev/null 2>&1 || true
+[ "$(md5sum < "$ROOTFS/boot/firmware/recovery.txt" 2>/dev/null || echo none)" = "$under" ] && grep -q '"acked": false' "$ROOTFS$S/recovery-request.json" &&
+  ok "nothing written to the folder under the mount point, request kept" || bad "request acknowledged without the FAT"
+fat_on
+printf 'joypad=current\r\n' > "$ROOTFS/boot/firmware/recovery.txt"
+hr >/dev/null 2>&1 || true
+[ ! -e "$ROOTFS$S/recovery-request.json" ] && grep -q '^joypad=none' "$ROOTFS/boot/firmware/recovery.txt" &&
+  ok "with the FAT back: acknowledged on it and done" || bad "request with the FAT back"
 head -c 70000 /dev/zero | tr '\0' 'x' > "$ROOTFS/boot/firmware/recovery.txt"
 hr || true; no_marker && ok "oversized recovery.txt ignored" || bad "oversized recovery.txt acted on"
 fat_off
@@ -228,8 +251,28 @@ hu apply || true
 expect_versions "$V1" "$FF1"
 no_marker && ok "gives up after 3 attempts" || bad "still scheduled after 3 attempts"
 
+echo "== unfinished dpkg work before the first change: refused, nothing run, kept release untouched (#66, #67)"
+dl >/dev/null || true; hu schedule >/dev/null || true
+x="$WORK/ut-pending"; mkdir -p "$x/DEBIAN"
+printf 'Package: ut-pending\nVersion: 1\nArchitecture: all\nMaintainer: t <t@t>\nDescription: t\n' > "$x/DEBIAN/control"
+printf '#!/bin/sh\ntouch /root/ut-pending-configured\n' > "$x/DEBIAN/postinst"; chmod 755 "$x/DEBIAN/postinst"
+dpkg-deb --root-owner-group -b "$x" "$ROOTFS/root/ut-pending.deb" >/dev/null
+chroot "$ROOTFS" dpkg --unpack /root/ut-pending.deb >/dev/null 2>&1
+kept=$(md5sum < "$ROOTFS$S/previous/manifest.json" 2>/dev/null || echo none)
+fat_on; hu apply >/dev/null 2>&1 || true; fat_off
+st=$(hu status)
+[ "$(echo "$st" | js 'd["last_result"]["ok"]')" = False ] && echo "$st" | grep -q "nothing changed" &&
+  ok "apply refused: unfinished work outside the plan" || bad "apply with unfinished work: $(echo "$st" | js 'd["last_result"]')"
+[ ! -e "$ROOTFS/root/ut-pending-configured" ] && ok "its maintainer script did not run" || bad "dpkg --configure -a ran it"
+[ "$(md5sum < "$ROOTFS$S/previous/manifest.json" 2>/dev/null || echo none)" = "$kept" ] &&
+  ok "the kept release is the one from before (not replaced by a refused install)" || bad "kept release replaced"
+chroot "$ROOTFS" dpkg --purge ut-pending >/dev/null 2>&1; safe_rm "$ROOTFS/root/ut-pending.deb"
+[ -e "$ROOTFS/root/ut-pending-configured" ] && safe_rm "$ROOTFS/root/ut-pending-configured"
+
 echo "== power cut while installing: some packages unpacked at the new version"
 dl >/dev/null || true; hu schedule >/dev/null || true
+# A real cut comes after the worker recorded its first change (plan-changed.json).
+printf '{"plan": "%s"}' "$(hu status | js 'd["plan"]')" > "$ROOTFS$S/plan-changed.json"
 for p in handtop handtop-desktop libavcodec61; do
   chroot "$ROOTFS" dpkg --unpack "$(ls "$ROOTFS$S"/cache/${p}_*.deb | sed "s|^$ROOTFS||")" >/dev/null 2>&1 || true
 done
@@ -241,13 +284,26 @@ clean_dpkg "after resuming"
 echo "== a cut after the result was written: the next maintenance boot only finishes"
 fat_on; printf 'handtop=previous\n' > "$ROOTFS/boot/firmware/recovery.txt"; hr >/dev/null || true; fat_off
 pid=$(hu status | js 'd["plan"]')
-python3 - "$ROOTFS$S/last-result.json" "$pid" <<'P'
+# The result as finish() writes it: for this scheduling (its gen, review #34), not matched by the clock.
+python3 - "$ROOTFS$S/last-result.json" "$pid" "$ROOTFS$S/schedule.json" <<'P'
 import json, sys, time; json.dump({"plan": sys.argv[2], "ok": True, "final": True, "action": "reboot", "message": "test",
-                                  "time": int(time.time()) + 1}, open(sys.argv[1], "w"))
+                                  "time": int(time.time()), "gen": json.load(open(sys.argv[3]))["gen"]},
+                                 open(sys.argv[1], "w"))
 P
 out=$(hu apply || true)
 expect_versions "$V2" "$FF2"
 no_marker && [ ! -e "$ROOTFS$S/plan.json" ] && ok "finished without installing again" || bad "re-ran after a recorded result"
+echo "== a result from an earlier scheduling of the same plan doesn't count (gen, not the clock)"
+fat_on; printf 'handtop=previous\n' > "$ROOTFS/boot/firmware/recovery.txt"; hr >/dev/null || true; fat_off
+pid=$(hu status | js 'd["plan"]')
+python3 - "$ROOTFS$S/last-result.json" "$pid" <<'P'
+import json, sys, time; json.dump({"plan": sys.argv[2], "ok": True, "final": True, "action": "reboot", "message": "test",
+                                  "time": int(time.time()) + 60, "gen": "000000000000"}, open(sys.argv[1], "w"))
+P
+out=$(hu apply || true)
+expect_versions "$V1" "$FF1"
+no_marker && ok "an older scheduling's result (even with a later clock) didn't stop the install" || bad "marker left"
+fat_on; printf 'handtop=none\n' > "$ROOTFS/boot/firmware/recovery.txt"; fat_off
 
 echo "== the maintenance boot was stopped (time-out): the next normal boot reports it"
 printf '{"plan": "x", "attempt": 1, "started": 0}' > "$ROOTFS$S/in-progress.json"

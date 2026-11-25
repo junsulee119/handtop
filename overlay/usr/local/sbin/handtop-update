@@ -41,6 +41,7 @@ STATE = "/var/lib/handtop-update"
 PLAN = STATE + "/plan.json"
 SCHEDULE = STATE + "/schedule.json"     # {plan, after, attempts, deferrals}
 INPROGRESS = STATE + "/in-progress.json"
+CHANGED = STATE + "/plan-changed.json"    # the plan whose install has started changing packages
 RESULT = STATE + "/last-result.json"
 CHECKED = STATE + "/checked.json"
 CACHE = STATE + "/cache"                # the plan's .debs
@@ -105,7 +106,10 @@ NEVER_ROLLED_BACK = ("handtop-keyring",)    # an old keyring could lack the curr
 APT_ENV = dict(os.environ, DEBIAN_FRONTEND="noninteractive", LC_ALL="C",
                APT_LISTCHANGES_FRONTEND="none", PATH="/usr/sbin:/usr/bin:/sbin:/bin")
 CONF = ["--force-confdef", "--force-confold"]
-APT_CONF = ["-o", "Dpkg::Options::=--force-confdef", "-o", "Dpkg::Options::=--force-confold"]
+# Dpkg::Use-Pty=0: apt runs dpkg in a PTY in a new session otherwise, outside the process group a
+# time-out stops (review 2026-11-26 #68).
+APT_CONF = ["-o", "Dpkg::Options::=--force-confdef", "-o", "Dpkg::Options::=--force-confold",
+            "-o", "Dpkg::Use-Pty=0"]
 
 
 class Fail(Exception):
@@ -114,6 +118,11 @@ class Fail(Exception):
 
 class Drift(Fail):
     """The card no longer matches the plan: retrying can't help."""
+
+
+class Stuck(Drift):
+    """A timed-out command left processes or dpkg's lock behind: no retry in place (the restart that
+    follows ends them)."""
 
 
 def out(obj):
@@ -208,25 +217,98 @@ def tail(path, n):
         return f.read().decode("utf-8", "replace")
 
 
-def _stop_group(p):
-    """Stop a command and everything it started (apt's dpkg, maintainer scripts): TERM, then KILL."""
-    for sig, wait in ((signal.SIGTERM, 10), (signal.SIGKILL, 30)):
-        try:
-            os.killpg(p.pid, sig)
-        except ProcessLookupError:
-            return
-        try:
-            p.wait(timeout=wait)
-        except subprocess.TimeoutExpired:
+def _descendants(pid):
+    """Every process below pid (by parent links in /proc), including ones in other sessions."""
+    kids = {}
+    for e in os.listdir("/proc"):
+        if not e.isdigit():
             continue
-        # the leader is gone; give the rest of its group the same time to go
+        try:
+            with open("/proc/%s/stat" % e) as f:
+                ppid = int(f.read().rsplit(")", 1)[1].split()[1])
+        except (OSError, ValueError, IndexError):
+            continue
+        kids.setdefault(ppid, []).append(int(e))
+    res, todo = [], [pid]
+    while todo:
+        for c in kids.get(todo.pop(), []):
+            res.append(c)
+            todo.append(c)
+    return res
+
+
+def _alive(pid):
+    """Running (a zombie, waiting to be reaped, doesn't count)."""
+    try:
+        with open("/proc/%d/stat" % pid) as f:
+            return f.read().rsplit(")", 1)[1].split()[0] != "Z"
+    except (OSError, IndexError):
+        return False
+
+
+def _group_alive(pgid):
+    try:
+        os.killpg(pgid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return any(_alive(int(e)) for e in os.listdir("/proc") if e.isdigit() and _pgid(int(e)) == pgid)
+
+
+def _pgid(pid):
+    try:
+        return os.getpgid(pid)
+    except OSError:
+        return None
+
+
+def dpkg_lock_free():
+    """True when no process holds dpkg's locks (fcntl locks, as dpkg takes them)."""
+    for name in ("lock-frontend", "lock"):
+        path = "/var/lib/dpkg/" + name
+        try:
+            fd = os.open(path, os.O_RDWR)
+        except FileNotFoundError:
+            continue
+        try:
+            fcntl.lockf(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            fcntl.lockf(fd, fcntl.LOCK_UN)
+        except OSError:
+            return False
+        finally:
+            os.close(fd)
+    return True
+
+
+def _stop_group(p):
+    """Stop a command and everything it started (apt's dpkg, maintainer scripts): TERM, then KILL, to
+    its process group and every process below it (found before signalling: an orphan loses its
+    parent link). Raises Stuck when any of them, or dpkg's lock, is still there afterwards."""
+    procs = set()
+    for sig, wait in ((signal.SIGTERM, 10), (signal.SIGKILL, 30)):
+        procs |= set(_descendants(p.pid))
+        for kill, target in [(os.killpg, p.pid)] + [(os.kill, x) for x in procs]:
+            try:
+                kill(target, sig)
+            except (ProcessLookupError, PermissionError):
+                pass
         deadline = time.monotonic() + wait
         while time.monotonic() < deadline:
-            try:
-                os.killpg(p.pid, 0)
-            except ProcessLookupError:
-                return
+            p.poll()
+            if p.returncode is not None and not _group_alive(p.pid) and not any(_alive(x) for x in procs):
+                break
             time.sleep(0.5)
+        else:
+            continue
+        break
+    for _ in range(20):
+        left = sorted(x for x in procs if _alive(x))
+        if not left and dpkg_lock_free():
+            return
+        time.sleep(0.5)
+    raise Stuck("a timed-out command left %s; not retrying until the restart" % (
+        "processes %s running" % left if left else "dpkg's lock held"))
 
 
 def run(cmd, timeout, log=None, check=True, cwd=None):
@@ -358,16 +440,52 @@ def require_clean_dpkg():
                    % ", ".join(left[:8]))
 
 
-def first_attempt_clean(plan):
-    """Before the first attempt changes anything: dpkg may only have unfinished work on the plan's
-    own packages (a later attempt resumes those). Other pending work would run unchecked."""
-    if (read_json(INPROGRESS) or {}).get("attempt", 1) > 1:
+def pending_state():
+    """[(name as apt prints it, version, status)] of packages dpkg hasn't finished with."""
+    p = run(["dpkg-query", "-W", "-f", "${Package}\\t${Architecture}\\t${Version}\\t${db:Status-Abbrev}\\n"],
+            timeout=60)
+    res = []
+    for line in p.stdout.splitlines():
+        name, arch, ver, st = line.split("\t")
+        if len(st) > 1 and st[1] in "UHFWt":
+            res.append((name if arch in (native_arch(), "all") else "%s:%s" % (name, arch), ver, st[1]))
+    return res
+
+
+def plan_changed(plan):
+    """True once an attempt at this plan has started changing packages (kept across attempts and
+    reschedules: a kept migration resumes after a cut in the middle of its install)."""
+    return (read_json(CHANGED) or {}).get("plan") == plan.get("id")
+
+
+def mark_changed(plan):
+    """Recorded (synced) right before the first package change of a plan."""
+    if not plan_changed(plan):
+        write_json(CHANGED, {"plan": plan["id"], "time": int(time.time())})
+
+
+def dpkg_state_check(plan, any_version=False):
+    """Before anything of this plan changed packages, dpkg must have no unfinished work at all (it
+    would run unchecked: review 2026-11-26 #67). After a cut, only the plan's own packages may be
+    unfinished, at their old or planned version, plus trigger states (they run the installed versions'
+    own triggers). any_version (going back): the plan's packages at whatever version the failed
+    release left them, also on the first attempt; anything else unfinished still stops it."""
+    pend = pending_state()
+    if not any_version and not plan_changed(plan):
+        if pend:
+            raise Fail("dpkg has unfinished work (%s): nothing changed; finish it first "
+                       "(sudo dpkg --configure -a)" % ", ".join("%s %s" % (n, v) for n, v, _ in pend[:8]))
         return
-    mine = {p["name"].split(":")[0] for p in plan["packages"]} | set(plan.get("remove", []))
-    other = [n for n in pending_packages() if n not in mine]
+    allowed = {}
+    for p in plan["packages"]:
+        allowed.setdefault(p["name"], set()).update(x for x in (p.get("old"), p.get("new"), p.get("version")) if x)
+    for n in plan.get("remove", []):
+        allowed.setdefault(n, None)
+    other = ["%s %s" % (n, v) for n, v, st in pend if st not in "tW" and not (
+        n in allowed and (any_version or allowed[n] is None or v in allowed[n]))]
     if other:
-        raise Fail("dpkg has unfinished work outside this update (%s): nothing changed; finish it "
-                   "first (sudo dpkg --configure -a)" % ", ".join(other[:8]))
+        raise Drift("dpkg has unfinished work outside this update (%s): not continuing; finish it "
+                    "(sudo dpkg --configure -a)" % ", ".join(other[:8]))
 
 
 def boot_abi():
@@ -471,7 +589,8 @@ def apt_opts(frozen=False, held=False):
 
 
 def parse_sim(text):
-    inst, removes = [], []
+    """(installs, removals); parse_sim.confs: the (package, version) pairs apt would configure."""
+    inst, removes, confs = [], [], []
     for line in text.splitlines():
         m = re.match(r"^Inst (\S+) (?:\[(\S+)\] )?\((\S+) (.*?)(?: \[(\S+)\])?\)", line)
         if m:
@@ -480,6 +599,10 @@ def parse_sim(text):
         m = re.match(r"^(?:Remv|Purg) (\S+)", line)
         if m:
             removes.append(m.group(1))
+        m = re.match(r"^Conf (\S+) \((\S+)", line)
+        if m:
+            confs.append((m.group(1), m.group(2)))
+    parse_sim.confs = confs
     return inst, removes
 
 
@@ -543,7 +666,8 @@ def plan_transaction(frozen):
         return inst, False, []
     write_held_prefs()
     inst = simulate(apt_opts(frozen, held=True))
-    still = [i["name"] for i in inst if is_handtop(i["name"]) or i["name"] in FFMPEG_FAMILY + FFMPEG_DEV]
+    still = [i["name"] for i in inst if is_handtop(i["name"].split(":")[0])
+             or i["name"].split(":")[0] in FFMPEG_FAMILY + FFMPEG_DEV]          # name:arch too (#58)
     if still:    # e.g. an administrator's pin outranks ours: refuse rather than install them
         raise Fail("this card needs a new image, but the Debian-only update would still change %s "
                    "(check /etc/apt/preferences.d)" % ", ".join(still))
@@ -751,9 +875,10 @@ def rollback_set(have):
     return sorted(names)
 
 
-def stage_previous(plan_id, opts):
+def stage_previous(plan_id, opts, need_mb=0):
     """Download the installed release into previous.next (previous/ stays as it is until the
-    install starts). Returns its manifest."""
+    install starts). Returns its manifest. need_mb: what the plan itself needs on top; the space for
+    both is checked before this download starts (review 2026-11-26 #54)."""
     have = installed()
     names = rollback_set(have)
     tmp = NEXT + ".tmp"
@@ -761,6 +886,14 @@ def stage_previous(plan_id, opts):
     os.makedirs(tmp)
     stage_for_apt(tmp)
     want = ["%s=%s" % (n, have[n]) for n in names]
+    if want:
+        uris = run(["apt-get", "download", "--print-uris", "-q"] + opts + want, timeout=300, check=False, cwd=tmp)
+        prev_mb = sum(int(m.group(1)) for m in re.finditer(r"^'\S+' \S+ (\d+)", uris.stdout, re.M)) / 1e6
+        mb, inodes = free_space(STATE)
+        if mb < prev_mb + need_mb + 200 or inodes < MIN_INODES:
+            rmtree(tmp)
+            raise Fail("not enough free space to keep the current release for going back and install the "
+                       "update (%d MB free, %d MB needed)" % (mb, prev_mb + need_mb + 200))
     p = run(["apt-get", "download", "-q"] + opts + want, timeout=1800, check=False, cwd=tmp) if want else None
     os.chown(tmp, 0, 0)
     pkgs, missing = [], []
@@ -822,7 +955,7 @@ def _fields(deb):
     return f.get("Package"), f.get("Version"), j("Depends", "Pre-Depends"), f.get("Provides", ""), j("Breaks", "Conflicts")
 
 
-def trial_rollback(plan, manifest):
+def trial_rollback(plan, manifest, where=NEXT):
     """Would going back (what handtop-recovery does: install the kept release on top of the planned
     state, remove the Handtop packages the update added) leave every relationship satisfied? Static
     check of Depends / Pre-Depends (versioned and virtual), Breaks and Conflicts; None or the reason."""
@@ -837,16 +970,23 @@ def trial_rollback(plan, manifest):
             state[n.split(":")[0]] = (v, d, pr, br)
     for i in plan["packages"]:                                   # after the update
         state[i["name"].split(":")[0]] = _fields(os.path.join(CACHE, i["file"]))[1:]
+    before = dict(state)                                         # after the update, before going back
     back = set()
     for i in manifest["packages"]:                               # after going back
-        n, v, d, pr, br = _fields(os.path.join(NEXT, i["file"]))
+        n, v, d, pr, br = _fields(os.path.join(where, i["file"]))
         state[n] = (v, d, pr, br)
         back.add(n)
-    gone = {i["name"].split(":")[0] for i in plan["packages"] if is_handtop(i["name"]) and not i["old"]
-            and i["name"].split(":")[0] not in back and i["name"] not in NEVER_ROLLED_BACK}
-    for n in gone:                                               # recovery removes what the update added
+    # Recovery removes every Handtop package the kept release doesn't have (but the keyring): the
+    # ones this update adds and any added since (review 2026-11-26 #69).
+    gone = {n for n in state if is_handtop(n) and n not in back and n not in NEVER_ROLLED_BACK}
+    for n in gone:
         state.pop(n, None)
     touched = back | gone
+    # Virtual names those packages provide (before or after going back) are touched too.
+    for n in list(touched):
+        for st_ in (before, state):
+            if n in st_:
+                touched |= {name for name, _, _ in sum(_deps(st_[n][2]), [])}
     provides = {}
     for n, (v, d, pr, br) in state.items():
         for name, _, pv in sum(_deps(pr), []):
@@ -867,12 +1007,18 @@ def trial_rollback(plan, manifest):
             if not ok:
                 return "after going back, %s would need %s" % (n, " | ".join(
                     "%s%s" % (a[0], " (%s %s)" % (a[1], a[2]) if a[1] else "") for a in g))
+    providers = {}
+    for n, (v, d, pr, br) in state.items():
+        for name, _, pv in sum(_deps(pr), []):
+            providers.setdefault(name, []).append((n, pv))
     for n, (v, d, pr, br) in state.items():                      # Breaks / Conflicts, either way
         for name, op, ver in sum(_deps(br), []):
-            if name == n or name not in state or (n not in back and name not in back):
-                continue
-            if not op or _vcmp(state[name][0], op, ver):
-                return "after going back, %s would break %s %s" % (n, name, state[name][0])
+            if name in state and name != n and (n in back or name in back):
+                if not op or _vcmp(state[name][0], op, ver):
+                    return "after going back, %s would break %s %s" % (n, name, state[name][0])
+            for prov, pv in providers.get(name, []):             # a virtual name: who provides it
+                if prov != n and (n in back or prov in back) and (not op or (pv and _vcmp(pv, op, ver))):
+                    return "after going back, %s would break %s (provided by %s)" % (n, name, prov)
     return None
 
 
@@ -930,7 +1076,7 @@ def cmd_download():
         rmtree(NEXT)
         if any(is_handtop(p["name"]) or p["name"] in FFMPEG_FAMILY + FFMPEG_DEV for p in pkgs):
             # Plain apt options: the pins of a Debian-only plan must not stop this download.
-            manifest = stage_previous(plan["id"], apt_opts(True))
+            manifest = stage_previous(plan["id"], apt_opts(True), need_mb=2 * total)
             mb, inodes = free_space(STATE)
             if mb < 2 * total + 200 or inodes < MIN_INODES:
                 rmtree(NEXT)
@@ -939,8 +1085,14 @@ def cmd_download():
             reason = trial_rollback(plan, manifest)
             plan["rollback"] = {"needed": True, "possible": reason is None, "reason": reason,
                                 "no_predecessor": False}
-        else:       # Debian's packages only: going back to the kept Handtop release still works
-            plan["rollback"] = {"needed": False, "possible": True, "reason": None, "no_predecessor": False}
+        else:
+            # Debian's packages only: nothing to keep for this update, but the release already kept
+            # must still fit after it (a Debian update can break what an older Handtop needs). Not a
+            # reason to hold back Debian's updates: the app says going back won't work afterwards.
+            kept = read_json(PREVIOUS + "/manifest.json")
+            reason = trial_rollback(plan, kept, PREVIOUS) if kept and kept.get("complete") else None
+            plan["rollback"] = {"needed": False, "possible": True, "reason": None, "no_predecessor": False,
+                                "kept_after": reason}
         write_json(PLAN, plan)
         unlink(SCHEDULE)
         out({"ok": True, "plan": plan["id"], "packages": len(pkgs), "download_mb": round(total, 1),
@@ -1264,9 +1416,10 @@ def install_migrate(plan, log, budget):
         raise Fail("the boot partition is not mounted: nothing changed; run the command again")
     if plan.get("kernel_sha256") and card_value(FAT + "/KERNEL") != ("f", plan["kernel_sha256"]):
         raise Fail("this card's kernel changed since the download: nothing changed; flash the new image")
-    first_attempt_clean(plan)
+    dpkg_state_check(plan)
     opts = apt_opts(True)
-    run(["dpkg"] + CONF + ["--configure", "-a"], timeout=budget(1200), log=log, check=False)
+    if plan_changed(plan):
+        run(["dpkg"] + CONF + ["--configure", "-a"], timeout=budget(1200), log=log, check=False)
     plan_ad = plan.get("adoption") or adoption(plan, data)
     backup(plan_ad["backup"] + plan_ad.get("ffmpeg_backup", []), log)
     if plan_ad.get("links"):
@@ -1288,6 +1441,7 @@ def install_migrate(plan, log, budget):
         os.makedirs(os.path.dirname(UNITS_SEEN), exist_ok=True)
         write_atomic(UNITS_SEEN, "".join(u + "\n" for u in sorted(seen | present)))
     check_against_plan(plan, opts)
+    mark_changed(plan)
     run(["apt-get", "-q", "-y", "--no-download", "--no-remove", "-o", "Dir::Cache::archives=" + CACHE]
         + opts + ["install"] + plan_targets(plan), timeout=budget(3600), log=log)
     run(["dpkg"] + CONF + ["--configure", "-a"], timeout=budget(1200), log=log)
@@ -1412,6 +1566,15 @@ def cmd_schedule(after="restart", expected=None):
                 write_json(SCHEDULE, dict(sched, after=after))
             out({"ok": True, "restart": True, "after": after, "plan": plan["id"]})
             return 0
+        # Our marker without this plan's schedule: never start the attempt count again silently
+        # (review 2026-11-26 #56). Another plan's schedule: that one has to be cancelled first.
+        attempts = 0
+        if mk:
+            if sched and sched.get("plan") != plan["id"]:
+                raise Fail("an earlier install is still scheduled: cancel it first")
+            prog = read_json(INPROGRESS) or {}
+            if prog.get("plan") == plan["id"]:
+                attempts = int(prog.get("attempt") or 0)
         if not plan["rollback"]["possible"] and not plan["rollback"]["no_predecessor"]:
             raise Fail("going back would not be possible: %s" % plan["rollback"]["reason"])
         verify_files(plan["packages"], CACHE)
@@ -1429,8 +1592,9 @@ def cmd_schedule(after="restart", expected=None):
                             stderr=subprocess.DEVNULL, text=True, timeout=15).stdout.strip()
         if en != "enabled":
             raise Fail("%s is not enabled (%s): the update could not be installed" % (APPLY_UNIT, en or "?"))
-        write_json(SCHEDULE, {"plan": plan["id"], "after": after, "attempts": 0, "deferrals": 0,
-                              "at": int(time.time())})
+        # gen: this scheduling, so a result is matched to it exactly (not by clock: review #34)
+        write_json(SCHEDULE, {"plan": plan["id"], "after": after, "attempts": attempts, "deferrals": 0,
+                              "at": int(time.time()), "gen": uuid.uuid4().hex[:12]})
         set_marker()
         out({"ok": True, "restart": True, "after": after, "plan": plan["id"]})
         return 0
@@ -1438,7 +1602,7 @@ def cmd_schedule(after="restart", expected=None):
 
 def forget_plan():
     remove_marker()
-    for p in (PLAN, SCHEDULE):
+    for p in (PLAN, SCHEDULE, CHANGED):
         unlink(p)
     for d in (CACHE, LISTS, PREFS, NEXT):
         rmtree(d)
@@ -1592,23 +1756,36 @@ def check_against_plan(plan, opts):
                     ["install"] + plan_targets(plan))
     want = {(p["name"], p["new"]) for p in plan["packages"]}
     extra = ["%s %s" % (i["name"], i["new"]) for i in inst if (i["name"], i["new"]) not in want]
+    # Configure-only work (a package left unpacked at another version) must be the plan's too.
+    extra += ["%s %s (configure)" % c for c in getattr(parse_sim, "confs", [])
+              if c not in want and c[0] not in {i["name"] for i in inst}]
     if extra:
         raise Drift("this card changed since the download (%s); download the update again" % ", ".join(extra))
 
 
 def install_update(plan, log, budget):
     opts = apt_opts(True, plan.get("handtop_held"))
-    first_attempt_clean(plan)
-    if any(p["name"].startswith("handtop-modules-") for p in plan["packages"]):
-        # Before any change: the kernel on the boot partition is still the one boot-abi names.
+    dpkg_state_check(plan)
+    for p in plan["packages"]:
+        if not p["name"].startswith("handtop-modules-"):
+            continue
+        # Before any change: the kernel on the boot partition is the one boot-abi names and the one
+        # the planned modules package is built for (review 2026-11-26 #58).
         want = boot_abi().get("kernel_sha256")
-        if not os.path.ismount(FAT) or not want or card_value(FAT + "/KERNEL") != ("f", want):
-            raise Fail("the boot partition's kernel can't be checked or isn't the one %s names: "
-                       "nothing changed" % BOOT_ABI)
-    # After a power cut, packages unpacked at the new version may wait for siblings still at the old
-    # one: this pass then fails, and the install below completes the set.
-    run(["dpkg"] + CONF + ["--configure", "-a"], timeout=budget(1200), log=log, check=False)
+        built = run(["dpkg-deb", "-f", os.path.join(CACHE, p["file"]), "Handtop-Kernel-SHA256"],
+                    timeout=60).stdout.strip()
+        if not os.path.ismount(FAT) or not want or built != want or card_value(FAT + "/KERNEL") != ("f", want):
+            raise Fail("the boot partition's kernel can't be checked, or isn't the one %s names and %s is "
+                       "built for: nothing changed" % (BOOT_ABI, p["name"]))
+    if plan_changed(plan):
+        # After a power cut, packages unpacked at the new version may wait for siblings still at the
+        # old one: this pass then fails, and the install below completes the set.
+        run(["dpkg"] + CONF + ["--configure", "-a"], timeout=budget(1200), log=log, check=False)
     check_against_plan(plan, opts)
+    # Every check passed: only now does the release this card runs become the one kept for going
+    # back (the one kept until now stays while a check can still refuse; review 2026-11-26 #66).
+    mark_changed(plan)
+    promote_previous(plan["id"])
     run(["apt-get", "-q", "-y", "--no-download", "--no-remove", "-o", "Dir::Cache::archives=" + CACHE]
         + opts + ["install"] + plan_targets(plan), timeout=budget(3600), log=log)
     run(["dpkg"] + CONF + ["--configure", "-a"], timeout=budget(1200), log=log)
@@ -1623,13 +1800,19 @@ def install_update(plan, log, budget):
 
 
 def install_recovery(plan, log, budget):
+    dpkg_state_check(plan, any_version=True)
+    mark_changed(plan)
     run(["dpkg"] + CONF + ["--configure", "-a"], timeout=budget(1200), log=log, check=False)
+    # The packages the newer release added go first: one of them may Break the kept release's
+    # packages, and dpkg -i would refuse those then (review 2026-11-26 #69). The kept release's
+    # packages, installed right after, satisfy what depended on them (the trial checked the end state).
+    if plan.get("remove"):
+        run(["dpkg", "--remove", "--force-depends"] + plan["remove"], timeout=budget(1200), log=log)
     files = [os.path.join(PREVIOUS, p["file"]) for p in plan["packages"]]
     if files:
         run(["dpkg"] + CONF + ["-i"] + files, timeout=budget(3600), log=log)
-    if plan.get("remove"):
-        run(["dpkg", "--remove"] + plan["remove"], timeout=budget(1200), log=log)
     run(["dpkg"] + CONF + ["--configure", "-a"], timeout=budget(1200), log=log)
+    run(["apt-get", "check", "-q"] + APT_CONF, timeout=300, log=log)   # every dependency satisfied
     have = installed()
     wrong = [p["name"] for p in plan["packages"] if have.get(p["name"]) != p["version"]]
     wrong += [n for n in plan.get("remove", []) if n in have]
@@ -1662,7 +1845,7 @@ def finish(plan, ok, message, log, resume=False, extra=None):
     sched = read_json(SCHEDULE) or {}
     action = "poweroff" if resume or sched.get("after") == "poweroff" else "reboot"
     res = dict(extra or {}, plan=(plan or {}).get("id"), ok=ok, message=message, time=int(time.time()),
-               log=log.path, action=action, final=not resume)
+               log=log.path, action=action, final=not resume, gen=sched.get("gen"))
     write_json(RESULT, res)
     console(message)
     log(message)
@@ -1676,7 +1859,7 @@ def finish(plan, ok, message, log, resume=False, extra=None):
 
 def complete(ok, keep_plan=False):
     remove_marker()
-    for p in (SCHEDULE, INPROGRESS) + (() if keep_plan else (PLAN,)):
+    for p in (SCHEDULE, INPROGRESS) + (() if keep_plan else (PLAN, CHANGED)):
         unlink(p)
     if not keep_plan:
         for d in (LISTS, PREFS, NEXT) + ((CACHE,) if ok else ()):
@@ -1714,10 +1897,10 @@ def cmd_apply():
             repair_previous()
             # A result for this plan written during this schedule: a cut came after it. Finish only.
             # (An older result for the same plan, e.g. an interruption before it was scheduled again, is not.)
-            if (res.get("final") and plan and res.get("plan") == plan.get("id") and sched
-                    and res.get("time", 0) >= sched.get("at", 0)):
+            if (res.get("final") and plan and res.get("plan") == plan.get("id") and sched and (
+                    res.get("gen") == sched["gen"] if sched.get("gen") else res.get("time", 0) >= sched.get("at", 0))):
                 log("the result was recorded before a cut: finishing")       # idempotent end
-                copy_log_to_fat(log.path, "update")
+                copy_log_to_fat(res["log"] if os.path.isfile(res.get("log") or "") else log.path, "update")
                 complete(res.get("ok"), keep_plan=not res.get("ok") and plan.get("kind") == "migrate")
                 power(res.get("action", "reboot"))
                 return 0
@@ -1746,7 +1929,8 @@ def cmd_apply():
                 return 1
             write_json(SCHEDULE, dict(sched, attempts=attempts + 1, deferrals=0))
             prog_start = int(time.time())
-            write_json(INPROGRESS, {"plan": plan["id"], "attempt": attempts + 1, "started": prog_start})
+            write_json(INPROGRESS, {"plan": plan["id"], "attempt": attempts + 1, "started": prog_start,
+                                    "gen": sched.get("gen")})
             budget = Budget(APPLY_BUDGET)
             try:
                 if plan["kind"] in ("update", "migrate"):
@@ -1755,8 +1939,7 @@ def cmd_apply():
                     if mb < plan.get("size_mb", 0) + plan.get("backup_mb", 0) + 150 or inodes < MIN_INODES // 2:
                         raise Fail("not enough free space to install (%d MB, %d inodes free)" % (mb, inodes))
                     if plan["kind"] == "update":
-                        check_kept_release(plan)
-                        promote_previous(plan["id"])
+                        check_kept_release(plan)          # promoted by install_update, after its checks
                 else:
                     verify_files(plan["packages"], PREVIOUS)
             except Fail as e:
@@ -1826,8 +2009,8 @@ def cmd_boot_check():
         repair_previous()
         prog = read_json(INPROGRESS)
         res = read_json(RESULT) or {}
-        if prog and not our_marker() and res.get("final") and res.get("plan") == prog.get("plan") \
-                and res.get("time", 0) >= prog.get("started", 0):
+        if prog and not our_marker() and res.get("final") and res.get("plan") == prog.get("plan") and (
+                res.get("gen") == prog["gen"] if prog.get("gen") else res.get("time", 0) >= prog.get("started", 0)):
             unlink(INPROGRESS)        # the result was written, then a cut: keep it (and the plan's cleanup)
             if res.get("ok") or (read_json(PLAN) or {}).get("kind") != "migrate":
                 complete(res.get("ok"))

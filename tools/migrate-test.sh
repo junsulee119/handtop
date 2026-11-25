@@ -14,7 +14,7 @@ set -euo pipefail
 source "$(dirname "$(realpath "$0")")/../build/config.sh"
 source "$TOP/build/lib/chroot.sh"
 IMG=$(realpath "${1:?usage: migrate-test.sh <image.img.xz>}")
-ARCH_DIR="$WORK/device-archive/r1"
+ARCH_DIR="${HANDTOP_TEST_ARCHIVE:-$WORK/device-archive/r1}"   # run.sh: shared by parallel runs with their own WORK
 [ -f "$ARCH_DIR/Packages" ] || die "no test archive in $ARCH_DIR: run tools/update-device-archive.sh first"
 MNT="$WORK/migrate-mnt"; LOOP=""
 cleanup() {

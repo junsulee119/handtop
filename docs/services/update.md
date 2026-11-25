@@ -61,19 +61,28 @@ systemd sees `/system-update` and boots into `system-update.target`: no session,
 controller modes, no Wi-Fi. `handtop-update-apply.service` (through `handtop-run`):
 
 1. does nothing if the link isn't Handtop's; finishes a cut promotion of the kept release;
-2. if a final result for this plan is already recorded (cut after it): only finishes (link, files, restart);
+2. if a final result for this scheduling is already recorded (cut after it; matched by the schedule's
+   `gen`, not by the clock): only finishes (link, files, restart);
 3. stops if the plan and schedule don't match or 3 attempts were made (the card then starts normally);
 4. battery under 10 % without the charger, or unreadable after 20 s: switches off and keeps the plan
    (counted as a deferral; after 3 in a row the update is cancelled so the card can be used);
-5. counts the attempt, writes `in-progress.json`, verifies every archive's hash and the free space, and
-   only then makes `previous.next/` the kept release (`previous/`);
+5. counts the attempt, writes `in-progress.json`, verifies every archive's hash, the free space and the
+   staged release for going back;
 6. installs a `policy-rc.d` that refuses service starts (an administrator's own is set aside and put back);
-7. `dpkg --configure -a` (allowed to fail: after a power cut it can't configure packages whose siblings
-   are still old), checks that what apt would do is part of the plan (same versions, nothing else, no
-   removals; anything else: "the card changed since the download"), installs the plan's versions from
+7. checks dpkg's state: before this plan has changed anything (`plan-changed.json`), no unfinished work
+   at all is allowed (it would run unchecked); after a cut, only the plan's own packages at their old or
+   planned version, plus trigger states. Then, only after a cut, `dpkg --configure -a` (allowed to fail:
+   it can't configure packages whose siblings are still old). A modules update: the boot partition's
+   `KERNEL` must be the one `boot-abi` names and the package is built for. Checks that what apt would do
+   is part of the plan (same versions, nothing else, no removals, no configure-only work outside it;
+   anything else: "the card changed since the download"). Only now are the first change recorded and
+   `previous.next/` made the kept release (`previous/`): a refusal before this keeps the older kept
+   release, which is then still the right one to go back to. Installs the plan's versions from
    `cache/` with the frozen lists (`--no-download --no-remove`, edited config files kept), `dpkg --configure
    -a` again (must pass), gives back apt's automatic marks, checks every version. A failure is retried once
-   in place (not a changed card or a damaged file);
+   in place (not a changed card, a damaged file, or a time-out that left processes or dpkg's lock behind).
+   apt runs dpkg without a PTY (`Dpkg::Use-Pty=0`), so a time-out stops dpkg with apt: its process group
+   and every process below it (found before signalling), TERM then KILL;
 8. records the result first (synced), then copies the log to the FAT, then removes the plan's files and the
    link, then restarts or powers off. If systemd refuses that request, it is forced.
 
@@ -87,13 +96,15 @@ Power button: a long press is a hard cut by the power chip, not a clean shutdown
 
 On the boot partition, editable from any PC; read (at most 64 KiB) early in every boot. The request is saved
 in `/var/lib/handtop-update/recovery-request.json` before the file is set back to `none`, and a saved request
-is finished after a power cut. A read-only FAT means nothing is acted on (the file couldn't be reset).
+is finished after a power cut. A read-only FAT means nothing is acted on (the file couldn't be reset); so
+does a missing one (the request waits for a start with the boot partition mounted, never "set back" in
+the empty folder under the mount point).
 
 | Line | Effect |
 |---|---|
-| `joypad=previous` | The patched joypad driver from before the last modules update (kept by the modules package in `/var/lib/handtop/modules/`, only when another version replaced it) goes to `/usr/lib/modules/<kernel>/updates/handtop-recovery/`; re-indexed and checked with `modinfo -n`; one restart. ROCKNIX's unpatched driver is never used. |
+| `joypad=previous` | The patched joypad driver from before the last modules update (kept by the modules package in `/var/lib/handtop/modules/`, only when another version replaced it) goes to `/usr/lib/modules/<kernel>/updates/handtop-recovery/`; re-indexed and checked with `modinfo -n` (by file identity: kmod prints `/lib/modules`, the same folder); one restart. ROCKNIX's unpatched driver is never used. |
 | `joypad=current` | Removes that override, re-indexes (always), checks; one restart. A later modules update does not remove it by itself. |
-| `handtop=previous` | Schedules a maintenance boot that reinstalls the kept release (Handtop's packages and FFmpeg build, hashes checked) with `dpkg -i` and removes Handtop packages the newer release added. The keyring stays. A downloaded update is dropped. One restart. |
+| `handtop=previous` | Schedules a maintenance boot that removes the Handtop packages the kept release doesn't have (first: one may Break the older packages), then reinstalls the kept release (Handtop's packages and FFmpeg build, hashes checked; also packages at the same version a cut left unfinished) with `dpkg -i`, then `apt-get check`. The keyring stays. A downloaded update is dropped. One restart. Before an update is scheduled, a trial checks the end state (versioned and virtual dependencies, Breaks / Conflicts both ways, the same removals); a Debian-only update checks the release already kept and the app says when going back won't work after it. |
 
 Not covered: a broken `apt` / `dpkg` or a card that doesn't boot to userspace: reflash.
 

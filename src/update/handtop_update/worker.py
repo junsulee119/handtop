@@ -34,6 +34,11 @@ def call(*args):
     return res
 
 
+def _fully_installed(st):
+    """dpkg's status abbreviation says installed with no error flag; held (hi) counts (review #52)."""
+    return len(st) >= 2 and st[1] == "i" and (len(st) < 3 or st[2] == " ")
+
+
 def installed_release():
     """The installed release's name (Handtop-Release of the handtop metapackage), or None."""
     if FAKE:
@@ -42,7 +47,7 @@ def installed_release():
         p = subprocess.run(["dpkg-query", "-W", "-f", "${db:Status-Abbrev}\t${Handtop-Release}", "handtop"],
                            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, timeout=30)
         st, _, rel = p.stdout.partition("\t")
-        return rel.strip() or None if st.startswith("ii") else None     # only a fully installed release
+        return rel.strip() or None if _fully_installed(st) else None     # only a fully installed release
     except (OSError, subprocess.SubprocessError):
         return None
 
@@ -56,7 +61,7 @@ def installed_version():
         st, _, ver = p.stdout.partition("\t")
         if not ver.strip():
             return None
-        return ver.strip() if st.startswith("ii") else "%s (not fully installed)" % ver.strip()
+        return ver.strip() if _fully_installed(st) else "%s (not fully installed)" % ver.strip()
     except (OSError, subprocess.SubprocessError):
         return None
 

@@ -89,6 +89,9 @@ def rollback_text(plan_status, previous_release):
     if rb.get("no_predecessor"):
         return "This is the first update of this card: going back to the current release won't be possible."
     if rb.get("needed") is False:
+        if rb.get("kept_after"):
+            return ("Only Debian's packages change; Handtop stays as it is. Going back to the release kept "
+                    "earlier won't be possible afterwards: %s" % rb["kept_after"])
         return "Only Debian's packages change; Handtop stays as it is."
     if rb.get("possible"):
         return "If something goes wrong, recovery.txt on the SD card can go back to the release you have now."

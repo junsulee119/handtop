@@ -112,6 +112,9 @@ class App:
         self.win.set_icon_name("rg35xxh-update")
         self.win.set_default_size(640, 440)
         self.win.connect("destroy", lambda *a: self.loop.quit())
+        # While the worker is busy (scheduling, then the restart request) the window stays: closing it
+        # would end the thread that asks for the restart (review 2026-11-26 #53).
+        self.win.connect("delete-event", lambda *a: self.busy)
         self.win.connect("key-press-event", self._key)
         self.stack = Gtk.Stack()
         self.stack.set_transition_type(Gtk.StackTransitionType.NONE)
