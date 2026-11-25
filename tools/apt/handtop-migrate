@@ -50,13 +50,20 @@ mountpoint -q /boot/firmware || die "the boot partition (/boot/firmware) is not 
 [ -L /system-update ] || [ -L /etc/system-update ] &&
   die "an update or move is already scheduled: restart the handheld to install it"
 
-exec > >(tee -a "$LOG") 2>&1
+# One run at a time: a second one must not undo or change what a running one is doing (#84).
+exec 9> /run/handtop-migrate.lock
+flock -n 9 || die "handtop-migrate is already running"
+exec > >(exec 9>&-; tee -a "$LOG") 2>&1          # (the log copier doesn't hold the lock)
 echo "== handtop-migrate $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
 T=$(mktemp -d /var/tmp/handtop-migrate.XXXXXX)
+installed() { dpkg-query -W -f '${db:Status-Abbrev}' handtop 2>/dev/null | grep -q '^[ih]i'; }
 
 undo() {   # put back what $U records (nothing was installed: the move was never scheduled)
   echo "Putting back what this script changed (nothing was installed)."
-  [ -x "$W" ] && "$W" cancel >/dev/null 2>&1 || true        # plan, downloads; FFmpeg holds back
+  # plan, downloads; FFmpeg holds back. If that fails, the record stays for the next run (#85).
+  if [ -x "$W" ] && [ -e "$STATE/plan.json" ] && ! "$W" cancel >/dev/null 2>&1; then
+    echo "could not cancel the downloaded move; run this command again later"; return 1
+  fi
   [ -f "$U/apply-enabled" ] || systemctl disable handtop-update-apply.service >/dev/null 2>&1 || true
   for u in $DROPIN_UNITS; do
     if [ -f "$U/dropin-$u" ]; then cp -a "$U/dropin-$u" "/etc/systemd/system/$u.d/$DROPIN"
@@ -66,14 +73,25 @@ undo() {   # put back what $U records (nothing was installed: the move was never
     o="$U/orig/$(echo "$f" | tr / _)"
     if [ -e "$o" ]; then cp -a "$o" "$f"; elif grep -qx "$f" "$U/ABSENT" 2>/dev/null; then rm -f "$f"; fi
   done
-  [ -f "$U/share-new" ] && rm -rf /usr/local/share/handtop
+  if [ -f "$U/share-new" ]; then rm -rf /usr/local/share/handtop
+  elif [ -d "$U/share" ]; then         # the folder was there: each file as it was, new ones removed (#85)
+    (cd "$U/share" && find . -type f -print0) | while IFS= read -r -d '' f; do
+      cp -a "$U/share/$f" "/usr/local/share/handtop/$f"; done
+    while IFS= read -r f; do [ -n "$f" ] && rm -f "/usr/local/share/handtop/$f"; done < "$U/share-absent"
+  fi
   systemctl daemon-reload 2>/dev/null || true
   apt-get update -qq >/dev/null 2>&1 || true                # the lists without Handtop's source
   rm -rf "$U"; sync
 }
 if [ -d "$U" ]; then
-  echo "An earlier run stopped before the move was scheduled (power cut?): putting that back first."
-  undo
+  # Only a move that was never agreed to is put back. Once it was (or it is scheduled, or installed),
+  # the record is just dropped: undoing then would remove what the packages now own (review #84).
+  if [ -e "$U/consented" ] || installed || [ -L /system-update ] || [ -L /etc/system-update ]; then
+    rm -rf "$U"; sync
+  else
+    echo "An earlier run stopped before the move was scheduled (power cut?): putting that back first."
+    undo || die "could not put back the earlier run's changes"
+  fi
 fi
 
 # ---- a move that failed in the maintenance boot: resume its plan ---------------------------------
@@ -90,8 +108,7 @@ if [ -x "$W" ] && [ "$(json "$STATE/plan.json" 'd.get("kind")')" = migrate ]; th
   if [ "${HANDTOP_MIGRATE_NO_RESTART:-}" = 1 ]; then echo "scheduled (no restart: test)"; exit 0; fi
   echo "Restarting in 10 s."; sleep 10; systemctl reboot; exit 0
 fi
-! dpkg-query -W -f '${db:Status-Abbrev}' handtop 2>/dev/null | grep -q '^[ih]i' ||
-  die "this card has Handtop's packages already: open Apps > Update instead"
+! installed || die "this card has Handtop's packages already: open Apps > Update instead"
 
 # ---- from here on, everything this script changes is put back unless the move gets scheduled -----
 SCHEDULED=0
@@ -105,7 +122,9 @@ for u in $DROPIN_UNITS; do                       # a drop-in of that name the ca
 done
 [ "$(systemctl is-enabled handtop-update-apply.service 2>/dev/null)" = enabled ] && touch "$U.tmp/apply-enabled"
 sync; mv "$U.tmp" "$U"; sync                     # complete, then visible
-finish_or_undo() { if [ "$SCHEDULED" = 1 ]; then rm -rf "$U"; sync; else undo; fi; rm -rf "$T"; }
+finish_or_undo() {
+  if [ "$SCHEDULED" = 1 ] || [ -e "$U/consented" ]; then rm -rf "$U"; sync; else undo || true; fi
+  rm -rf "$T"; }
 trap finish_or_undo EXIT
 put() { cat > "$1.handtop-new"; mv -f "$1.handtop-new" "$1"; }   # whole file or nothing
 
@@ -176,6 +195,15 @@ for f in handtop-update handtop-run handtop-recovery; do
   install -m755 "$T/x/usr/local/sbin/$f" "/usr/local/sbin/$f"
 done
 install -d /usr/local/share/handtop
+if [ ! -f "$U/share-new" ]; then       # the folder was there: keep what each file was first (#85)
+  mkdir -p "$U/share"; : > "$U/share-absent"
+  (cd "$T/x/usr/local/share/handtop" && find . -type f) | while IFS= read -r f; do
+    if [ -e "/usr/local/share/handtop/$f" ]; then
+      mkdir -p "$U/share/$(dirname "$f")"; cp -a "/usr/local/share/handtop/$f" "$U/share/$f"
+    else echo "$f" >> "$U/share-absent"; fi
+  done
+  sync
+fi
 cp -a "$T/x/usr/local/share/handtop/." /usr/local/share/handtop/
 install -m644 "$T/x/etc/systemd/system/handtop-update-apply.service" "$UNIT"
 # The first maintenance boot still has v0.4.x's boot splash and Bluetooth check: keep them out of it.
@@ -219,6 +247,7 @@ echo "4/4 Install at the next start"
 ask "The handheld restarts and installs for a few minutes (keep it charged; don't switch it off). Go ahead?" ||
   die "cancelled: nothing installed"
 PID=$(json "$T/plan.json" 'd.get("plan")')     # exactly the plan shown above (review 2026-11-26 #63)
+echo "$PID" > "$U/consented"; sync               # from here on, a cut never undoes the move (#84)
 "$W" schedule restart "$PID" > "$T/sched.json" || die "$(json "$T/sched.json" 'd.get("error")' || cat "$T/sched.json")"
 SCHEDULED=1
 rm -rf "$U"

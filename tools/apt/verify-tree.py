@@ -140,6 +140,18 @@ def check_suite(tree, suite, a, now, pool_refs):
     for b in {base(n) for n in sha}:
         if b not in present:
             bad("%s: no form of %s is published" % (suite, b))
+    # Every architecture and component the Release names has its Packages index (#77).
+    for comp in f.get("Components", "").split():
+        for arch in f.get("Architectures", "").split():
+            if "%s/binary-%s/Packages" % (comp, arch) not in present:
+                bad("%s: %s/binary-%s/Packages is missing" % (suite, comp, arch))
+    # Acquire-By-Hash: each published index's current object is there under its SHA256 name.
+    if f.get("Acquire-By-Hash", "").lower() == "yes":
+        for name, (h, _) in sha.items():
+            if os.path.isfile(os.path.join(d, name)):
+                bh = os.path.join(d, os.path.dirname(name), "by-hash", "SHA256", h)
+                if not os.path.isfile(bh):
+                    bad("%s: by-hash object of %s is missing" % (suite, name))
     # Nothing unlisted in the suite's folder.
     for root, dirs, files in os.walk(d):
         for fn in files:
@@ -168,7 +180,10 @@ def check_suite(tree, suite, a, now, pool_refs):
     for b, names in present.items():
         if os.path.basename(b) != "Packages":
             continue
-        text = read_index(os.path.join(d, sorted(names, key=len)[0]))
+        forms = {n: read_index(os.path.join(d, n)) for n in names}
+        if len(set(forms.values())) > 1:          # every compressed form is the same index (#77)
+            bad("%s: the forms of %s differ" % (suite, b))
+        text = forms[sorted(names, key=len)[0]]
         for stanza in text.split("\n\n"):
             s = fields(stanza)
             if not s.get("Filename"):

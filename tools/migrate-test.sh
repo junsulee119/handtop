@@ -146,6 +146,9 @@ out=$(hu download 2>&1 || true); grep -q "hasn't finished" <<<"$out" && ok "down
 out=$(hu channel testing 2>&1 || true); grep -q "hasn't finished" <<<"$out" && ok "channel switch refused while the move is kept" || bad "channel: $out"
 pid=$(echo "$st" | js 'd["plan"]')
 deb=$(ls "$ROOTFS$SD"/cache/handtop-desktop_*.deb); printf 'XXXX' | dd of="$deb" bs=1 seek=2000 conv=notrunc status=none
+out=$(hu schedule restart "$pid" 2>&1 || true)
+grep -q "damaged" <<<"$out" && chroot "$ROOTFS" apt-mark showhold | grep -x libavcodec61 >/dev/null &&
+  ok "a refused resume (damaged file) leaves FFmpeg held (#92)" || bad "refused resume: $out; holds: $(chroot "$ROOTFS" apt-mark showhold | xargs)"
 out=$(migrate 2>&1 || true)
 grep -q "didn't finish" <<<"$out" && [ "$(hu status | js 'd["scheduled"] and d["plan"]')" = "$pid" ] &&
   ok "the command resumed the same plan (a damaged file fetched again)" || bad "resume: $(echo "$out" | tail -3)"
@@ -181,7 +184,8 @@ v=$(chroot "$ROOTFS" dpkg --verify handtop-core handtop-desktop handtop-video ha
 grep -q "changed by the user" "$ROOTFS$CONF" && [ -f "$ROOTFS$CONF.dpkg-dist" ] && ok "changed config kept, package's next to it" || bad "changed config not kept"
 grep -q "changed by the user" "$ROOTFS/var/backups/handtop-migrate$OTHER" && ! grep -q "changed by the user" "$ROOTFS$OTHER" &&
   ok "changed Handtop file backed up and replaced" || bad "changed Handtop file: backup or replace missing"
-grep -q "^ram=DDR4$" "$ROOTFS/etc/handtop/model" && grep -q "^kernel_sha256=" "$ROOTFS/etc/handtop/boot-abi" &&
+RAM=DDR4; case "$(basename "$IMG")" in *DDR3*) RAM=DDR3;; esac
+grep -q "^ram=$RAM$" "$ROOTFS/etc/handtop/model" && grep -q "^kernel_sha256=" "$ROOTFS/etc/handtop/boot-abi" &&
   ok "/etc/handtop/model and boot-abi written" || bad "identity files"
 [ -f "$ROOTFS/boot/firmware/recovery.txt" ] && ok "recovery.txt on the boot partition" || bad "no recovery.txt"
 if [ "$REL" = v0.4.0 ]; then
@@ -210,6 +214,12 @@ lnk=/usr/lib/aarch64-linux-gnu/libavcodec.so
 [ ! -L "$ROOTFS/system-update" ] && ok "marker removed" || bad "marker still there"
 [ -f "$ROOTFS/usr/local/lib/rg35xxh-update/handtop_update/app.py" ] && ok "Update app installed" || bad "no Update app"
 [ "$(cat "$ROOTFS/usr/sbin/policy-rc.d" 2>/dev/null)" = "$(printf '#!/bin/sh\nexit 101')" ] && ok "policy-rc.d as before" || bad "policy-rc.d changed"
+
+echo "== a stale undo record after the move never undoes it (review 2026-11-27 #84)"
+mkdir -p "$ROOTFS$SD/migrate-undo/orig"; echo /usr/local/sbin/handtop-update > "$ROOTFS$SD/migrate-undo/ABSENT"
+out=$(migrate 2>&1 || true)
+grep -q "has Handtop's packages already" <<<"$out" && [ -x "$ROOTFS/usr/local/sbin/handtop-update" ] &&
+  [ ! -e "$ROOTFS$SD/migrate-undo" ] && ok "stale record dropped, packaged worker kept" || bad "stale undo record: $(echo "$out" | tail -2)"
 
 echo "== a second run is refused"
 out=$(migrate 2>&1 || true)

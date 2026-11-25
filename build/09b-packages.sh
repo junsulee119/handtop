@@ -15,7 +15,7 @@ assert_rootfs
 # last release and before the next one (0.4.1+202611181930.gabc1234).
 # HANDTOP_RELEASE=1 (release builds, docs/release-checklist.md): HEAD must carry the tag, so the tested
 # packages are the released ones; a dev version (0.5.0+...) sorts above 0.5.0 (review 2026-11-26 #81).
-if git -C "$TOP" describe --exact-match --tags HEAD 2>/dev/null | grep -qx "v$RELEASE_VERSION"; then
+if git -C "$TOP" describe --exact-match --tags HEAD 2>/dev/null | grep -Fqx "v$RELEASE_VERSION"; then   # literal: dots aren't wildcards (#81)
   PKG_VERSION="$RELEASE_VERSION"
 elif [ "${HANDTOP_RELEASE:-0}" = 1 ]; then
   die "HANDTOP_RELEASE=1 but HEAD is not tagged v$RELEASE_VERSION: tag the release commit first (git tag v$RELEASE_VERSION)"

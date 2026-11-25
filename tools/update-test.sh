@@ -211,6 +211,12 @@ out=$(hr 2>&1 || true)
 modpath=$(chroot "$ROOTFS" modinfo -k "$KVER" -n rocknix-singleadc-joypad || true)
 grep -q "would reboot now" <<<"$out" && [ -n "$modpath" ] && [[ "$modpath" != */updates/* ]] &&
   ok "joypad=current alone: packaged driver, restart asked" || bad "joypad=current alone: $modpath; $(echo "$out" | tail -2)"
+echo "== a request edited again on a PC before it was acknowledged: the newer one counts (#71)"
+printf '{"joypad": "previous", "handtop": "none", "acked": false}' > "$ROOTFS$S/recovery-request.json"
+printf 'joypad=current\r\n' > "$ROOTFS/boot/firmware/recovery.txt"
+hr >/dev/null 2>&1 || true
+modpath=$(chroot "$ROOTFS" modinfo -k "$KVER" -n rocknix-singleadc-joypad || true)
+[ -n "$modpath" ] && [[ "$modpath" != */updates/* ]] && ok "the newer request (current) was acted on" || bad "acted on the saved one: $modpath"
 echo "== the boot partition missing: a request not yet acknowledged waits (review 2026-11-26 #71)"
 fat_off
 under=$(md5sum < "$ROOTFS/boot/firmware/recovery.txt" 2>/dev/null || echo none)
@@ -268,6 +274,13 @@ st=$(hu status)
   ok "the kept release is the one from before (not replaced by a refused install)" || bad "kept release replaced"
 chroot "$ROOTFS" dpkg --purge ut-pending >/dev/null 2>&1; safe_rm "$ROOTFS/root/ut-pending.deb"
 [ -e "$ROOTFS/root/ut-pending-configured" ] && safe_rm "$ROOTFS/root/ut-pending-configured"
+
+echo "== a cleanup cut short: finished at the next start, the plan doesn't look kept (#91)"
+dl >/dev/null || true
+pid=$(hu status | js 'd["plan"]')
+printf '{"plan": "%s", "ok": true, "keep_plan": false}' "$pid" > "$ROOTFS$S/cleanup.json"
+hu boot-check >/dev/null 2>&1 || true
+[ ! -e "$ROOTFS$S/plan.json" ] && [ ! -e "$ROOTFS$S/cleanup.json" ] && ok "boot-check finished the cleanup" || bad "cleanup not finished"
 
 echo "== power cut while installing: some packages unpacked at the new version"
 dl >/dev/null || true; hu schedule >/dev/null || true

@@ -32,6 +32,8 @@ fi
 if [ -n "$SUITE" ]; then
 	[ -s "$SUMS" ] || { echo "client-test: no $SUMS" >&2; exit 1; }
 	sed -i "s/^Suites: .*/Suites: $SUITE/" "$T/etc/apt/sources.list.d/handtop.sources"
+	# The card's own pins (handtop-keyring's file): what apt picks there is what cards get (#96).
+	cp "$(dirname "$(realpath "$0")")/../../overlay/etc/apt/preferences.d/handtop.pref" "$T/etc/apt/preferences.d/"
 	find "$T/state/lists" -maxdepth 1 -type f -delete
 	A=(-o Dir::Etc="$T/etc/apt" -o Dir::State="$T/state" -o Dir::Cache="$T/cache"
 	   -o Dir::Etc::SourceList="$T/etc/apt/sources.list" -o APT::Architecture=arm64 -o Debug::NoLocking=1)
@@ -43,9 +45,11 @@ if [ -n "$SUITE" ]; then
 		fi
 		got=$(sha256sum "$T/dl/"*.deb | cut -d' ' -f1); find "$T/dl" -type f -delete
 		[ "$got" = "$sum" ] || { echo "client-test: $pkg $ver from $SUITE is not the tested package" >&2; badn=$((badn+1)); }
+		cand=$(apt-cache "${A[@]}" policy "$pkg" </dev/null 2>/dev/null | sed -n 's/^  Candidate: //p')
+		[ "$cand" = "$ver" ] || { echo "client-test: in $SUITE a card would install $pkg $cand, not the tested $ver" >&2; badn=$((badn+1)); }
 		n=$((n+1))
 	done < "$SUMS"
 	[ "$badn" = 0 ] || { echo "client-test: FAILED ($badn of $n packages)" >&2; exit 1; }
-	echo "client-test: $n packages in $SUITE are the tested ones"
+	echo "client-test: $n packages in $SUITE are the tested ones, and the ones a card picks"
 fi
 echo "client-test: OK"

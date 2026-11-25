@@ -44,5 +44,6 @@ and they only carry the release version when the build runs on the tagged commit
 - [ ] The next re-sign date: 7 days before the deployed `Valid-Until` ([apt-repository.md](apt-repository.md#monthly-re-sign)).
 
 ## If a release has to be withdrawn
-- Switch `trixie-stable` back to the last good snapshot, sign, export, push; keep the withdrawn version's packages indexed (all released versions stay in the archive) so cards that installed it can still stage it as their kept release.
-- apt's pin doesn't downgrade cards already on the withdrawn version: prefer a corrective higher release; cards can also go back with `handtop=previous` (not a just-migrated card: it has no packaged predecessor until its first update).
+- Don't switch `trixie-stable` back to an older snapshot: that drops the withdrawn version's index entries (cards that installed it then can't stage it as their kept release), and apt's pin never downgrades cards that already have it.
+- Instead publish a **corrective higher version** (the last good code, rebuilt as the next patch release), into a snapshot that still has every earlier version (retention: all released versions stay indexed), through testing to stable as usual; `client-test.sh` confirms cards pick it.
+- Until then, cards can go back with `handtop=previous` (not a just-migrated card: it has no packaged predecessor until its first update). Say so in the release notes and the issue.

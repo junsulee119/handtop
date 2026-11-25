@@ -11,7 +11,7 @@ WORKER = "/usr/local/sbin/handtop-update"
 STATE = "/var/lib/handtop-update"
 FAKE = os.environ.get("HANDTOP_UPDATE_FAKE")
 # Longer than the worker's own limits (download: 3600 s for the plan + 1800 s for the kept release).
-TIMEOUTS = {"status": 60, "check": 900, "download": 6000, "schedule": 300, "cancel": 300, "channel": 300}
+TIMEOUTS = {"status": 60, "check": 900, "download": 6000, "schedule": 300, "cancel": 300, "channel": 300, "repair": 2400}
 
 
 def call(*args):

@@ -60,6 +60,11 @@ d3="$T/handtop-repotest_3.0_arm64.deb"
 echo "handtop-repotest 3.0 arm64 $(sha256sum < "$d3" | cut -d' ' -f1)" > "$T/packages.txt"
 out=$(bash "$HERE/client-test.sh" "file:$C" trixie-testing "$T/packages.txt" 2>&1) && ok "client gets the tested package from testing" ||
   bad "client-test: $(echo "$out" | tail -3)"
+# A higher version in the same suite: the tested 3.0 downloads, but cards would pick 3.1 (#96).
+$R add "$(deb 3.1)" >/dev/null 2>&1; $R snapshot s4 >/dev/null; $R publish s4 trixie-testing >/dev/null
+HANDTOP_APT_TEST_PASS='' bash "$HERE/sign.sh" >/dev/null 2>&1; X >/dev/null 2>&1 || true
+out=$(bash "$HERE/client-test.sh" "file:$C" trixie-testing "$T/packages.txt" 2>&1) && bad "client-test accepted a suite where cards pick another version" ||
+  { grep -q "a card would install handtop-repotest 3.1" <<<"$out" && ok "client-test refuses a suite where cards pick another version"; }
 echo "handtop-repotest 3.0 arm64 $(printf x | sha256sum | cut -d' ' -f1)" > "$T/packages.txt"
 out=$(bash "$HERE/client-test.sh" "file:$C" trixie-testing "$T/packages.txt" 2>&1) && bad "client-test accepted other bytes" ||
   { grep -q "is not the tested package" <<<"$out" && ok "client-test refuses bytes that weren't tested"; }

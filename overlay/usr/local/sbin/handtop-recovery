@@ -202,8 +202,8 @@ def joypad(want, log):
     if want == "previous":
         ok = found and os.path.samefile(path, override)
     else:
-        real, rtree, rodir = (os.path.realpath(x) for x in (path, tree, odir)) if found else ("", "", "")
-        ok = found and real.startswith(rtree + "/") and not real.startswith(rodir + "/")
+        packaged = os.path.join(tree, "rocknix-joypad", JOYPAD_KO)     # build/pkg/modules.txt (#70)
+        ok = found and os.path.isfile(packaged) and os.path.samefile(path, packaged)
     log("joypad: %s driver from the next start (%s)%s" % (want, path or "?", "" if ok else ": NOT as asked"))
     return ok
 
@@ -213,8 +213,8 @@ def installed():
     going back must replace or remove them too."""
     p = subprocess.run(["dpkg-query", "-W", "-f", "${Package}\\t${Version}\\t${db:Status-Abbrev}\\n"],
                        env=ENV, stdout=subprocess.PIPE, text=True, timeout=60)
-    return {n: (v, st[:2] == "ii") for n, v, st in (l.split("\t") for l in p.stdout.splitlines())
-            if len(st) > 1 and st[1] in "iUHFWt"}
+    return {n: (v, st[1] == "i" and (len(st) < 3 or st[2] == " ")) for n, v, st in
+            (l.split("\t") for l in p.stdout.splitlines()) if len(st) > 1 and st[1] in "iUHFWt"}
 
 
 def repair_previous():
@@ -252,13 +252,18 @@ def handtop_previous(log):
                                        not (os.path.islink(MARKER) and os.readlink(MARKER) == STATE)):
         log("handtop=previous: another offline update is scheduled (/system-update); not touching it")
         return False
-    # A downloaded update is dropped (its files and plan), the kept release isn't.
-    for d in (STATE + "/cache", STATE + "/lists", STATE + "/prefs.d", PREVIOUS + ".next"):
+    # A downloaded update is dropped, the kept release isn't. An update a cut interrupted keeps its
+    # archives and package list: its unfinished Debian work is finished from them (review #87).
+    fwd = read_json(PLAN) or {}
+    forward = fwd.get("packages", []) if fwd.get("kind") == "update" else []
+    for d in (STATE + "/lists", STATE + "/prefs.d", PREVIOUS + ".next") + (() if forward else (STATE + "/cache",)):
         if os.path.isdir(d):
             shutil.rmtree(d)
     pid = uuid.uuid4().hex[:12]
     write_json(PLAN, {"id": pid, "kind": "recovery", "created": int(time.time()),
-                      "release": m.get("release"), "packages": change, "remove": remove})
+                      "release": m.get("release"), "packages": change, "remove": remove,
+                      "forward": [{"name": p["name"], "old": p.get("old"), "new": p.get("new"), "file": p.get("file"),
+                                   "algo": p.get("algo"), "hash": p.get("hash")} for p in forward]})
     write_json(SCHEDULE, {"plan": pid, "after": "restart", "attempts": 0, "deferrals": 0,
                           "at": int(time.time()), "gen": uuid.uuid4().hex[:12]})
     if not os.path.lexists(MARKER):
@@ -291,6 +296,14 @@ def main():
         req = {"joypad": fat.get("joypad", "none"), "handtop": fat.get("handtop", "none"), "acked": False}
         write_json(REQUEST, req)                         # saved before recovery.txt is set back
     log = log or Log()
+    if not req.get("acked", True) and os.path.ismount(FAT):
+        # Edited again on a PC since it was saved (and not yet acknowledged): the live one counts (#71).
+        live = read_fat_request(log)
+        live = {"joypad": live.get("joypad", "none"), "handtop": live.get("handtop", "none")}
+        if any(v not in ("", "none") for v in live.values()) and live != {k: req.get(k) for k in live}:
+            log("recovery.txt changed since the request was saved: using the newer one")
+            req = dict(live, acked=False)
+            write_json(REQUEST, req)
     if not req.get("acked", True):
         # Set recovery.txt back to none before acting (also after a cut right after saving the
         # request), so the same line can't be acted on twice. Only on the mounted boot partition:

@@ -267,7 +267,7 @@ class App:
             box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
             box.get_style_context().add_class("rg-card")
             box.pack_start(_label(M.migration_kept_text()), False, False, 0)
-            box.pack_start(_button("Resume the move", lambda *a: self._do_schedule("restart"), suggested=True),
+            box.pack_start(_button("Resume the move", lambda *a: self._do_resume(), suggested=True),
                            False, False, 0)
             body.pack_start(box, False, False, 0)
         body.pack_start(_label("Updates are installed when the handheld restarts, so nothing changes while "
@@ -427,6 +427,18 @@ class App:
             self._restart_now()
         plan = (self.status or {}).get("plan")
         self._run(lambda: W.call("schedule", after, *([plan] if plan else [])), done)
+
+    def _do_resume(self):
+        """A kept migration: fetch any missing or damaged file of the same plan again, then schedule it
+        (review 2026-11-27 #95)."""
+        self._show_busy("Checking the downloaded files of the move…")
+
+        def done(res):
+            if not res.get("ok"):
+                self._main(error=M.friendly_error(res.get("error")))
+                return
+            self._do_schedule("restart")
+        self._run(lambda: W.call("repair"), done)
 
     def _restart_now(self):
         self._show_busy("Restarting to install the update…")
