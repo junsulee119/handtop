@@ -70,6 +70,17 @@ def diversions():
     return out
 
 
+def diversion_owners():
+    """{path: the Debian package that owns it} from diversions.txt."""
+    out = {}
+    with open(os.path.join(HERE, "diversions.txt")) as f:
+        for line in f:
+            line = line.split("#", 1)[0].split()
+            if line:
+                out[line[1]] = line[2]
+    return out
+
+
 def check_overlay():
     import subprocess
     top = os.path.dirname(os.path.dirname(HERE))

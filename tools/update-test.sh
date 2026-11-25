@@ -324,5 +324,8 @@ hu apply >/dev/null 2>&1 || true
 [ ! -e "$ROOTFS/system-update" ] && [ -L "$ROOTFS/etc/system-update" ] && ok "apply leaves it alone" || bad "apply touched the markers"
 safe_rm "$ROOTFS/etc/system-update"
 
+echo "== diversions of Debian's config files: install, Debian update, remove, purge (tools/divert-test.sh)"
+if out=$(bash "$TOP/tools/divert-test.sh" "$ROOTFS" 2>&1); then ok "$(echo "$out" | tail -1)"; else bad "$(echo "$out" | grep -e ^FAIL -e passed)"; fi
+
 echo; echo "update-test: $pass passed, $fail failed"
 [ "$fail" = 0 ]

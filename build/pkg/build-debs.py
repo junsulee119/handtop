@@ -106,19 +106,60 @@ def script(body):
     return "#!/bin/sh\nset -e\n" + body
 
 
+# Diversions of Debian's config files (diversions.txt; review 2026-11-19 #8). Added with --no-rename:
+# the file on disk stays where it is, so dpkg compares it with ours like any conffile. Before that,
+# Debian's copy is saved as <path>.debian if it is still as Debian shipped it (its md5 in dpkg's
+# status), so Debian's later versions of it update that copy normally. Removing the Handtop package
+# keeps its config files, as dpkg does for any package, so the diversion stays too; purging deletes
+# ours and puts Debian's back. Without a saved copy (a card whose file was Handtop's before the
+# packages came), Debian's updates arrive as <path>.debian.dpkg-dist: the next Handtop version
+# adopts that file; otherwise purging says how to get Debian's back.
+DIVERT_LIB = r"""debian_md5() {  # the md5 dpkg recorded for file $1 of Debian package $2
+    dpkg-query -W -f='${Conffiles}\n' "$2" 2>/dev/null | awk -v p="$1" '$1 == p { print $2; exit }'
+}
+ours() { dpkg-divert --listpackage "$1" 2>/dev/null | grep -qx "$PKG"; }
+"""
+
+DIVERT_PRE = r"""    if ! ours "$p"; then
+        if [ -f "$p" ] && [ ! -e "$p.debian" ] && [ "$(md5sum < "$p" | cut -d' ' -f1)" = "$(debian_md5 "$p" "$o")" ]; then
+            cp -p "$p" "$p.debian.tmp" && mv "$p.debian.tmp" "$p.debian"
+        fi
+        dpkg-divert --package "$PKG" --add --no-rename --divert "$p.debian" "$p" >/dev/null
+    elif [ ! -e "$p.debian" ] && [ -f "$p.debian.dpkg-dist" ]; then
+        mv "$p.debian.dpkg-dist" "$p.debian"
+    fi
+"""
+
+# purge: dpkg has deleted our copy. abort-install: the file is still Debian's (or the user's), so
+# a saved copy identical to it goes.
+DIVERT_POST = r"""    if ours "$p"; then
+        if [ -f "$p" ] && [ -f "$p.debian" ] && cmp -s "$p" "$p.debian"; then rm -f "$p.debian"; fi
+        if [ -e "$p" ] && [ -e "$p.debian" ]; then mv "$p" "$p.handtop"; echo "$PKG: kept $p as $p.handtop"; fi
+        if [ -e "$p.debian" ]; then
+            dpkg-divert --package "$PKG" --rename --remove "$p" >/dev/null
+        else
+            dpkg-divert --package "$PKG" --no-rename --remove "$p" >/dev/null
+            [ -e "$p" ] || [ "$1" = abort-install ] ||
+                echo "$PKG: $p is missing; Debian's copy: apt-get install --reinstall -o Dpkg::Options::=--force-confmiss $o"
+        fi
+    fi
+"""
+
+
+def divert_script(pkg, divs, actions, part):
+    body = "PKG=%s\n%scase \"$1\" in %s)\n" % (pkg, DIVERT_LIB, actions)
+    for p, owner in divs:
+        body += "    p='%s'; o='%s'\n%s" % (p, owner, part)
+    return body + "    ;;\nesac\n"
+
+
 def maintainer_scripts(pkg, paths, unit_policy):
-    divs = [(p, k) for p, k in audit.diversions().items() if k == pkg]
-    # No --rename when adding: the file on disk stays where it is, so dpkg compares it with ours
-    # like any conffile (identical: taken over; edited by the user: kept, ours saved as .dpkg-dist).
-    # Debian's own later versions of that path go to <path>.debian. Removing Handtop's package
-    # moves a .debian file back, if there is one.
-    add = "".join("    dpkg-divert --package %s --add --no-rename --divert '%s.debian' '%s'\n" % (pkg, p, p)
-                  for p, _ in divs)
-    rem = "".join("    dpkg-divert --package %s --rename --remove '%s'\n" % (pkg, p) for p, _ in divs)
+    owners = audit.diversion_owners()
+    divs = [(p, owners[p]) for p, k in audit.diversions().items() if k == pkg]
     out = {}
     if divs:
-        out["preinst"] = script('case "$1" in install|upgrade)\n%s    ;;\nesac\n' % add)
-        out["postrm"] = script('case "$1" in remove|abort-install|disappear)\n%s    ;;\nesac\n' % rem)
+        out["preinst"] = script(divert_script(pkg, divs, "install|upgrade", DIVERT_PRE))
+        out["postrm"] = script(divert_script(pkg, divs, "purge|abort-install|disappear", DIVERT_POST))
     mine = [u for u, pol in unit_policy.items() if pol == "enable" and "/etc/systemd/system/" + u in paths]
     sudoers = [p for p in paths if p.startswith("/etc/sudoers.d/")]
     body = 'if [ "$1" = configure ]; then\n'

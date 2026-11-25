@@ -1,5 +1,5 @@
 # Files Debian packages own (registered conffiles) that Handtop replaces. Each is moved aside with
-# dpkg-divert --rename by the package below before Handtop's copy is unpacked, so Debian's later
+# dpkg-divert by the package below (no rename; Debian's untouched copy saved as <path>.debian), so Debian's later
 # updates write to <path>.debian instead of over Handtop's file (project doc update-system.md).
 # package          path                                Debian owner
 handtop-core       /etc/default/zramswap               zram-tools

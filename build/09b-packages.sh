@@ -31,7 +31,26 @@ HANDTOP_RELEASE_VERSION="$RELEASE_VERSION" python3 "$TOP/build/pkg/build-platfor
 chroot_mount
 mkdir -p "$ROOTFS/tmp/handtop-pkg"
 cp "$PKG_OUT"/handtop*.deb "$ROOTFS/tmp/handtop-pkg/"
+# Debian's own copy of each file Handtop diverts (diversions.txt) goes next to it as <path>.debian,
+# from the owner's package at the installed version: the overlay has already replaced the file, and
+# the preinst only saves the copy on disk when it is still Debian's (review 2026-11-19 #8).
+mkdir -p "$ROOTFS/tmp/handtop-pkg/debian"
+grep -v '^[[:space:]]*#' "$TOP/build/pkg/diversions.txt" | while read -r _pkg path owner; do
+  [ -n "$path" ] || continue
+  in_chroot "cd /tmp/handtop-pkg/debian && apt-get download -qq $owner=\$(dpkg-query -W -f='\${Version}' $owner)" ||
+    die "can't download $owner for Debian's copy of $path"
+  deb=$(ls "$ROOTFS/tmp/handtop-pkg/debian/${owner}_"*.deb)
+  dpkg-deb --fsys-tarfile "$deb" | tar -xO ".$path" > "$ROOTFS$path.debian" || die "no $path in $deb"
+  want=$(in_chroot "dpkg-query -W -f='\${Conffiles}\n' $owner" | awk -v p="$path" '$1 == p { print $2 }')
+  [ "$(md5sum < "$ROOTFS$path.debian" | cut -d' ' -f1)" = "$want" ] || die "$path.debian is not the file dpkg recorded for $owner"
+  chmod 644 "$ROOTFS$path.debian"
+  safe_rm "$deb"
+done
 in_chroot "dpkg -i --force-confdef --force-confold /tmp/handtop-pkg/handtop*.deb"
+for path in $(grep -v '^[[:space:]]*#' "$TOP/build/pkg/diversions.txt" | awk '{print $2}'); do
+  [ -f "$ROOTFS$path.debian" ] && in_chroot "dpkg-divert --listpackage $path" | grep -q '^handtop-' ||
+    die "$path: no Handtop diversion with Debian's copy next to it"
+done
 safe_rm -r "$ROOTFS/tmp/handtop-pkg"
 # handtop-keyring's pin now keeps Debian's FFmpeg out; 04c's holds would keep FFmpeg updates back.
 # (Not in its postinst: apt-mark can't run while dpkg holds its lock. Cards: handtop-update.)
