@@ -34,7 +34,7 @@ chmod 0440 "$ROOTFS"/etc/sudoers.d/rg35xxh-*
 "$TOP/build/07f-update-app.sh" >/dev/null
 
 echo "== release 1: the packages 09b builds and installs"
-"$TOP/build/09b-packages.sh"
+HANDTOP_FFMPEG_PKGS="$SRC_WORK/pkg-ffmpeg" "$TOP/build/09b-packages.sh"
 V1=$(chroot "$ROOTFS" dpkg-query -W -f '${Version}' handtop)
 FF1="$FFMPEG_HANDTOP_VERSION"
 FF2="${FFMPEG_DEBIAN_VERSION}+handtop$((FFMPEG_HANDTOP_REV + 1))"

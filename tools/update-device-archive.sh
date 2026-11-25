@@ -32,7 +32,7 @@ chmod 0440 "$ROOTFS"/etc/sudoers.d/rg35xxh-*
 "$TOP/build/07f-update-app.sh" >/dev/null
 
 echo "== release 1"
-"$TOP/build/09b-packages.sh"
+HANDTOP_FFMPEG_PKGS="$SRC_WORK/pkg-ffmpeg" "$TOP/build/09b-packages.sh"
 V1=$(chroot "$ROOTFS" dpkg-query -W -f '${Version}' handtop)
 # The listing first: grep -q stopping early would break dpkg-deb's pipe and fail under pipefail.
 DESK=$(dpkg-deb -c "$WORK"/pkg/handtop-desktop_*.deb)

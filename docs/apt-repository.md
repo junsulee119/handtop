@@ -21,8 +21,8 @@ Part of updates without reflashing (planned for v0.5.0): Handtop's packages are 
 |---|---|---|
 | `repo.sh init` / `add` / `snapshot` / `publish <snapshot> <suite>` / `list` | aptly state in `~/.handtop-apt` (`aptly/`, `public/`); publishes unsigned | Claude or Jason |
 | `sign.sh` | sets `Date` and `Valid-Until`, writes `InRelease` and `Release.gpg`, checks both | Jason (passphrase) |
-| `export.sh <checkout>` | copies the signed tree into a `handtop-apt` checkout: links as files, `.nojekyll`, public key, README | Claude or Jason |
-| `client-test.sh <url>` | `apt-get update` against the live URL with a throwaway state; fails on any signature or expiry error | after every push |
+| `export.sh [--with-migrate] [--nonempty SUITE]… <checkout>` | checks the signed tree with `verify-tree.py` (both suites, signatures, Release fields and at least 7 days of validity, every index and by-hash object, every pool package, nothing unlisted; `--with-migrate`: this checkout's `handtop-migrate`, signed), copies it into a `handtop-apt` checkout (links as files, `.nojekyll`, public key, README; `.gitattributes` kept) and checks the checkout again | Claude or Jason |
+| `client-test.sh <url> [SUITE packages.txt]` | `apt-get update` against the live URL with a throwaway state; fails on any signature or expiry error. With a suite and a build's `work/pkg/packages.txt`: every package downloaded from that suite alone at its exact version must be the tested bytes | after every push |
 | `key-ceremony.sh`, `key-ceremony-wipe.sh` | one-time key creation | Jason |
 
 ## Publishing
@@ -36,6 +36,6 @@ The `handtop-apt` checkout has `.gitattributes` `* -text`: any line-ending conve
 
 ## Monthly re-sign
 
-Steps 2–4 above, about five minutes. Due before each `Valid-Until` (the first one: 2026-12-18).
+Steps 2–4 above, about five minutes. Start **7 days before** the deployed `Valid-Until` (check it in the live `dists/*/InRelease`), even without a new release; a reminder scheduled task fires for the first one (2026-12-11, expiry 2026-12-18).
 
 Tested 2026-11-18: an empty repository signed with the real subkey passes the client test against the live Pages URL; a `Release` signed with an expiry in the past is refused (`is expired`).

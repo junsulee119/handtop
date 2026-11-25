@@ -85,7 +85,9 @@ grep -q "cancelled: nothing installed" <<<"$out" && ok "No: cancelled" || bad "N
   [ ! -e "$ROOTFS/var/lib/handtop-update/plan.json" ] && ok "No: source, apply unit and plan gone" || bad "No: leftovers"
 [ "$(chroot "$ROOTFS" apt-mark showhold | sort | xargs)" = "$holds0" ] && ok "No: holds as before ($holds0)" ||
   bad "No: holds $(chroot "$ROOTFS" apt-mark showhold | sort | xargs), were $holds0"
-V1=$(sed -n 's/^Version: //p' "$ARCH_DIR"/Packages | grep -v '^7:' | sort -u | grep -m1 '+')
+# The metapackage's version in the test archive (a release build's is a bare 0.5.0; review #81).
+V1=$(awk '/^Package: /{p=$2} /^Version: /{if (p == "handtop") print $2}' "$ARCH_DIR"/Packages | sort -V | tail -1)
+[ -n "$V1" ] || { echo "no handtop package in $ARCH_DIR/Packages" >&2; exit 1; }
 
 echo "== handtop-migrate (plan, download, schedule)"
 if out=$(migrate 2>&1); then ok "handtop-migrate scheduled"; else bad "handtop-migrate failed: $(echo "$out" | tail -5)"; fi
