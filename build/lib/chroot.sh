@@ -35,7 +35,11 @@ chroot_mount() {
 chroot_dev_private() {
   local m p
   for m in dev dev/pts; do
-    mountpoint -q "$ROOTFS/$m" || continue
+    local rc=0
+    [ -e "$ROOTFS/$m" ] || continue
+    mountpoint -q "$ROOTFS/$m" || rc=$?
+    [ "$rc" = 32 ] && continue                   # not a mount point; any other failure: unknown (#119)
+    [ "$rc" = 0 ] || return 1
     p=$(findmnt -n -o PROPAGATION "$ROOTFS/$m" 2>/dev/null) || return 1
     case "$p" in ""|*shared*) return 1 ;; esac
   done

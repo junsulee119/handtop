@@ -9,8 +9,8 @@ Per suite (default: trixie-stable, trixie-testing; all must be there):
     fingerprint; InRelease carries exactly Release;
   - Origin / Label "Handtop", Suite and Codename = the suite's folder, Date not in the future,
     Valid-Until at least --min-valid-days ahead (default 7);
-  - every index Release lists: at least one form (Packages, .gz, .bz2, .xz) of each is there, and every
-    form that is there has the listed size and SHA-256; nothing else in the suite's folder but the
+  - every index form Release lists (Packages, .gz, .bz2, .xz) is there with the listed size and SHA-256,
+    and with Acquire-By-Hash its SHA256 and SHA512 by-hash objects; nothing else in the suite's folder but the
     signature files, the listed indexes and by-hash objects whose name is their own checksum (older
     generations stay for apt's cache window), aptly's current-index copies (identical to the index) and
     its <index>.old copies (identical to a by-hash object next to them);
@@ -95,6 +95,11 @@ def read_index(path):
         return f.read().decode("utf-8")
 
 
+def contents(name):
+    """Contents-* (apt-file's, never fetched by apt update; aptly lists empty ones it doesn't write)."""
+    return os.path.basename(base(name)).startswith("Contents-")
+
+
 def base(name):
     return re.sub(r"\.(gz|bz2|xz)$", "", name)
 
@@ -137,9 +142,10 @@ def check_suite(tree, suite, a, now, pool_refs):
             present.setdefault(base(name), []).append(name)
             if os.path.getsize(p) != size or digest(p) != h:
                 bad("%s/%s: size or SHA-256 differs from Release" % (suite, name))
-    for b in {base(n) for n in sha}:
-        if b not in present:
-            bad("%s: no form of %s is published" % (suite, b))
+        elif not contents(name):
+            # apt may fetch any form Release lists (it picks by its own compression order): a listed
+            # but missing form is a failed update on some cards (#120).
+            bad("%s/%s: listed in Release but not published" % (suite, name))
     # Every architecture and component the Release names has its Packages index (#77).
     for comp in f.get("Components", "").split():
         for arch in f.get("Architectures", "").split():
@@ -152,11 +158,16 @@ def check_suite(tree, suite, a, now, pool_refs):
     if f.get("Acquire-By-Hash", "").lower() == "yes":
         # apt asks for the strongest hash's object first (SHA512): every strong one must be there (#109)
         for alg in ("SHA256", "SHA512"):
-            for name, (h, _) in lst.get(alg, {}).items():
-                if os.path.isfile(os.path.join(d, name)):
-                    bh = os.path.join(d, os.path.dirname(name), "by-hash", alg, h)
-                    if not os.path.isfile(bh):
-                        bad("%s: %s by-hash object of %s is missing" % (suite, alg, name))
+            if alg not in lst:
+                continue
+            for name, (h, size) in lst[alg].items():   # every listed form (#120)
+                if contents(name) and not os.path.isfile(os.path.join(d, name)):
+                    continue
+                bh = os.path.join(d, os.path.dirname(name), "by-hash", alg, h)
+                if not os.path.isfile(bh):
+                    bad("%s: %s by-hash object of %s is missing" % (suite, alg, name))
+                elif os.path.getsize(bh) != size:
+                    bad("%s: %s by-hash object of %s has the wrong size" % (suite, alg, name))
     # Nothing unlisted in the suite's folder.
     for root, dirs, files in os.walk(d):
         for fn in files:

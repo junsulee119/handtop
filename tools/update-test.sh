@@ -229,10 +229,15 @@ x="$WORK/ut-pending2"; mkdir -p "$x/DEBIAN"
 printf 'Package: ut-pending2\nVersion: 1\nArchitecture: all\nMaintainer: t <t@t>\nDescription: t\n' > "$x/DEBIAN/control"
 dpkg-deb --root-owner-group -b "$x" "$ROOTFS/root/ut-pending2.deb" >/dev/null
 chroot "$ROOTFS" dpkg --unpack /root/ut-pending2.deb >/dev/null 2>&1
+[ -d "$ROOTFS$S/previous" ] && cp -a "$ROOTFS$S/previous" "$ROOTFS$S/previous.old"   # as after a failed update (#110)
+kept=$(md5sum < "$ROOTFS$S/previous/manifest.json" 2>/dev/null || echo none)
 printf 'handtop=previous\r\n' > "$ROOTFS/boot/firmware/recovery.txt"
 out=$(hr 2>&1 || true)
 no_marker && grep -q "unfinished work on other packages" <<<"$out" && ok "refused before anything changed" ||
   bad "handtop=previous with unfinished work: $(echo "$out" | tail -2)"
+[ -d "$ROOTFS$S/previous.old" ] && [ "$(md5sum < "$ROOTFS$S/previous/manifest.json")" = "$kept" ] &&
+  ok "refused: the kept releases weren't swapped (#110)" || bad "a refused request swapped previous / previous.old"
+[ -d "$ROOTFS$S/previous.old" ] && safe_rm -r "$ROOTFS$S/previous.old"
 chroot "$ROOTFS" dpkg --purge ut-pending2 >/dev/null 2>&1; safe_rm "$ROOTFS/root/ut-pending2.deb"
 echo "== the boot partition missing: a request not yet acknowledged waits (review 2026-11-26 #71)"
 fat_off

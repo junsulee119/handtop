@@ -457,8 +457,9 @@ def pending_state():
     res = []
     for line in p.stdout.splitlines():
         name, arch, ver, st = line.split("\t")
-        if len(st) > 1 and st[1] in "UHFWt":
-            res.append((name if arch in (native_arch(), "all") else "%s:%s" % (name, arch), ver, st[1]))
+        if len(st) > 1 and (st[1] in "UHFWt" or (len(st) > 2 and st[2] not in " ")):   # also error flags
+            res.append((name if arch in (native_arch(), "all") else "%s:%s" % (name, arch), ver,
+                        st[1] if st[1] in "UHFWt" else "R"))
     return res
 
 
@@ -491,8 +492,8 @@ def dpkg_state_check(plan, any_version=False):
         allowed.setdefault(p["name"], set()).update(x for x in (p.get("old"), p.get("new"), p.get("version")) if x)
     for n in plan.get("remove", []):
         allowed.setdefault(n, None)
-    other = ["%s %s" % (n, v) for n, v, st in pend if st not in "tW" and not (
-        n in allowed and (any_version or allowed[n] is None or v in allowed[n]))]
+    other = ["%s %s" % (n, v) for n, v, st in pend if (st not in "tW" or any_version) and not (
+        n in allowed and (any_version or allowed[n] is None or v in allowed[n]))]   # recovery: no others' triggers
     if other:
         raise Drift("dpkg has unfinished work outside this update (%s): not continuing; finish it "
                     "(sudo dpkg --configure -a)" % ", ".join(other[:8]))
@@ -981,9 +982,11 @@ def trial_rollback(plan, manifest, where=NEXT, live=False):
         return "the release to go back to isn't complete (%s)" % ", ".join((manifest or {}).get("missing", []) or ["none kept"])
     p = run(["dpkg-query", "-W", "-f", "${binary:Package}\\t${Version}\\t${Depends}, ${Pre-Depends}\\t"
              "${Provides}\\t${Breaks}, ${Conflicts}\\t${db:Status-Abbrev}\\n"], timeout=120)
-    state, foreign = {}, {}
+    state, foreign, healthy = {}, {}, set()
     for line in p.stdout.splitlines():
         n, v, d, pr, br, st = line.split("\t")
+        if st[:1] in "ih" and st[1:2] == "i" and st[2:3] in ("", " "):
+            healthy.add(n.split(":")[0])
         if len(st) > 1 and st[1] in "iUHFWt":
             if ":" in n and n.split(":", 1)[1] not in (native_arch(), "all"):
                 foreign[n] = d                   # another architecture: not modelled, see below
@@ -1039,13 +1042,21 @@ def trial_rollback(plan, manifest, where=NEXT, live=False):
     # dpkg -i unpacks the kept packages in order, after the removals: each one's Pre-Depends must hold
     # in the card's state at that point (removed packages gone, kept ones not yet installed; #101).
     if live:
-        at_install = {n: x for n, x in before.items() if n not in gone}
-        prov = {name for n, x in at_install.items() for name, _, _ in sum(_deps(x[2]), [])}
+        # Only healthy packages that stay untouched while dpkg -i runs count; a pre-dependency on
+        # anything going back changes (or a name it provides) would depend on dpkg's order: refused (#112).
+        at_install = {n: x for n, x in before.items() if n not in gone and n not in back and n in healthy}
+        prov = {}
+        for n, x in at_install.items():
+            for name, _, pv in sum(_deps(x[2]), []):
+                prov.setdefault(name, []).append(pv)
         for i in manifest["packages"]:
             pre = run(["dpkg-deb", "-f", os.path.join(where, i["file"]), "Pre-Depends"], timeout=60).stdout.strip()
             for g in _deps(pre):
+                if any(a[0] in touched for a in g):
+                    return "%s pre-depends on %s, which going back changes" % (i["name"], " | ".join(a[0] for a in g))
                 if not any((a[0] in at_install and (not a[1] or _vcmp(at_install[a[0]][0], a[1], a[2])))
-                           or (not a[1] and a[0] in prov) for a in g):
+                           or any((not a[1]) or (pv and _vcmp(pv, a[1], a[2])) for pv in prov.get(a[0], []))
+                           for a in g):
                     return "%s's pre-dependency %s isn't there when it is installed" % (
                         i["name"], " | ".join(a[0] for a in g))
     providers = {}
@@ -1439,6 +1450,26 @@ def fat_uuid():
     return p.stdout.strip() or None
 
 
+def fat_on_root_disk():
+    """The partition on /boot/firmware is on the same disk as / (images share the FAT's serial, so the
+    UUID alone can't tell this card's boot partition from another card in a reader; #115)."""
+    def disk(target):                            # by device number: also when / shows as /dev/root
+        try:
+            st = os.stat(target)
+            dev = os.path.realpath("/sys/dev/block/%d:%d" % (os.major(st.st_dev), os.minor(st.st_dev)))
+        except OSError:
+            return None
+        if not os.path.isdir(dev):
+            return None                          # not a block device (tmpfs, overlay)
+        return os.path.dirname(dev) if os.path.isfile(os.path.join(dev, "partition")) else dev
+    if not os.path.ismount(FAT):
+        return False
+    a, b = disk(FAT), disk("/")
+    if a is None or b is None:
+        return CHROOT_TEST                       # tests: a tmpfs boot partition in a chroot
+    return a == b
+
+
 def fat_write(name, data, log):
     """Write a file on the boot partition (temp file, sync, rename); only when it is really mounted.
     A write error (full, I/O error) is False too, never an exception: the packages are installed by
@@ -1476,7 +1507,7 @@ def migrate_boot_files(plan, data, log):
         "uuid": plan.get("fat_uuid"), "plan": plan.get("id")}
     if not pend:
         write_json(BOOT_PENDING, {"release": rel, "files": ["recovery.txt", "rg35xxh-input.conf"], "ident": ident})
-    if not os.path.ismount(FAT) or (ident.get("uuid") and fat_uuid() != ident["uuid"]) or not ident.get("kernel") \
+    if not fat_on_root_disk() or (ident.get("uuid") and fat_uuid() != ident["uuid"]) or not ident.get("kernel") \
             or any(v and card_value(FAT + "/" + n) != ("f", v)
                    for n, v in (("rootfix.cpio", ident.get("rootfix")), ("KERNEL", ident.get("kernel")))):
         return ["boot partition files not written yet (this card's boot partition isn't mounted or can't be "
@@ -1555,6 +1586,8 @@ def add_missing_settings(path, log):
 
 UNITS_DIR = "/etc/systemd/system"
 RECOVERY_UNITS = ("handtop-recovery.service", "handtop-update-boot-check.service")
+RECOVERY_UNIT_TARGETS = {"handtop-recovery.service": "sysinit.target",
+                         "handtop-update-boot-check.service": "multi-user.target"}
 
 
 def _sync_up(path):
@@ -1580,6 +1613,15 @@ def save_newest(path, sha, log):
     log("changed after the plan, kept in the backup folder: %s" % path)
 
 
+def load_edits(plan):
+    """later-edits.json for this plan, every field present (#114)."""
+    j = read_json(LATER_EDITS) or {}
+    if j.get("plan") != plan["id"]:
+        j = {}
+    return {"plan": plan["id"], "files": j.get("files") or {}, "recreated": j.get("recreated") or [],
+            "deleted_done": j.get("deleted_done") or []}
+
+
 def later_edits(plan, plan_ad, log):
     """Before the packages, every attempt: Handtop files the plan found as shipped but which the user
     changed since are kept as they are now: the current bytes go to BACKUP (<path>.changed-after-plan)
@@ -1587,9 +1629,7 @@ def later_edits(plan, plan_ad, log):
     afterwards (decision 2026-11-25: keep the newest edit). A config file the user had deleted and made
     again before this install stays, whatever it holds. Files already as the package has them are the
     install's own writes (an earlier attempt). Journal later-edits.json, bound to the plan (#86)."""
-    j = read_json(LATER_EDITS) or {}
-    if j.get("plan") != plan["id"]:
-        j = {"plan": plan["id"], "files": {}, "recreated": []}
+    j = load_edits(plan)
     changed, recreated = dict(j["files"]), set(j["recreated"])
     for path, orig, pkg_md5 in plan_ad.get("stock", []):
         cur = card_value(path)
@@ -1690,15 +1730,22 @@ def install_migrate(plan, log, budget):
         write_json(BACKUP + "/modes.json", dict(plan_ad["modes"]))
     removed = remove_old_ffmpeg_files(plan["from"]["release"], log)
     for path in plan_ad.get("deleted", []):              # stays deleted (dpkg won't bring it back later)
+        if os.path.lexists(path + ".handtop-deleting"):    # a cut in the middle of the step below
+            j = load_edits(plan)
+            write_json(LATER_EDITS, dict(j, deleted_done=sorted(set(j["deleted_done"]) | {path})))
+            os.unlink(path + ".handtop-deleting")
         want = plan_ad.get("deleted_md5", {}).get(path)
         if path in recreated:
             if os.path.lexists(path):
                 kept_new.append(path)                  # made again by the user before the install: stays
             continue
         if os.path.lexists(path) and (not want or (os.path.isfile(path) and md5(path) == want)):
-            j = read_json(LATER_EDITS) or {"plan": plan["id"]}
-            write_json(LATER_EDITS, dict(j, deleted_done=sorted(set(j.get("deleted_done", [])) | {path})))
-            os.unlink(path)
+            # Moved aside first, then recorded, then removed: a cut never makes the package's copy look
+            # like one the user made again (#114).
+            os.rename(path, path + ".handtop-deleting")
+            j = load_edits(plan)
+            write_json(LATER_EDITS, dict(j, deleted_done=sorted(set(j["deleted_done"]) | {path})))
+            os.unlink(path + ".handtop-deleting")
             log("config file you had deleted, deleted again: %s" % path)
         elif os.path.lexists(path):
             kept_new.append(path)                      # made again by the user since the plan: stays
@@ -1708,10 +1755,11 @@ def install_migrate(plan, log, budget):
     notes = []
     off = []
     for u in RECOVERY_UNITS:
-        # "enabled" only: a "static" unit is wanted by no target and wouldn't start (#107)
-        if run(["systemctl", "is-enabled", u], timeout=30, check=False).stdout.strip() != "enabled":
+        # Wanted by its own boot target (the link), not just "enabled" somewhere (#107, #118)
+        link = "%s/%s.wants/%s" % (UNITS_DIR, RECOVERY_UNIT_TARGETS[u], u)
+        if not os.path.lexists(link):
             run(["systemctl", "enable", u], timeout=60, check=False)
-            if run(["systemctl", "is-enabled", u], timeout=30, check=False).stdout.strip() != "enabled":
+            if not os.path.lexists(link):
                 off.append(u)
     if off:
         raise Fail("installed, but %s could not be enabled (needed for recovery.txt): the move is kept; "
@@ -1949,9 +1997,9 @@ def cmd_abandon_migration():
         if our_marker() is False:
             raise Fail("another offline update is scheduled (/system-update); not touching it")
         started = plan_changed(mig)
+        if os.path.exists(MIGRATE_HOLDS) and not restore_legacy_holds():   # first: a failure keeps the plan (#117)
+            raise Fail("FFmpeg's packages could not be held again (apt-mark): nothing given up; run this again")
         forget_plan()
-        if not restore_legacy_holds():
-            raise Fail("the move is given up, but FFmpeg's packages could not be held again: run this again")
         out({"ok": True, "abandoned": mig["id"], "had_started": started,
              "note": "packages it already installed stay; if the card doesn't work, flash v0.5.0" if started else ""})
         return 0
@@ -2041,8 +2089,8 @@ def settle_previous(plan, ok):
         have = installed_any()
         # Only Handtop's packages and FFmpeg build decide (what going back reinstalls): an update that
         # changed only Debian's packages before failing leaves the set-aside release the useful one (#102).
-        mine = [p for p in plan["packages"] if is_handtop(p["name"].split(":")[0])
-                or p["name"].split(":")[0] in FFMPEG_FAMILY + FFMPEG_DEV]
+        mine = [p for p in plan["packages"] if p["name"].split(":")[0] not in NEVER_ROLLED_BACK and (
+                is_handtop(p["name"].split(":")[0]) or p["name"].split(":")[0] in FFMPEG_FAMILY + FFMPEG_DEV)]
         untouched = all(have.get(p["name"].split(":")[0]) == p.get("old") for p in mine)
         if m.get("for_plan") == plan.get("id") and untouched:
             os.rename(PREVIOUS, DROP)            # aside first: a cut never leaves neither (#102)
@@ -2183,9 +2231,16 @@ def install_recovery(plan, log, budget):
     reason = trial_rollback({"packages": []}, kept, PREVIOUS, live=True) if kept else "no kept release"
     if reason:
         raise Drift("going back can't be done safely on this card as it is now (%s): nothing changed" % reason)
+    # What going back removes must still be exactly what the request planned (the card can change
+    # between the request and this boot; #112).
+    gone_now = sorted(n for n in installed_any() if is_handtop(n) and n not in NEVER_ROLLED_BACK
+                      and n not in {p["name"] for p in kept["packages"]})
+    if gone_now != sorted(plan.get("remove", [])):
+        raise Drift("this card's Handtop packages changed since going back was requested: nothing changed")
     budget(1200 + 3600 + 1200)                   # enough time left for the whole of it, or nothing starts
     mark_changed(plan)
     run(["dpkg"] + CONF + ["--configure", "-a"], timeout=budget(1200), log=log, check=False)
+    dpkg_state_check(plan, any_version=True)     # still only the planned packages unfinished (#111)
     # The packages the newer release added go first: one of them may Break the kept release's
     # packages, and dpkg -i would refuse those then (review 2026-11-26 #69). The kept release's
     # packages, installed right after, satisfy what depended on them (the trial checked the end state).
@@ -2249,41 +2304,48 @@ def finish(plan, ok, message, log, resume=False, extra=None):
 
 
 def complete(ok, keep_plan=False):
-    """The plan's files and the link go. Recorded first (cleanup.json: plan id and the schedule's gen,
-    never rewritten), so a cut in the middle is finished at the next start, and the replay deletes only
-    what still belongs to that plan and that scheduling (review #91, #104)."""
+    """The plan's files and the link go. Recorded first (cleanup.json: plan id and the schedule's gen),
+    so a cut in the middle is finished at the next start (review #91)."""
     plan, sched = read_json(PLAN) or {}, read_json(SCHEDULE) or {}
-    c = read_json(CLEANUP)
-    if not c or (plan.get("id") and c.get("plan") != plan.get("id")):
-        c = {"plan": plan.get("id"), "gen": sched.get("gen"), "ok": ok, "keep_plan": keep_plan}
-        write_json(CLEANUP, c)
-    mine_plan = bool(c.get("plan")) and plan.get("id") == c["plan"]
-    mine_sched = not sched or (sched.get("plan") == c.get("plan") and sched.get("gen") == c.get("gen"))
+    c = {"plan": plan.get("id"), "gen": sched.get("gen"), "ok": ok, "keep_plan": keep_plan}
+    write_json(CLEANUP, c)
+    _cleanup(c)
+
+
+def _cleanup(c):
+    """Delete what still belongs to the plan and scheduling c names, nothing else (#104, #113)."""
+    plan, sched = read_json(PLAN) or {}, read_json(SCHEDULE) or {}
+    if plan.get("id") and plan["id"] != c.get("plan"):
+        mine_plan = False                        # another plan was made since: none of it is touched
+    else:
+        mine_plan = bool(plan) and (not sched or sched.get("plan") != c.get("plan") or sched.get("gen") == c.get("gen"))
+    mine_sched = bool(sched) and sched.get("plan") == c.get("plan") and sched.get("gen") == c.get("gen")
     if mine_plan and not c.get("keep_plan"):
         unlink(PLAN)
     if mine_sched:
         remove_marker()
         unlink(SCHEDULE)
-    if (read_json(INPROGRESS) or {}).get("plan") in (None, c.get("plan")):
+    if not read_json(SCHEDULE) and our_marker():
+        remove_marker()                          # a link with nothing scheduled to install (#113)
+    if (read_json(INPROGRESS) or {}).get("plan") == c.get("plan") and (mine_sched or not read_json(SCHEDULE)):
         unlink(INPROGRESS)
-    if not c.get("keep_plan") and (mine_plan or not plan):
+    if not c.get("keep_plan") and not read_json(PLAN):
         for f in (CHANGED, LATER_EDITS):
             if (read_json(f) or {}).get("plan") in (None, c.get("plan")):
                 unlink(f)
-        if not read_json(PLAN):                  # another plan's files are never touched
-            for d in (LISTS, PREFS, NEXT) + ((CACHE,) if c.get("ok") else ()):
-                rmtree(d)
+        for d in (LISTS, PREFS, NEXT) + ((CACHE,) if c.get("ok") else ()):
+            rmtree(d)
     fsync_dir(STATE)
     unlink(CLEANUP)
     fsync_dir(STATE)
 
 
 def finish_cleanup():
-    """A cleanup cut short: finish it (same plan, same decision). True when there was one."""
+    """A cleanup cut short: finish it for its own plan and scheduling only. True when there was one."""
     c = read_json(CLEANUP)
     if not c:
         return False
-    complete(c.get("ok"), c.get("keep_plan", False))
+    _cleanup(c)
     return True
 
 
@@ -2465,7 +2527,7 @@ def cmd_boot_check():
             res = read_json(RESULT)
             owner = (pend.get("ident") or {}).get("plan")
             if res and not os.path.exists(BOOT_PENDING) and res.get("migrated_from") and \
-                    (not owner or res.get("plan") == owner):   # the migration's own result only (#72, #105)
+                    owner and res.get("plan") == owner:   # the migration's own result only (#72, #105, #115)
                 res["notes"] = [n for n in res.get("notes", []) if "not written yet" not in n] + \
                     ["boot partition files written at a later start"]
                 write_json(RESULT, res)

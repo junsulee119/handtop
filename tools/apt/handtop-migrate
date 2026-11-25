@@ -67,9 +67,10 @@ undo() {   # put back what $U records (nothing was installed: the move was never
     echo "could not cancel the move or put FFmpeg's holds back; run this command again later"; return 1
   fi
   [ ! -e "$STATE/migrate-holds.json" ] || { echo "FFmpeg's holds are not back yet"; ok=0; }
-  [ -f "$U/apply-enabled" ] || systemctl disable handtop-update-apply.service >/dev/null 2>&1 || true
+  [ -f "$U/apply-enabled" ] || systemctl disable handtop-update-apply.service >/dev/null 2>&1 || ok=0
   for u in $DROPIN_UNITS; do
-    if [ -f "$U/dropin-$u" ]; then cp -a "$U/dropin-$u" "/etc/systemd/system/$u.d/$DROPIN" || ok=0
+    if [ -f "$U/dropin-$u" ] || [ -L "$U/dropin-$u" ]; then
+      rm -f "/etc/systemd/system/$u.d/$DROPIN"; cp -a "$U/dropin-$u" "/etc/systemd/system/$u.d/$DROPIN" || ok=0
     else rm -f "/etc/systemd/system/$u.d/$DROPIN" || ok=0; fi
   done
   for f in $FILES; do
@@ -79,10 +80,16 @@ undo() {   # put back what $U records (nothing was installed: the move was never
   done
   if [ -f "$U/share-new" ]; then rm -rf /usr/local/share/handtop || ok=0
   elif [ -d "$U/share" ]; then         # the folder was there: each file as it was, new ones removed (#85)
-    while IFS= read -r -d '' f; do
-      rm -f "/usr/local/share/handtop/$f"; cp -a "$U/share/$f" "/usr/local/share/handtop/$f" || ok=0
-    done < <(cd "$U/share" && find . ! -type d -print0)
-    while IFS= read -r f; do [ -n "$f" ] && { rm -f "/usr/local/share/handtop/$f" || ok=0; }; done < "$U/share-absent"
+    # Listed into a file first: a failed listing must not look like "nothing to put back" (#117).
+    if (cd "$U/share" && find . ! -type d -print0) > "$T/share-undo" 2>/dev/null; then
+      while IFS= read -r -d '' f; do
+        rm -f "/usr/local/share/handtop/$f"; cp -a "$U/share/$f" "/usr/local/share/handtop/$f" || ok=0
+      done < "$T/share-undo"
+    else ok=0; fi
+    rm -f "$T/share-undo"
+    if [ -f "$U/share-absent" ]; then
+      while IFS= read -r f; do [ -n "$f" ] && { rm -f "/usr/local/share/handtop/$f" || ok=0; }; done < "$U/share-absent"
+    else ok=0; fi
   fi
   systemctl daemon-reload 2>/dev/null || true
   apt-get update -qq >/dev/null 2>&1 || true                # the lists without Handtop's source
@@ -120,10 +127,12 @@ SCHEDULED=0
 mkdir -p "$STATE"; rm -rf "$U.tmp"; mkdir -p "$U.tmp/orig"
 [ -e /usr/local/share/handtop ] || touch "$U.tmp/share-new"
 for f in $FILES; do
-  if [ -e "$f" ] || [ -L "$f" ]; then cp -a "$f" "$U.tmp/orig/$(echo "$f" | tr / _)"; else echo "$f" >> "$U.tmp/ABSENT"; fi
+  if [ -e "$f" ] || [ -L "$f" ]; then cp -a "$f" "$U.tmp/orig/$(echo "$f" | tr / _)" || die "could not save $f"
+  else echo "$f" >> "$U.tmp/ABSENT"; fi
 done
 for u in $DROPIN_UNITS; do                       # a drop-in of that name the card had already
-  [ -f "/etc/systemd/system/$u.d/$DROPIN" ] && cp -a "/etc/systemd/system/$u.d/$DROPIN" "$U.tmp/dropin-$u"
+  d="/etc/systemd/system/$u.d/$DROPIN"
+  if [ -f "$d" ] || [ -L "$d" ]; then cp -a "$d" "$U.tmp/dropin-$u" || die "could not save $d"; fi
 done
 [ "$(systemctl is-enabled handtop-update-apply.service 2>/dev/null)" = enabled ] && touch "$U.tmp/apply-enabled"
 sync; mv "$U.tmp" "$U"; sync                     # complete, then visible
@@ -202,11 +211,13 @@ done
 install -d /usr/local/share/handtop
 if [ ! -f "$U/share-new" ]; then       # the folder was there: keep what each file was first (#85)
   mkdir -p "$U/share"; : > "$U/share-absent"
-  (cd "$T/x/usr/local/share/handtop" && find . ! -type d) | while IFS= read -r f; do
+  (cd "$T/x/usr/local/share/handtop" && find . ! -type d) > "$T/share-list" || die "could not list the new files"
+  while IFS= read -r f; do
     if [ -e "/usr/local/share/handtop/$f" ] || [ -L "/usr/local/share/handtop/$f" ]; then
-      mkdir -p "$U/share/$(dirname "$f")"; cp -a "/usr/local/share/handtop/$f" "$U/share/$f"
+      mkdir -p "$U/share/$(dirname "$f")" && cp -a "/usr/local/share/handtop/$f" "$U/share/$f" ||
+        die "could not save /usr/local/share/handtop/$f"
     else echo "$f" >> "$U/share-absent"; fi
-  done
+  done < "$T/share-list"
   sync
 fi
 cp -a "$T/x/usr/local/share/handtop/." /usr/local/share/handtop/

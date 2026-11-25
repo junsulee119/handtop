@@ -228,8 +228,14 @@ def installed():
     going back must replace or remove them too."""
     p = subprocess.run(["dpkg-query", "-W", "-f", "${Package}\\t${Version}\\t${db:Status-Abbrev}\\n"],
                        env=ENV, stdout=subprocess.PIPE, text=True, timeout=60)
+    if p.returncode != 0:
+        raise Defer("dpkg-query failed (%d)" % p.returncode)
     return {n: (v, st[1] == "i" and (len(st) < 3 or st[2] == " ")) for n, v, st in
             (l.split("\t") for l in p.stdout.splitlines()) if len(st) > 1 and st[1] in "iUHFWt"}
+
+
+class Defer(Exception):
+    """Can't decide now (a query failed, the boot partition unreadable): the request stays for the next start."""
 
 
 def repair_previous():
@@ -248,23 +254,25 @@ def repair_previous():
         fsync_dir(STATE)
 
 
+def _is_handtop(n):
+    return n == "handtop" or n.startswith("handtop-")
+
+
 def handtop_previous(log):
     repair_previous()
     m = read_json(PREVIOUS + "/manifest.json")
+    have = installed()
     # An update that failed before changing Handtop leaves the newer kept release equal to what is
     # installed, the useful one set aside (previous.old) until the worker settles it: use that (#102).
+    # Only decided here; the swap happens after every refusal below, right before scheduling (#110).
     mo = read_json(OLD + "/manifest.json")
+    use_old = False
     if m and mo and mo.get("complete"):
-        have0 = installed()
-        if all(have0.get(p["name"]) == (p["version"], True) for p in m.get("packages", [])):
-            drop = PREVIOUS + ".drop"            # the same swap as the worker's settle_previous()
-            os.rename(PREVIOUS, drop)
-            os.rename(OLD, PREVIOUS)
-            fsync_dir(STATE)
-            shutil.rmtree(drop)
-            m = mo
-            log("handtop=previous: the update didn't change Handtop; going back to the release kept before it")
-    base = PREVIOUS
+        names_m = {p["name"] for p in m.get("packages", [])}
+        if all(have.get(p["name"]) == (p["version"], True) for p in m.get("packages", [])) and not any(
+                _is_handtop(n) and n not in names_m and n not in NEVER_ROLLED_BACK for n in have):
+            m, use_old = mo, True
+    base = OLD if use_old else PREVIOUS
     if not m or not m.get("complete"):
         log("handtop=previous: no complete earlier release is kept on this card (it is kept when an "
             "update that changes Handtop is installed)")
@@ -274,23 +282,23 @@ def handtop_previous(log):
         if not os.path.isfile(f) or sha256(f) != p["hash"]:
             log("handtop=previous: %s is missing or damaged; can't go back" % p["file"])
             return False
-    have = installed()
     names = {p["name"] for p in m["packages"]}
     # Same version but not fully installed (a cut) counts as a change: it is installed again (#69).
     change = [p for p in m["packages"] if have.get(p["name"]) != (p["version"], True)]
-    remove = sorted(n for n in have if (n == "handtop" or n.startswith("handtop-"))
-                    and n not in names and n not in NEVER_ROLLED_BACK)
+    remove = sorted(n for n in have if _is_handtop(n) and n not in names and n not in NEVER_ROLLED_BACK)
     # Only from a healthy card (decision 2026-11-25, review round 5): dpkg may have unfinished work
-    # only on the packages going back replaces or removes. An update a cut interrupted resumes by itself
-    # at the next start; anything else needs a reflash. Refused here, before anything changes.
-    other = sorted(n for n, (v, ok) in have.items() if not ok and n not in names and n not in remove
-                   and not (n == "handtop" or n.startswith("handtop-")))
+    # only on the packages going back replaces or removes (the keyring isn't one of them; #111). An
+    # update a cut interrupted resumes by itself at the next start; anything else needs a reflash.
+    other = sorted(n for n, (v, ok) in have.items() if not ok and n not in names and n not in remove)
     if other:
         log("handtop=previous: dpkg has unfinished work on other packages (%s): not going back. If an update "
             "was cut off, it finishes at the next start; otherwise flash the current image" % ", ".join(other[:8]))
         return False
-    foreign = subprocess.run(["dpkg", "--print-foreign-architectures"], env=ENV, stdout=subprocess.PIPE,
-                             text=True, timeout=60).stdout.split()
+    fp = subprocess.run(["dpkg", "--print-foreign-architectures"], env=ENV, stdout=subprocess.PIPE,
+                        text=True, timeout=60)
+    if fp.returncode != 0:
+        raise Defer("dpkg --print-foreign-architectures failed")
+    foreign = fp.stdout.split()
     if foreign:
         log("handtop=previous: this card has packages for other architectures (%s): going back isn't "
             "supported there" % " ".join(foreign))
@@ -302,6 +310,13 @@ def handtop_previous(log):
                                        not (os.path.islink(MARKER) and os.readlink(MARKER) == STATE)):
         log("handtop=previous: another offline update is scheduled (/system-update); not touching it")
         return False
+    if use_old:                                  # the same swap as the worker's settle_previous()
+        drop = PREVIOUS + ".drop"
+        os.rename(PREVIOUS, drop)
+        os.rename(OLD, PREVIOUS)
+        fsync_dir(STATE)
+        shutil.rmtree(drop)
+        log("handtop=previous: the update didn't change Handtop; going back to the release kept before it")
     # A recovery plan already written for this request (a cut before the request was done): reused.
     old = read_json(PLAN) or {}
     if old.get("kind") == "recovery" and old.get("release") == m.get("release") and old.get("packages") == change \
@@ -355,10 +370,20 @@ def main():
         # request's own reset), it was edited on a PC since: the newer content counts, also when it
         # cancels everything (none) (#71, #106).
         raw = read_fat_raw()
+        if raw is None and os.path.lexists(RECOVERY_TXT):
+            # There but unreadable: whether it was edited can't be told; nothing acted on (#116).
+            log("recovery.txt can't be read: the request waits for the next start")
+            return 1
         mine = template_for(req.get("id")).replace("\n", "\r\n").encode()
-        if raw is not None and req.get("src") and hashlib.sha256(raw).hexdigest() != req["src"] and raw != mine:
+        live = None
+        if raw is not None and raw != mine and hashlib.sha256(raw).hexdigest() != req.get("src"):
             live = parse(raw.decode("utf-8", "replace"))
             live = {"joypad": live.get("joypad", "none"), "handtop": live.get("handtop", "none")}
+            active = any(v not in ("", "none") for v in live.values())
+            # A request saved by an older version has no src: only an active, different file counts (#116).
+            if not req.get("src") and (not active or live == {k: req.get(k, "none") for k in live}):
+                live = None
+        if live is not None:
             if not any(v not in ("", "none") for v in live.values()):
                 log("recovery.txt was set back to none on a PC before the request ran: cancelled")
                 os.unlink(REQUEST)
@@ -395,7 +420,12 @@ def main():
     if h == "previous":
         with open(LOCK, "a") as lk:                  # the update worker's lock: one writer of the plan
             fcntl.flock(lk, fcntl.LOCK_EX)
-            restart |= handtop_previous(log)
+            try:
+                restart |= handtop_previous(log)
+            except Defer as e:
+                log("handtop=previous: %s; asked again at the next start" % e)
+                copy_log_to_fat(log)
+                return 1                         # the request (acknowledged) stays
     elif h not in ("", "none"):
         log("handtop=%s not understood (previous or none)" % h)
     os.unlink(REQUEST)
