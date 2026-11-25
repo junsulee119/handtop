@@ -221,14 +221,14 @@ v0.4.0	*	/usr/include/libswscale/swscale.h	x	42ab58ed743efc74ba2152a049b521d41a0
 v0.4.0	*	/usr/include/libswscale/version.h	x	35f3460f3be0ab1d9bab8735dbad97df71d4e6dbd46968c0e8c111714ce12a6e	644
 v0.4.0	*	/usr/include/libswscale/version_major.h	x	59377e8cf1cf5243456f800078d2d32d654552682ebfcae3c0a90b82a950fc56	644
 v0.4.0	*	/usr/lib/aarch64-linux-gnu/dri/v4l2_request_drv_video.so	f	bfc6f008057adef0ead1680e1a533dd67deafbaa7d52ba5426dd4c11eccd84f7	755
-v0.4.0	*	/usr/lib/aarch64-linux-gnu/libavcodec.so	l	libavcodec.so.61.19.101	
-v0.4.0	*	/usr/lib/aarch64-linux-gnu/libavdevice.so	l	libavdevice.so.61.3.100	
-v0.4.0	*	/usr/lib/aarch64-linux-gnu/libavfilter.so	l	libavfilter.so.10.5.100	
-v0.4.0	*	/usr/lib/aarch64-linux-gnu/libavformat.so	l	libavformat.so.61.7.103	
-v0.4.0	*	/usr/lib/aarch64-linux-gnu/libavutil.so	l	libavutil.so.59.39.100	
-v0.4.0	*	/usr/lib/aarch64-linux-gnu/libpostproc.so	l	libpostproc.so.58.3.100	
-v0.4.0	*	/usr/lib/aarch64-linux-gnu/libswresample.so	l	libswresample.so.5.3.100	
-v0.4.0	*	/usr/lib/aarch64-linux-gnu/libswscale.so	l	libswscale.so.8.3.100	
+v0.4.0	*	/usr/lib/aarch64-linux-gnu/libavcodec.so	x	l:libavcodec.so.61.19.101	
+v0.4.0	*	/usr/lib/aarch64-linux-gnu/libavdevice.so	x	l:libavdevice.so.61.3.100	
+v0.4.0	*	/usr/lib/aarch64-linux-gnu/libavfilter.so	x	l:libavfilter.so.10.5.100	
+v0.4.0	*	/usr/lib/aarch64-linux-gnu/libavformat.so	x	l:libavformat.so.61.7.103	
+v0.4.0	*	/usr/lib/aarch64-linux-gnu/libavutil.so	x	l:libavutil.so.59.39.100	
+v0.4.0	*	/usr/lib/aarch64-linux-gnu/libpostproc.so	x	l:libpostproc.so.58.3.100	
+v0.4.0	*	/usr/lib/aarch64-linux-gnu/libswresample.so	x	l:libswresample.so.5.3.100	
+v0.4.0	*	/usr/lib/aarch64-linux-gnu/libswscale.so	x	l:libswscale.so.8.3.100	
 v0.4.0	*	/usr/lib/aarch64-linux-gnu/pkgconfig/libavcodec.pc	x	3d9d0fc9927b921723fc0d28924963c5fdb08b2ed343d4f790aa39da7d9b3c19	644
 v0.4.0	*	/usr/lib/aarch64-linux-gnu/pkgconfig/libavdevice.pc	x	54402e57376f29ed867f6a3e775e8ac12e096546e809d869e40ae2bb82cd3e53	644
 v0.4.0	*	/usr/lib/aarch64-linux-gnu/pkgconfig/libavfilter.pc	x	7ac1128ea6999de584b8ca7fd03f7e1816d1dc8cf78a68512b9cbf7fba6374f4	644
@@ -1928,14 +1928,14 @@ v0.4.1	*	/usr/include/libswscale/swscale.h	x	42ab58ed743efc74ba2152a049b521d41a0
 v0.4.1	*	/usr/include/libswscale/version.h	x	35f3460f3be0ab1d9bab8735dbad97df71d4e6dbd46968c0e8c111714ce12a6e	644
 v0.4.1	*	/usr/include/libswscale/version_major.h	x	59377e8cf1cf5243456f800078d2d32d654552682ebfcae3c0a90b82a950fc56	644
 v0.4.1	*	/usr/lib/aarch64-linux-gnu/dri/v4l2_request_drv_video.so	f	2b86309c5e152a6fd49badfcf6ea0779a7f898d9dff899683425e5c1dba3c963	755
-v0.4.1	*	/usr/lib/aarch64-linux-gnu/libavcodec.so	l	libavcodec.so.61.19.101	
-v0.4.1	*	/usr/lib/aarch64-linux-gnu/libavdevice.so	l	libavdevice.so.61.3.100	
-v0.4.1	*	/usr/lib/aarch64-linux-gnu/libavfilter.so	l	libavfilter.so.10.5.100	
-v0.4.1	*	/usr/lib/aarch64-linux-gnu/libavformat.so	l	libavformat.so.61.7.103	
-v0.4.1	*	/usr/lib/aarch64-linux-gnu/libavutil.so	l	libavutil.so.59.39.100	
-v0.4.1	*	/usr/lib/aarch64-linux-gnu/libpostproc.so	l	libpostproc.so.58.3.100	
-v0.4.1	*	/usr/lib/aarch64-linux-gnu/libswresample.so	l	libswresample.so.5.3.100	
-v0.4.1	*	/usr/lib/aarch64-linux-gnu/libswscale.so	l	libswscale.so.8.3.100	
+v0.4.1	*	/usr/lib/aarch64-linux-gnu/libavcodec.so	x	l:libavcodec.so.61.19.101	
+v0.4.1	*	/usr/lib/aarch64-linux-gnu/libavdevice.so	x	l:libavdevice.so.61.3.100	
+v0.4.1	*	/usr/lib/aarch64-linux-gnu/libavfilter.so	x	l:libavfilter.so.10.5.100	
+v0.4.1	*	/usr/lib/aarch64-linux-gnu/libavformat.so	x	l:libavformat.so.61.7.103	
+v0.4.1	*	/usr/lib/aarch64-linux-gnu/libavutil.so	x	l:libavutil.so.59.39.100	
+v0.4.1	*	/usr/lib/aarch64-linux-gnu/libpostproc.so	x	l:libpostproc.so.58.3.100	
+v0.4.1	*	/usr/lib/aarch64-linux-gnu/libswresample.so	x	l:libswresample.so.5.3.100	
+v0.4.1	*	/usr/lib/aarch64-linux-gnu/libswscale.so	x	l:libswscale.so.8.3.100	
 v0.4.1	*	/usr/lib/aarch64-linux-gnu/pkgconfig/libavcodec.pc	x	3d9d0fc9927b921723fc0d28924963c5fdb08b2ed343d4f790aa39da7d9b3c19	644
 v0.4.1	*	/usr/lib/aarch64-linux-gnu/pkgconfig/libavdevice.pc	x	54402e57376f29ed867f6a3e775e8ac12e096546e809d869e40ae2bb82cd3e53	644
 v0.4.1	*	/usr/lib/aarch64-linux-gnu/pkgconfig/libavfilter.pc	x	7ac1128ea6999de584b8ca7fd03f7e1816d1dc8cf78a68512b9cbf7fba6374f4	644

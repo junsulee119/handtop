@@ -24,6 +24,11 @@ SRC=/etc/apt/sources.list.d/handtop.sources
 PREF=/etc/apt/preferences.d/handtop.pref
 UNIT=/etc/systemd/system/handtop-update-apply.service
 DROPIN=handtop-migrate-maintenance.conf
+DROPIN_UNITS="rg35xxh-bootlogo.service rg35xxh-bt-check.service"
+FILES="$KEYRING $SRC $PREF $UNIT /usr/local/sbin/handtop-run /usr/local/sbin/handtop-recovery $W"
+# What this script changes is recorded here before the first change and put back from here: also by
+# the next run, when a power cut came before the move was scheduled (review 2026-11-26 #73).
+U=$STATE/migrate-undo
 die() { printf '\nhandtop-migrate: %s\n' "$*" >&2; exit 1; }
 json() { python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print(eval(sys.argv[2]))' "$@" 2>/dev/null; }
 ask() {
@@ -49,43 +54,59 @@ exec > >(tee -a "$LOG") 2>&1
 echo "== handtop-migrate $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
 T=$(mktemp -d /var/tmp/handtop-migrate.XXXXXX)
 
+undo() {   # put back what $U records (nothing was installed: the move was never scheduled)
+  echo "Putting back what this script changed (nothing was installed)."
+  [ -x "$W" ] && "$W" cancel >/dev/null 2>&1 || true        # plan, downloads; FFmpeg holds back
+  [ -f "$U/apply-enabled" ] || systemctl disable handtop-update-apply.service >/dev/null 2>&1 || true
+  for u in $DROPIN_UNITS; do
+    if [ -f "$U/dropin-$u" ]; then cp -a "$U/dropin-$u" "/etc/systemd/system/$u.d/$DROPIN"
+    else rm -f "/etc/systemd/system/$u.d/$DROPIN"; fi
+  done
+  for f in $FILES; do
+    o="$U/orig/$(echo "$f" | tr / _)"
+    if [ -e "$o" ]; then cp -a "$o" "$f"; elif grep -qx "$f" "$U/ABSENT" 2>/dev/null; then rm -f "$f"; fi
+  done
+  [ -f "$U/share-new" ] && rm -rf /usr/local/share/handtop
+  systemctl daemon-reload 2>/dev/null || true
+  apt-get update -qq >/dev/null 2>&1 || true                # the lists without Handtop's source
+  rm -rf "$U"; sync
+}
+if [ -d "$U" ]; then
+  echo "An earlier run stopped before the move was scheduled (power cut?): putting that back first."
+  undo
+fi
+
 # ---- a move that failed in the maintenance boot: resume its plan ---------------------------------
 if [ -x "$W" ] && [ "$(json "$STATE/plan.json" 'd.get("kind")')" = migrate ]; then
   trap 'rm -rf "$T"' EXIT
+  PID=$(json "$STATE/plan.json" 'd.get("id")')
   echo "A move onto packages was downloaded before and didn't finish:"
   echo "  $(json "$STATE/last-result.json" 'd.get("message")' || echo "(no result recorded)")"
   ask "Install it at the next start (the handheld restarts now)?" || die "not resumed; run this again when ready"
-  "$W" schedule restart > "$T/sched.json" || die "$(json "$T/sched.json" 'd.get("error")' || cat "$T/sched.json")"
+  # Files that went missing or got damaged since: fetched again for the same plan (its hashes).
+  "$W" repair > "$T/repair.json" || die "$(json "$T/repair.json" 'd.get("error")' || cat "$T/repair.json")"
+  "$W" schedule restart "$PID" > "$T/sched.json" || die "$(json "$T/sched.json" 'd.get("error")' || cat "$T/sched.json")"
   sync
   if [ "${HANDTOP_MIGRATE_NO_RESTART:-}" = 1 ]; then echo "scheduled (no restart: test)"; exit 0; fi
   echo "Restarting in 10 s."; sleep 10; systemctl reboot; exit 0
 fi
-! dpkg-query -W -f '${db:Status-Abbrev}' handtop 2>/dev/null | grep -q '^ii' ||
+! dpkg-query -W -f '${db:Status-Abbrev}' handtop 2>/dev/null | grep -q '^[ih]i' ||
   die "this card has Handtop's packages already: open Apps > Update instead"
 
 # ---- from here on, everything this script changes is put back unless the move gets scheduled -----
 SCHEDULED=0
-mkdir -p "$T/orig"
-SHARE_NEW=0; [ -e /usr/local/share/handtop ] || SHARE_NEW=1
-for f in "$KEYRING" "$SRC" "$PREF" "$UNIT" /usr/local/sbin/handtop-run /usr/local/sbin/handtop-recovery "$W"; do
-  if [ -e "$f" ]; then cp -a "$f" "$T/orig/$(echo "$f" | tr / _)"; else echo "$f" >> "$T/orig/ABSENT"; fi
+mkdir -p "$STATE"; rm -rf "$U.tmp"; mkdir -p "$U.tmp/orig"
+[ -e /usr/local/share/handtop ] || touch "$U.tmp/share-new"
+for f in $FILES; do
+  if [ -e "$f" ]; then cp -a "$f" "$U.tmp/orig/$(echo "$f" | tr / _)"; else echo "$f" >> "$U.tmp/ABSENT"; fi
 done
-undo() {
-  [ "$SCHEDULED" = 1 ] && { rm -rf "$T"; return; }
-  echo "Putting back what this script changed (nothing was installed)."
-  [ -x "$W" ] && "$W" cancel >/dev/null 2>&1 || true        # plan, downloads; FFmpeg holds back
-  systemctl disable handtop-update-apply.service >/dev/null 2>&1 || true
-  for u in rg35xxh-bootlogo.service rg35xxh-bt-check.service; do rm -f "/etc/systemd/system/$u.d/$DROPIN"; done
-  for f in "$KEYRING" "$SRC" "$PREF" "$UNIT" /usr/local/sbin/handtop-run /usr/local/sbin/handtop-recovery "$W"; do
-    o="$T/orig/$(echo "$f" | tr / _)"
-    if [ -e "$o" ]; then cp -a "$o" "$f"; elif grep -qx "$f" "$T/orig/ABSENT" 2>/dev/null; then rm -f "$f"; fi
-  done
-  [ "$SHARE_NEW" = 1 ] && rm -rf /usr/local/share/handtop
-  systemctl daemon-reload 2>/dev/null || true
-  apt-get update -qq >/dev/null 2>&1 || true                # the lists without Handtop's source
-  rm -rf "$T"
-}
-trap undo EXIT
+for u in $DROPIN_UNITS; do                       # a drop-in of that name the card had already
+  [ -f "/etc/systemd/system/$u.d/$DROPIN" ] && cp -a "/etc/systemd/system/$u.d/$DROPIN" "$U.tmp/dropin-$u"
+done
+[ "$(systemctl is-enabled handtop-update-apply.service 2>/dev/null)" = enabled ] && touch "$U.tmp/apply-enabled"
+sync; mv "$U.tmp" "$U"; sync                     # complete, then visible
+finish_or_undo() { if [ "$SCHEDULED" = 1 ]; then rm -rf "$U"; sync; else undo; fi; rm -rf "$T"; }
+trap finish_or_undo EXIT
 put() { cat > "$1.handtop-new"; mv -f "$1.handtop-new" "$1"; }   # whole file or nothing
 
 echo "1/4 Handtop's archive key, package source and FFmpeg pin"
@@ -158,7 +179,7 @@ install -d /usr/local/share/handtop
 cp -a "$T/x/usr/local/share/handtop/." /usr/local/share/handtop/
 install -m644 "$T/x/etc/systemd/system/handtop-update-apply.service" "$UNIT"
 # The first maintenance boot still has v0.4.x's boot splash and Bluetooth check: keep them out of it.
-for u in rg35xxh-bootlogo.service rg35xxh-bt-check.service; do
+for u in $DROPIN_UNITS; do
   mkdir -p "/etc/systemd/system/$u.d"
   printf '[Unit]\nConditionPathIsSymbolicLink=!/system-update\n' | put "/etc/systemd/system/$u.d/$DROPIN"
 done
@@ -197,8 +218,10 @@ echo
 echo "4/4 Install at the next start"
 ask "The handheld restarts and installs for a few minutes (keep it charged; don't switch it off). Go ahead?" ||
   die "cancelled: nothing installed"
-"$W" schedule restart > "$T/sched.json" || die "$(json "$T/sched.json" 'd.get("error")' || cat "$T/sched.json")"
+PID=$(json "$T/plan.json" 'd.get("plan")')     # exactly the plan shown above (review 2026-11-26 #63)
+"$W" schedule restart "$PID" > "$T/sched.json" || die "$(json "$T/sched.json" 'd.get("error")' || cat "$T/sched.json")"
 SCHEDULED=1
+rm -rf "$U"
 sync
 if [ "${HANDTOP_MIGRATE_NO_RESTART:-}" = 1 ]; then echo "scheduled (no restart: test)"; exit 0; fi
 echo "Restarting in 10 s. After the install the desktop starts again; Apps > Update shows the result."

@@ -260,6 +260,16 @@ class App:
         self._result_card(body)
         if error:
             body.pack_start(self._error_box(error)[0], False, False, 0)
+        pend = M.boot_pending_text(self.status.get("boot_pending"))
+        if pend:
+            body.pack_start(_label(pend, dim=True), False, False, 0)
+        if self.status.get("migration_kept"):
+            box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+            box.get_style_context().add_class("rg-card")
+            box.pack_start(_label(M.migration_kept_text()), False, False, 0)
+            box.pack_start(_button("Resume the move", lambda *a: self._do_schedule("restart"), suggested=True),
+                           False, False, 0)
+            body.pack_start(box, False, False, 0)
         body.pack_start(_label("Updates are installed when the handheld restarts, so nothing changes while "
                             "you use it. Checking needs Wi-Fi.", dim=True), False, False, 0)
         row = Gtk.Box(spacing=8)

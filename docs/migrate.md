@@ -21,7 +21,7 @@ holds. (The holds v0.4.x put on its FFmpeg libraries are released: Handtop's FFm
 Copy it from the release notes, or type it as is (one line):
 
 ```sh
-sudo bash -euc 'trap "echo Download or signature check failed: nothing was changed." ERR; d=$(mktemp -d /run/handtop-migrate.XXXXXX); cd "$d"; for f in handtop-migrate handtop-migrate.asc handtop-archive.asc; do curl -fsSL --proto =https -o "$f" "https://junsulee119.github.io/handtop-apt/migrate/$f"; done; sqv --keyring handtop-archive.asc handtop-migrate.asc handtop-migrate | grep -qx EF04B02F6569FB6FC8EAF9C5F5962C429E9C69FF; trap - ERR; bash ./handtop-migrate'
+sudo bash -euc 'trap "echo Download or signature check failed: nothing was changed." ERR; d=$(mktemp -d /run/handtop-migrate.XXXXXX); cd "$d"; for f in handtop-migrate handtop-migrate.asc handtop-archive.asc; do curl -fsSL --proto =https -o "$f" "https://junsulee119.github.io/handtop-apt/migrate/$f"; done; s=$(sqv --keyring handtop-archive.asc handtop-migrate.asc handtop-migrate); [ "$s" = EF04B02F6569FB6FC8EAF9C5F5962C429E9C69FF ]; trap - ERR; bash ./handtop-migrate'
 ```
 
 `sudo` asks for your password first. The rest runs as root in a new private folder under `/run`, so
@@ -35,8 +35,9 @@ the signed script, not the downloaded key file.
 ## What happens
 
 1. **Checks** that this is an RG35XX H with Debian 13 and Handtop v0.4.x, not moved yet. The release is
-   recognised from Handtop's files: the files only that release has must be there, the other release's
-   must not, and the boot partition must be that release's (DDR3 or DDR4). A card that mixes releases is
+   recognised from Handtop's files: the files only that release has must be there (at most 2 % of them
+   may be missing: deleted ones come back), not one file only the other release has may be, and the boot
+   partition's `rootfix.cpio` must be there and be that release's (DDR3 or DDR4). A card that mixes releases is
    refused: changed files couldn't be told apart, so reflashing v0.5.0 is safer. Anything else: it stops
    and changes nothing.
 2. **Adds** Handtop's archive key, package source and FFmpeg pin (the files the `handtop-keyring`
@@ -66,8 +67,19 @@ release the move installed, from the first update after the move on (tested on a
 
 - Before the restart: anything the script changed is put back when it stops. Run the command again.
 - If the install in the maintenance boot fails (twice in a row, or three power cuts), the card starts
-  normally again and **the downloaded move is kept**: run the same command again and it offers to resume
-  that exact move (same packages, same decisions about your files). What happened is in the log on the
+  normally again and **the downloaded move is kept**: Apps → Update shows **Resume the move**, and running
+  the same command again offers it too: that exact move (same packages, same decisions about your files;
+  files that went missing or got damaged meanwhile are fetched again and checked against the plan).
+  Until then the Update app doesn't download updates or switch channels, so nothing replaces the kept
+  move. FFmpeg is held again meanwhile, as on v0.4.x.
+- A file you change after answering yes (for example between two attempts) keeps your version: a config
+  file stays as you made it (Handtop's next to it as `.dpkg-dist`), another file is saved in
+  `/var/backups/handtop-migrate` as `<name>.changed-after-plan`. The result lists them.
+- To give a kept move up instead: `sudo /usr/local/sbin/handtop-update abandon-migration` (the plan and
+  downloads go, FFmpeg is held again as before). Packages it already installed stay; if the card doesn't
+  work properly then, flash v0.5.0.
+- A power cut before you answered: the next run of the command first puts back what the interrupted run
+  changed, then starts over. What happened is in the log on the
   boot partition. If the boot partition couldn't be written during the install, `recovery.txt` (and on
   v0.4.0 the input file) are written at a later start.
 - The log is `/var/log/handtop-migrate.log`; the maintenance boot's log is copied to the boot partition

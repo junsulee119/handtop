@@ -65,6 +65,12 @@ except Exception as e:
 ENVV=(env HANDTOP_UPDATE_NO_POWER_ACTION=1 HANDTOP_UPDATE_CHROOT=1)
 migrate() { chroot "$ROOTFS" "${ENVV[@]}" HANDTOP_MIGRATE_SOURCE=$'URIs: copy:/srv/handtop-test\nSuites: ./' \
               HANDTOP_MIGRATE_YES=1 HANDTOP_MIGRATE_NO_RESTART=1 bash /root/m/handtop-migrate; }
+migrate_ask() { chroot "$ROOTFS" "${ENVV[@]}" HANDTOP_MIGRATE_SOURCE=$'URIs: copy:/srv/handtop-test\nSuites: ./' \
+              HANDTOP_MIGRATE_NO_RESTART=1 bash /root/m/handtop-migrate; }
+hu() { chroot "$ROOTFS" "${ENVV[@]}" /usr/local/sbin/handtop-update "$@"; }
+SD=/var/lib/handtop-update
+nothing_left() { [ ! -e "$ROOTFS/etc/apt/sources.list.d/handtop.sources" ] && [ ! -e "$ROOTFS/etc/systemd/system/handtop-update-apply.service" ] &&
+  [ ! -e "$ROOTFS$SD/plan.json" ] && [ ! -e "$ROOTFS$SD/migrate-undo" ] && [ "$(chroot "$ROOTFS" apt-mark showhold | sort | xargs)" = "$holds0" ]; }
 
 echo "== the user's changes before migrating"
 CONF=/etc/rg35xxh/power.conf; OTHER=/usr/local/bin/rg35xxh-theme
@@ -85,6 +91,34 @@ grep -q "cancelled: nothing installed" <<<"$out" && ok "No: cancelled" || bad "N
   [ ! -e "$ROOTFS/var/lib/handtop-update/plan.json" ] && ok "No: source, apply unit and plan gone" || bad "No: leftovers"
 [ "$(chroot "$ROOTFS" apt-mark showhold | sort | xargs)" = "$holds0" ] && ok "No: holds as before ($holds0)" ||
   bad "No: holds $(chroot "$ROOTFS" apt-mark showhold | sort | xargs), were $holds0"
+
+echo "== no rootfix.cpio on the boot partition: refused, nothing changed (review 2026-11-26 #65)"
+mv "$ROOTFS/boot/firmware/rootfix.cpio" "$WORK/rootfix.keep"
+out=$(migrate 2>&1 || true)
+grep -q "no rootfix.cpio to recognise it by" <<<"$out" && nothing_left && ok "missing rootfix.cpio refused, everything put back" ||
+  bad "missing rootfix.cpio: $(echo "$out" | tail -2)"
+mv "$WORK/rootfix.keep" "$ROOTFS/boot/firmware/rootfix.cpio"
+
+echo "== a run killed before the answer (power cut): the next run puts it back first (review 2026-11-26 #73)"
+L="$ROOTFS/var/log/handtop-migrate.log"; n0=$(stat -c %s "$L" 2>/dev/null || echo 0)
+# The answer comes from a FIFO this test holds open (no answer: it waits). Only processes whose root
+# is this test's ROOTFS are killed: another test may run the same script in its own chroot.
+ANS="$WORK/migrate-answer"; [ -e "$ANS" ] && safe_rm "$ANS"; mkfifo "$ANS"
+migrate_ask < "$ANS" >/dev/null 2>&1 & MP=$!
+exec 7> "$ANS"
+for _ in $(seq 900); do tail -c +$((n0 + 1)) "$L" 2>/dev/null | grep "4/4 Install at the next start" >/dev/null &&
+  [ -e "$ROOTFS$SD/plan.json" ] && break; sleep 1; done
+RR=$(realpath "$ROOTFS")
+for p in $(pgrep -f "bash /root/m/handtop-migrate" || true); do
+  [ "$(readlink "/proc/$p/root" 2>/dev/null)" = "$RR" ] && kill -9 "$p" 2>/dev/null
+done
+exec 7>&-; wait "$MP" 2>/dev/null || true; safe_rm "$ANS"
+[ -d "$ROOTFS$SD/migrate-undo" ] && [ -e "$ROOTFS/etc/apt/sources.list.d/handtop.sources" ] &&
+  ok "killed while asking: changes and their undo record are on the card" || bad "killed run left no undo record"
+out=$(echo n | migrate_ask 2>&1 || true)
+grep -q "An earlier run stopped before the move was scheduled" <<<"$out" && nothing_left &&
+  ok "next run put the killed run's changes back (source, unit, plan, holds)" || bad "after a killed run: $(echo "$out" | tail -3)"
+
 # The metapackage's version in the test archive (a release build's is a bare 0.5.0; review #81).
 V1=$(awk '/^Package: /{p=$2} /^Version: /{if (p == "handtop") print $2}' "$ARCH_DIR"/Packages | sort -V | tail -1)
 [ -n "$V1" ] || { echo "no handtop package in $ARCH_DIR/Packages" >&2; exit 1; }
@@ -97,6 +131,30 @@ grep -q "kept, you changed it: $CONF" <<<"$out" && ok "changed config file annou
 grep -q "you changed $OTHER" <<<"$out" && ok "changed Handtop file announced" || bad "changed file not announced"
 [ "$(readlink "$ROOTFS/system-update")" = /var/lib/handtop-update ] && ok "maintenance boot scheduled" || bad "no marker"
 [ -z "$(ver handtop)" ] && ok "nothing installed before the restart" || bad "handtop installed before the restart"
+
+echo "== the move stops after its attempts: kept, the app can't replace it, the command resumes it (#63, #73)"
+python3 - "$ROOTFS$SD/schedule.json" <<'PY'
+import json, sys
+d = json.load(open(sys.argv[1])); d["attempts"] = 3; json.dump(d, open(sys.argv[1], "w"))
+PY
+hu apply >/dev/null 2>&1 || true
+st=$(hu status)
+[ "$(echo "$st" | js 'd["migration_kept"] and d["kind"]')" = migrate ] && ok "plan kept after the attempt limit" || bad "status: $st"
+chroot "$ROOTFS" apt-mark showhold | grep -x libavcodec61 >/dev/null && ok "FFmpeg held again meanwhile" ||
+  bad "holds after the failed move: $(chroot "$ROOTFS" apt-mark showhold | xargs)"
+out=$(hu download 2>&1 || true); grep -q "hasn't finished" <<<"$out" && ok "download refused while the move is kept" || bad "download: $out"
+out=$(hu channel testing 2>&1 || true); grep -q "hasn't finished" <<<"$out" && ok "channel switch refused while the move is kept" || bad "channel: $out"
+pid=$(echo "$st" | js 'd["plan"]')
+deb=$(ls "$ROOTFS$SD"/cache/handtop-desktop_*.deb); printf 'XXXX' | dd of="$deb" bs=1 seek=2000 conv=notrunc status=none
+out=$(migrate 2>&1 || true)
+grep -q "didn't finish" <<<"$out" && [ "$(hu status | js 'd["scheduled"] and d["plan"]')" = "$pid" ] &&
+  ok "the command resumed the same plan (a damaged file fetched again)" || bad "resume: $(echo "$out" | tail -3)"
+! chroot "$ROOTFS" apt-mark showhold | grep -x libavcodec61 >/dev/null && ok "holds released again for the install" || bad "still held"
+
+echo "== files changed after the plan keep the user's version (decision 2026-11-25, #64)"
+CONF2=/etc/rg35xxh/lowpower.conf; OTHER2=/usr/local/bin/rg35xxh-autosleep
+echo "# changed after the plan (migrate-test)" >> "$ROOTFS$CONF2"
+echo "# changed after the plan (migrate-test)" >> "$ROOTFS$OTHER2"
 
 echo "== maintenance boot (apply)"
 chroot "$ROOTFS" "${ENVV[@]}" /usr/local/sbin/handtop-update apply > "$WORK/migrate-apply.out" 2>&1 || true
@@ -118,7 +176,7 @@ done
 [ -z "$(chroot "$ROOTFS" dpkg --audit)" ] && ok "dpkg --audit clean" || bad "dpkg --audit: $(chroot "$ROOTFS" dpkg --audit | head -3)"
 # Allowed: the test's own config change, and the source file the test pointed at its archive.
 v=$(chroot "$ROOTFS" dpkg --verify handtop-core handtop-desktop handtop-video handtop-keyring 2>&1 |
-    grep -v -e " $CONF\$" -e " /etc/apt/sources.list.d/handtop.sources\$" || true)
+    grep -v -e " $CONF\$" -e " $CONF2\$" -e " /etc/apt/sources.list.d/handtop.sources\$" || true)
 [ -z "$v" ] && ok "dpkg --verify clean (but the test's changes)" || bad "dpkg --verify: $v"
 grep -q "changed by the user" "$ROOTFS$CONF" && [ -f "$ROOTFS$CONF.dpkg-dist" ] && ok "changed config kept, package's next to it" || bad "changed config not kept"
 grep -q "changed by the user" "$ROOTFS/var/backups/handtop-migrate$OTHER" && ! grep -q "changed by the user" "$ROOTFS$OTHER" &&
@@ -137,6 +195,18 @@ grep -q "\"$MODEF\": \"700\"" "$ROOTFS/var/backups/handtop-migrate/modes.json" 2
   grep -q "removed [0-9]* unchanged file(s) of v0.4.x's own FFmpeg" "$WORK/migrate-apply.out" "$ROOTFS"/var/log/handtop-update/*.log 2>/dev/null &&
   ok "old FFmpeg leftovers removed, the user's changed one kept" ||
   bad "old FFmpeg files: $OLDH $([ -e "$ROOTFS$OLDH" ] && echo still there || echo gone), $KEEPH $(grep -c "changed by the user" "$ROOTFS$KEEPH" 2>&1)"
+grep -q "changed after the plan" "$ROOTFS$CONF2" && ok "config file changed after the plan: the user's version stays" ||
+  bad "$CONF2 replaced"
+grep -q "changed after the plan" "$ROOTFS/var/backups/handtop-migrate$OTHER2.changed-after-plan" 2>/dev/null &&
+  ! grep -q "changed after the plan" "$ROOTFS$OTHER2" && ok "other file changed after the plan: saved, then Handtop's" ||
+  bad "$OTHER2: no .changed-after-plan backup"
+grep -q "after the move was planned" <<<"$st" && ok "the result lists them" || bad "not in the result"
+for u in handtop-recovery.service handtop-update-boot-check.service; do
+  [ "$(chroot "$ROOTFS" systemctl is-enabled "$u" 2>/dev/null)" = enabled ] && ok "$u enabled (#83)" || bad "$u not enabled"
+done
+lnk=/usr/lib/aarch64-linux-gnu/libavcodec.so
+[ ! -L "$ROOTFS$lnk" ] || chroot "$ROOTFS" dpkg -S "$lnk" >/dev/null 2>&1 &&
+  ok "v0.4.x's unversioned FFmpeg link gone or a package's (#75)" || bad "$lnk left, no package owns it"
 [ ! -L "$ROOTFS/system-update" ] && ok "marker removed" || bad "marker still there"
 [ -f "$ROOTFS/usr/local/lib/rg35xxh-update/handtop_update/app.py" ] && ok "Update app installed" || bad "no Update app"
 [ "$(cat "$ROOTFS/usr/sbin/policy-rc.d" 2>/dev/null)" = "$(printf '#!/bin/sh\nexit 101')" ] && ok "policy-rc.d as before" || bad "policy-rc.d changed"

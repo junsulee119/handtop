@@ -65,17 +65,34 @@ def result_text(res):
         title = "Updated on %s" % when
         if msg.startswith("back to the previous"):
             title = "Went back to the previous release on %s" % when
-        body = ""
+        if res.get("migrated_from"):
+            title = "Moved onto packages on %s (from Handtop %s)" % (when, res["migrated_from"])
+        parts = []
         if res.get("kept_config"):
-            body = ("These settings files were kept because you had edited them; the new version "
-                    "of each is saved next to it:\n" + "\n".join("  " + p for p in res["kept_config"][:8])
-                    + ("\n  and %d more" % (len(res["kept_config"]) - 8) if len(res["kept_config"]) > 8 else ""))
-        return title, body, False
+            parts.append("These settings files were kept because you had edited them; the new version "
+                         "of each is saved next to it:\n" + "\n".join("  " + p for p in res["kept_config"][:8])
+                         + ("\n  and %d more" % (len(res["kept_config"]) - 8) if len(res["kept_config"]) > 8 else ""))
+        # What the install noted (backups, boot partition files, ...): review 2026-11-26 #60, #72
+        parts += [n[:1].upper() + n[1:] + ("" if n.endswith(".") else ".") for n in (res.get("notes") or [])[:6]]
+        return title, "\n\n".join(parts), False
     if res.get("ok") is None:
         return "Update waiting", msg[:1].upper() + msg[1:], False
     title = "The update stopped (%s)" % when if res.get("interrupted") else "The update failed (%s)" % when
     msg = re.sub(r"^update (failed|not installed): ", "", msg)
     return title, (msg[:1].upper() + msg[1:]) if msg else "", True
+
+
+def boot_pending_text(files):
+    """Boot partition files the migration couldn't write yet (written at a later start)."""
+    if not files:
+        return None
+    return ("Not on the SD card's boot partition yet: %s. It is written at a later start; until then "
+            "recovery.txt may be missing there." % ", ".join(files))
+
+
+def migration_kept_text():
+    return ("The move onto packages hasn't finished. It is kept on the handheld: Resume installs it at the "
+            "next restart (the same command from docs/migrate.md does too). Updates wait until it is done.")
 
 
 def can_install(plan_status):

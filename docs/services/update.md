@@ -50,7 +50,12 @@ All print JSON (errors too) and take a lock (`/run/handtop-update.lock`); apt's 
   charger (an unreadable level counts as too low, and on the handheld a battery that hasn't shown up yet is
   unreadable; only a machine without a battery skips this), a controller mode runs or systemd can't say, `handtop-update-apply.service` isn't enabled,
   or `/system-update` belongs to another updater. Then the link, synced: the next start is the maintenance boot.
-- `cancel`: forgets the plan, its archives, lists and staged release; `previous/` stays.
+- `cancel`: forgets the plan, its archives, lists and staged release; `previous/` stays. Not for a migration
+  that has started installing.
+- A kept migration plan (after a failed move, docs/migrate.md): `download` and `channel` refuse while it is
+  there; `repair` fetches its missing or damaged archives again for the same plan (frozen lists, recorded
+  hashes); `abandon-migration` (root, not the app) gives it up and holds FFmpeg again. `status` says
+  `migration_kept`, and lists `boot_pending` (boot partition files a migration couldn't write yet).
 - `channel stable|testing`: cancels a downloaded or scheduled update, then writes or removes
   `handtop-testing.sources` (a fixed stanza). Packages from testing stay until stable has the same or newer.
 - `status`: plan, scheduled, after, going back possible, kept release, last result, joypad override, channel.

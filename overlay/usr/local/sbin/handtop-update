@@ -9,7 +9,10 @@
                                (restart, default) or switch off
     handtop-update migrate     v0.4.x card (no Handtop packages yet): check, download and save the plan
                                that moves it onto packages (handtop-migrate runs it; schedule next)
-    handtop-update cancel      forget the downloaded update
+    handtop-update cancel      forget the downloaded update (not a migration that has started installing)
+    handtop-update repair      a kept migration: fetch its missing or damaged files again (same plan)
+    handtop-update abandon-migration
+                               give up a kept migration plan (docs/migrate.md); root only, not the app
     handtop-update channel stable|testing
                                where Handtop's packages come from (cancels a downloaded update)
     handtop-update apply       maintenance boot only (handtop-update-apply.service)
@@ -41,6 +44,7 @@ STATE = "/var/lib/handtop-update"
 PLAN = STATE + "/plan.json"
 SCHEDULE = STATE + "/schedule.json"     # {plan, after, attempts, deferrals}
 INPROGRESS = STATE + "/in-progress.json"
+LATER_EDITS = STATE + "/later-edits.json"   # migration: Handtop files the user changed after the plan
 CHANGED = STATE + "/plan-changed.json"    # the plan whose install has started changing packages
 RESULT = STATE + "/last-result.json"
 CHECKED = STATE + "/checked.json"
@@ -725,13 +729,17 @@ def release_legacy_holds():
     run(["apt-mark", "unhold"] + rel, timeout=60)
 
 
-def restore_legacy_holds():
+def restore_legacy_holds(keep_journal=False):
+    """Hold again what the migration released. The journal stays when apt-mark fails (tried again
+    later) or keep_journal (a kept migration releases them again when it resumes)."""
     rel = (read_json(MIGRATE_HOLDS) or {}).get("released", [])
-    have = installed()
+    have = installed_any()
     rel = [n for n in rel if n in have]
-    if rel:
-        run(["apt-mark", "hold"] + rel, timeout=60, check=False)
-    unlink(MIGRATE_HOLDS)
+    if rel and run(["apt-mark", "hold"] + rel, timeout=60, check=False).returncode != 0:
+        return False
+    if not keep_journal:
+        unlink(MIGRATE_HOLDS)
+    return True
 
 
 def release_notes(version):
@@ -1054,6 +1062,7 @@ def fetch_plan(inst, opts, held, what=("dist-upgrade",)):
 
 def cmd_download():
     with lock():
+        refuse_if_migration_kept()
         if our_marker():
             raise Fail("an update is scheduled: cancel it first")
         chk = read_json(CHECKED) or {}
@@ -1175,7 +1184,9 @@ def identify(data):
     mine, theirs = own - others, others - own
     have_mine = sum(1 for p in mine if card_value(p)) / max(1, len(mine))
     have_theirs = sum(1 for p in theirs if card_value(p)) / max(1, len(theirs))
-    if mine and have_mine < 0.98 or theirs and have_theirs > 0.02:
+    # Mixed card: any file only another release has. A few of this release's own files may be missing
+    # (deleted by the user; they come back with the packages), at most 2 % of them.
+    if mine and have_mine < 0.98 or theirs and have_theirs > 0:
         raise Fail("this card mixes files of more than one Handtop release (%s's own files: %d%% there; "
                    "other releases' own files: %d%% there), so changed files can't be told apart: "
                    "nothing changed; flash v0.5.0 instead" % (rel, 100 * have_mine, 100 * have_theirs))
@@ -1183,6 +1194,9 @@ def identify(data):
         raise Fail("the boot partition is not mounted (%s)" % FAT)
     have = card_value(FAT + "/rootfix.cpio")
     variants = data[rel].get(FAT + "/rootfix.cpio", {})
+    if not have or have[0] != "f" or not variants:          # missing = no evidence (review 2026-11-26 #65)
+        raise Fail("this card's boot partition has no rootfix.cpio to recognise it by: nothing changed; flash "
+                   "v0.5.0 instead")
     var = next((v for v, tv in variants.items() if tv == have and v != "*"), None)
     if var is None and variants.get("*") != have:
         raise Fail("this card's boot partition (rootfix.cpio) is not %s's: nothing changed; flash v0.5.0 "
@@ -1231,7 +1245,10 @@ def adoption(plan, data):
     "keep": config files the user changed: they stay, the package's copy next to them (.dpkg-dist);
     "backup": [path, sha256] other files the user changed: copied to BACKUP, then replaced."""
     known = data.get(plan["from"]["release"], {})
-    res = {"replace": [], "keep": [], "backup": [], "ffmpeg_backup": [], "deleted": [], "links": [], "modes": []}
+    res = {"replace": [], "keep": [], "backup": [], "ffmpeg_backup": [], "deleted": [], "links": [], "modes": [],
+           # every Handtop file still as the release shipped it: [path, sha256 then, package md5], so the
+           # install can tell an edit made after the plan from its own writes (review #64)
+           "stock": [], "deleted_md5": {}}
     modes, legacy = release_extras(plan["from"]["release"])
     owned = None
     for p in plan["packages"]:
@@ -1243,6 +1260,7 @@ def adoption(plan, data):
             cur = card_value(path)
             if not cur and path in conff and path in known:
                 res["deleted"].append(path)          # the user deleted a config file the release had
+                res["deleted_md5"][path] = pkg_md5
                 continue
             if cur and cur[0] == "l" and cur not in known.get(path, {}).values():
                 res["links"].append([path, cur[1]])  # the user made it a link: keep where it pointed
@@ -1258,6 +1276,7 @@ def adoption(plan, data):
                     res["ffmpeg_backup"].append([path, cur[1]])
                 continue
             if cur in known.get(path, {}).values():
+                res["stock"].append([path, cur[1], pkg_md5])
                 if path in conff and md5(path) != pkg_md5:
                     res["replace"].append([path, pkg_md5])
                 m = "%o" % stat.S_IMODE(os.stat(path).st_mode)
@@ -1271,24 +1290,52 @@ def adoption(plan, data):
     return res
 
 
+def _aliases(path):
+    """The spellings dpkg may have recorded for a path on a merged-/usr system."""
+    res = {path}
+    for a, b in (("/usr/lib/", "/lib/"), ("/usr/bin/", "/bin/"), ("/usr/sbin/", "/sbin/")):
+        if path.startswith(a):
+            res.add(b + path[len(a):])
+        elif path.startswith(b):
+            res.add(a + path[len(b):])
+    return res
+
+
 def remove_old_ffmpeg_files(rel, log):
-    """After the packages: files of v0.4.x's own FFmpeg build that are still no package's and unchanged
-    (old header location, examples, BUILDINFO) go, with folders left empty. Changed ones stay."""
+    """After the packages: files (and unversioned .so links) of v0.4.x's own FFmpeg build that are still
+    no package's and unchanged (old header location, examples, BUILDINFO) go, with folders left empty.
+    Changed ones stay. Never through a folder that is a link (it could lead into another tree), never a
+    path any package owns under any spelling, and each one checked again right before it goes
+    (review 2026-11-26 #75)."""
     _, legacy = release_extras(rel)
     owned = dpkg_owned()
-    gone = 0
+    gone = skipped = 0
     for path, sums in sorted(legacy.items()):
-        if path in owned or not os.path.isfile(path) or os.path.islink(path) or sha256(path) not in sums:
+        d = os.path.dirname(path)
+        if os.path.realpath(d) != d:
+            skipped += os.path.lexists(path)
+            continue
+        if _aliases(path) & owned:          # (the folder is real, so this spelling is the path itself)
+            continue
+        try:
+            st = os.lstat(path)
+        except FileNotFoundError:
+            continue
+        if stat.S_ISLNK(st.st_mode):
+            if "l:" + os.readlink(path) not in sums:
+                continue
+        elif not stat.S_ISREG(st.st_mode) or sha256(path) not in sums:
             continue
         os.unlink(path)
         gone += 1
-        d = os.path.dirname(path)
-        while d not in ("/", "/usr", "/usr/include", "/usr/share", "/usr/bin") and os.path.isdir(d) \
-                and not os.listdir(d) and d not in owned:
+        while d not in ("/", "/usr", "/usr/include", "/usr/share", "/usr/bin", "/usr/share/doc") \
+                and os.path.isdir(d) and not os.path.islink(d) and not os.listdir(d) and not (_aliases(d) & owned):
             os.rmdir(d)
             d = os.path.dirname(d)
     if gone:
         log("removed %d unchanged file(s) of v0.4.x's own FFmpeg build that no package owns" % gone)
+    if skipped:
+        log("left %d file(s) of v0.4.x's own FFmpeg build alone: their folder is a link" % skipped)
     return gone
 
 
@@ -1332,11 +1379,18 @@ def backup(items, log):
 
 
 def fat_write(name, data, log):
-    """Write a file on the boot partition (temp file, sync, rename); only when it is really mounted."""
+    """Write a file on the boot partition (temp file, sync, rename); only when it is really mounted.
+    A write error (full, I/O error) is False too, never an exception: the packages are installed by
+    then, and the file waits for a later start (review 2026-11-26 #72)."""
     if not os.path.ismount(FAT) or not os.access(FAT, os.W_OK):
         log("boot partition not writable: %s not written" % name)
         return False
-    write_atomic(os.path.join(FAT, name), data)
+    try:
+        write_atomic(os.path.join(FAT, name), data)
+    except OSError as e:
+        log("could not write %s on the boot partition: %s" % (name, e))
+        unlink(os.path.join(FAT, name + ".new"))
+        return False
     return True
 
 
@@ -1347,6 +1401,9 @@ def migrate_boot_files(plan, data, log):
     notes, pending = [], []
     rel = plan["from"]["release"]
     tpl = lambda n: open(os.path.join(BOOT_TEMPLATES, n), "rb").read()
+    # Recorded before writing: a cut (or an error) in the middle still leaves the work to finish.
+    if not read_json(BOOT_PENDING):
+        write_json(BOOT_PENDING, {"release": rel, "files": ["recovery.txt", "rg35xxh-input.conf"]})
     if not os.path.exists(FAT + "/recovery.txt"):
         if fat_write("recovery.txt", tpl("recovery.txt"), log):
             notes.append("recovery.txt added to the boot partition")
@@ -1409,6 +1466,39 @@ def add_missing_settings(path, log):
     log("%s: added %s" % (path, ", ".join(a.split("=")[0].strip() for a in add)))
 
 
+UNITS_DIR = "/etc/systemd/system"
+RECOVERY_UNITS = ("handtop-recovery.service", "handtop-update-boot-check.service")
+
+
+def later_edits(plan_ad, log):
+    """Before the packages, every attempt: Handtop files the plan found as shipped but which the user
+    changed since (or a config file they deleted and made again) are kept as they are now: the current
+    bytes go to BACKUP (<path>.changed-after-plan) before dpkg replaces an ordinary file; a config file
+    stays (dpkg keeps it) and is not replaced afterwards (decision 2026-11-25: keep the newest edit).
+    Files already as the package has them are the install's own writes (an earlier attempt)."""
+    changed = {}
+    for path, orig, pkg_md5 in plan_ad.get("stock", []):
+        cur = card_value(path)
+        if cur == ("f", orig) or cur is None or cur[0] != "f" or md5(path) == pkg_md5:
+            continue
+        dst = BACKUP + path + ".changed-after-plan"
+        if not (os.path.isfile(dst) and sha256(dst) == cur[1]):
+            os.makedirs(os.path.dirname(dst), exist_ok=True)
+            shutil.copy2(path, dst + ".tmp")
+            with open(dst + ".tmp", "rb") as f:
+                os.fsync(f.fileno())
+            if sha256(dst + ".tmp") != cur[1]:
+                raise Fail("backup of %s did not verify" % path)
+            os.rename(dst + ".tmp", dst)
+            fsync_dir(os.path.dirname(dst))
+            log("changed after the plan, kept in the backup folder: %s" % path)
+        changed[path] = cur[1]
+    prev = read_json(LATER_EDITS) or {}
+    if changed and changed != {k: prev.get(k) for k in changed}:
+        write_json(LATER_EDITS, dict(prev, **changed))
+    return dict(prev, **changed)
+
+
 def install_migrate(plan, log, budget):
     data = release_data()
     # Before any change: the boot partition is there and still has the kernel the plan was made for.
@@ -1422,6 +1512,7 @@ def install_migrate(plan, log, budget):
         run(["dpkg"] + CONF + ["--configure", "-a"], timeout=budget(1200), log=log, check=False)
     plan_ad = plan.get("adoption") or adoption(plan, data)
     backup(plan_ad["backup"] + plan_ad.get("ffmpeg_backup", []), log)
+    edited = later_edits(plan_ad, log)
     if plan_ad.get("links"):
         os.makedirs(BACKUP, exist_ok=True)
         write_json(BACKUP + "/links.json", dict(plan_ad["links"]))   # path -> where your link pointed
@@ -1431,11 +1522,11 @@ def install_migrate(plan, log, budget):
         if not os.path.exists(path):
             os.makedirs(os.path.dirname(path), exist_ok=True)
             write_atomic(path, text.encode())
-    # Units the card has already count as enabled once: the packages' postinst then leaves the
+    # Units the card had before the plan count as enabled once: the packages' postinst then leaves the
     # user's choice alone (a unit they disabled stays disabled); only units new to the card get enabled.
-    units = "/etc/systemd/system"
-    present = {f for f in os.listdir(units) if f.endswith((".service", ".timer"))
-               and os.path.isfile(os.path.join(units, f))}
+    units = UNITS_DIR
+    present = set(plan["units_present"]) if "units_present" in plan else {
+        f for f in os.listdir(units) if f.endswith((".service", ".timer")) and os.path.isfile(os.path.join(units, f))}
     seen = set(open(UNITS_SEEN).read().split()) if os.path.isfile(UNITS_SEEN) else set()
     if present - seen:
         os.makedirs(os.path.dirname(UNITS_SEEN), exist_ok=True)
@@ -1456,7 +1547,14 @@ def install_migrate(plan, log, budget):
         unlink("%s/%s.d/%s" % (units, u, DROPIN_NAME))
     # dpkg kept the card's copy of each config file (--force-confold) and wrote the package's next to
     # it: where the card's copy was the old release's, the package's takes its place.
+    # Not a file the user changed after the plan was made: that one stays (decision 2026-11-25).
+    stock_then = {p: orig for p, orig, _ in plan_ad.get("stock", [])}
+    kept_new = []
     for path, pkg_md5 in plan_ad["replace"]:
+        if path in edited or card_value(path) not in (("f", stock_then.get(path)), None):
+            if os.path.isfile(path) and md5(path) != pkg_md5:
+                kept_new.append(path)
+            continue
         for ext in (".dpkg-dist", ".dpkg-new"):
             if os.path.isfile(path + ext) and md5(path + ext) == pkg_md5:
                 os.replace(path + ext, path)
@@ -1469,12 +1567,26 @@ def install_migrate(plan, log, budget):
         write_json(BACKUP + "/modes.json", dict(plan_ad["modes"]))
     removed = remove_old_ffmpeg_files(plan["from"]["release"], log)
     for path in plan_ad.get("deleted", []):              # stays deleted (dpkg won't bring it back later)
-        if os.path.lexists(path):
+        want = plan_ad.get("deleted_md5", {}).get(path)
+        if os.path.lexists(path) and (not want or (os.path.isfile(path) and md5(path) == want)):
             os.unlink(path)
             log("config file you had deleted, deleted again: %s" % path)
+        elif os.path.lexists(path):
+            kept_new.append(path)                      # made again by the user since the plan: stays
+    # Recovery without a screen needs these two enabled, whatever happened on the way (review #83).
+    notes = []
+    for u in RECOVERY_UNITS:
+        en = run(["systemctl", "is-enabled", u], timeout=30, check=False).stdout.strip()
+        if en not in ("enabled", "static") and run(["systemctl", "enable", u], timeout=60, check=False).returncode != 0:
+            notes.append("%s could not be enabled: run sudo systemctl enable %s" % (u, u))
+    later = sorted(set(kept_new) | set(edited))
+    if later:
+        notes.append("you changed these after the move was planned; your version is kept (config files stay, "
+                     "Handtop's next to them as .dpkg-dist; other files are in %s as .changed-after-plan): %s"
+                     % (BACKUP, ", ".join(later)))
     unlink(MIGRATE_HOLDS)                # the released v0.4.x holds stay released
     unlink(NO_PREDECESSOR)
-    return migrate_boot_files(plan, data, log) + (
+    return notes + migrate_boot_files(plan, data, log) + (
         ["%d changed file(s) backed up in %s" % (len(plan_ad["backup"]), BACKUP)] if plan_ad["backup"] else []) + (
         ["%d leftover file(s) of v0.4.x's own FFmpeg build removed" % removed] if removed else []) + (
         ["permissions you changed on %d file(s) are back to Handtop's; yours are noted in %s/modes.json"
@@ -1526,6 +1638,10 @@ def cmd_migrate():
                 # nothing packaged to go back to: the release before is the image's copied files
                 "rollback": {"needed": False, "possible": True, "reason": None, "no_predecessor": True}}
         ad = plan["adoption"] = adoption(plan, data)
+        # The units this card has before anything is installed, decided once (a retry after the packages
+        # added theirs must not count those: review 2026-11-26 #83).
+        plan["units_present"] = sorted(f for f in os.listdir(UNITS_DIR) if f.endswith((".service", ".timer"))
+                                       and os.path.isfile(os.path.join(UNITS_DIR, f)))
         plan["backup_mb"] = round(sum(os.path.getsize(b[0]) for b in ad["backup"] + ad["ffmpeg_backup"]
                                       if os.path.isfile(b[0])) / (1 << 20), 1)
         mb, inodes = free_space(STATE)
@@ -1577,6 +1693,8 @@ def cmd_schedule(after="restart", expected=None):
                 attempts = int(prog.get("attempt") or 0)
         if not plan["rollback"]["possible"] and not plan["rollback"]["no_predecessor"]:
             raise Fail("going back would not be possible: %s" % plan["rollback"]["reason"])
+        if plan["kind"] == "migrate":
+            release_legacy_holds()           # held again after a failed attempt; the plan installs FFmpeg
         verify_files(plan["packages"], CACHE)
         check_kept_release(plan)
         mb, inodes = free_space(STATE)
@@ -1600,6 +1718,21 @@ def cmd_schedule(after="restart", expected=None):
         return 0
 
 
+def kept_migration():
+    """The migration plan on this card (kept after a failed attempt, or downloaded and not yet
+    installed), or None."""
+    plan = read_json(PLAN)
+    return plan if plan and plan.get("kind") == "migrate" else None
+
+
+def refuse_if_migration_kept():
+    """A kept migration plan is the only way to finish moving this card onto packages: app actions
+    that would replace or drop it are refused (review 2026-11-26 #63, decision 3)."""
+    if kept_migration():
+        raise Fail("the move onto packages hasn't finished: resume it (Apps > Update, or the same command "
+                   "again); to give it up instead: sudo handtop-update abandon-migration (docs/migrate.md)")
+
+
 def forget_plan():
     remove_marker()
     for p in (PLAN, SCHEDULE, CHANGED):
@@ -1612,11 +1745,65 @@ def cmd_cancel():
     with lock():
         if our_marker() is False:
             raise Fail("the scheduled offline update is not Handtop's; not touching it")
-        migrating = (read_json(PLAN) or {}).get("kind") == "migrate"
+        mig = kept_migration()
+        if mig and plan_changed(mig):
+            raise Fail("the move onto packages has started installing and can only be finished: resume it "
+                       "(the same command again); to give it up: sudo handtop-update abandon-migration")
+        migrating = bool(mig)
         forget_plan()
         if migrating or os.path.exists(MIGRATE_HOLDS):
             restore_legacy_holds()
         out({"ok": True})
+        return 0
+
+
+def cmd_repair():
+    """A kept migration plan whose downloaded files went missing or got damaged: fetch exactly those
+    again, at the plan's versions, from the plan's frozen package lists, each checked against the
+    SHA-256 the plan recorded. The plan and its decisions stay as they are (review 2026-11-26 #63)."""
+    with lock():
+        mig = kept_migration()
+        if not mig:
+            raise Fail("no move onto packages is kept on this card")
+        if not os.path.isdir(LISTS):
+            raise Fail("the move's package lists are gone: give it up (abandon-migration) and run the command again")
+        bad = [p for p in mig["packages"] if not file_ok(os.path.join(CACHE, p["file"]), p["algo"], p["hash"])]
+        if bad:
+            os.makedirs(CACHE, exist_ok=True)
+            tmp = CACHE + "/repair"
+            rmtree(tmp)
+            os.makedirs(tmp)
+            stage_for_apt(tmp)
+            for p in bad:
+                unlink(os.path.join(CACHE, p["file"]))
+            run(["apt-get", "download", "-q"] + apt_opts(True) + ["%s=%s" % (p["name"], p["new"]) for p in bad],
+                timeout=1800, cwd=tmp, check=False)
+            for p in bad:
+                f = os.path.join(tmp, p["file"])
+                if os.path.isfile(f) and file_ok(f, p["algo"], p["hash"]):
+                    os.chown(f, 0, 0)
+                    os.rename(f, os.path.join(CACHE, p["file"]))
+            rmtree(tmp)
+            verify_files(mig["packages"], CACHE)
+        out({"ok": True, "plan": mig["id"], "repaired": [p["name"] for p in bad]})
+        return 0
+
+
+def cmd_abandon_migration():
+    """Give up a kept migration plan explicitly (docs/migrate.md): its plan, downloads and decisions go,
+    the FFmpeg holds it released come back. Packages it already installed stay; reflash if the card
+    doesn't work."""
+    with lock():
+        mig = kept_migration()
+        if not mig:
+            raise Fail("no move onto packages is kept on this card")
+        if our_marker() is False:
+            raise Fail("another offline update is scheduled (/system-update); not touching it")
+        started = plan_changed(mig)
+        forget_plan()
+        restore_legacy_holds()
+        out({"ok": True, "abandoned": mig["id"], "had_started": started,
+             "note": "packages it already installed stay; if the card doesn't work, flash v0.5.0" if started else ""})
         return 0
 
 
@@ -1628,6 +1815,7 @@ def cmd_channel(which=None):
     with lock():
         if our_marker() is False:
             raise Fail("another offline update is scheduled (/system-update)")
+        refuse_if_migration_kept()
         cancelled = os.path.exists(PLAN)
         forget_plan()
         unlink(CHECKED)
@@ -1646,6 +1834,7 @@ def joypad_override_active():
 
 def cmd_status():
     have = installed_any()
+    pend = read_json(BOOT_PENDING) or {}
     plan = read_json(PLAN)
     sched = read_json(SCHEDULE) or {}
     prev = read_json(PREVIOUS + "/manifest.json")
@@ -1661,6 +1850,10 @@ def cmd_status():
          "previous_release": prev.get("release") if prev and prev.get("complete") and any(
              have.get(p["name"]) != p["version"] for p in prev.get("packages", [])) else None,
          "last_result": read_json(RESULT), "joypad_override": joypad_override_active(),
+         # files the boot partition still needs (written at a later start: review #72)
+         "boot_pending": pend.get("files") or [],
+         "migration_kept": bool(plan and plan.get("kind") == "migrate"
+                                and not (our_marker() and sched.get("plan") == plan.get("id"))),
          "channel": "testing" if os.path.exists(CHANNEL_SOURCES) else "stable",
          "reboot_required": os.path.exists("/run/reboot-required")})
     return 0
@@ -1853,13 +2046,19 @@ def finish(plan, ok, message, log, resume=False, extra=None):
     copy_log_to_fat(log.path, "update")
     if not resume:
         # A failed migration keeps its plan (lists, downloads, decisions): the same command resumes it.
+        # Meanwhile v0.4.x's FFmpeg holds are back (decision 2026-11-24); resuming releases them again.
+        if not ok and (plan or {}).get("kind") == "migrate":
+            try:
+                restore_legacy_holds(keep_journal=True)
+            except Exception as e:      # noqa: BLE001 - never stops the finish
+                log("could not hold FFmpeg again: %r" % e)
         complete(ok, keep_plan=not ok and (plan or {}).get("kind") == "migrate")
     power(action)
 
 
 def complete(ok, keep_plan=False):
     remove_marker()
-    for p in (SCHEDULE, INPROGRESS) + (() if keep_plan else (PLAN, CHANGED)):
+    for p in (SCHEDULE, INPROGRESS) + (() if keep_plan else (PLAN, CHANGED, LATER_EDITS)):
         unlink(p)
     if not keep_plan:
         for d in (LISTS, PREFS, NEXT) + ((CACHE,) if ok else ()):
@@ -2057,7 +2256,8 @@ def main():
         return self_test()
     cmds = {"status": cmd_status, "check": cmd_check, "download": cmd_download, "schedule": cmd_schedule,
             "migrate": cmd_migrate,
-            "cancel": cmd_cancel, "apply": cmd_apply, "boot-check": cmd_boot_check, "channel": cmd_channel}
+            "cancel": cmd_cancel, "apply": cmd_apply, "boot-check": cmd_boot_check, "channel": cmd_channel,
+            "repair": cmd_repair, "abandon-migration": cmd_abandon_migration}
     args = sys.argv[2:]
     if len(sys.argv) < 2 or sys.argv[1] not in cmds or len(args) > {"schedule": 2, "channel": 1}.get(sys.argv[1], 0):
         print(__doc__.strip(), file=sys.stderr)

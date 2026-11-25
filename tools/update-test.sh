@@ -261,7 +261,7 @@ chroot "$ROOTFS" dpkg --unpack /root/ut-pending.deb >/dev/null 2>&1
 kept=$(md5sum < "$ROOTFS$S/previous/manifest.json" 2>/dev/null || echo none)
 fat_on; hu apply >/dev/null 2>&1 || true; fat_off
 st=$(hu status)
-[ "$(echo "$st" | js 'd["last_result"]["ok"]')" = False ] && echo "$st" | grep -q "nothing changed" &&
+[ "$(echo "$st" | js 'd["last_result"]["ok"]')" = False ] && grep -q "nothing changed" <<<"$st" &&
   ok "apply refused: unfinished work outside the plan" || bad "apply with unfinished work: $(echo "$st" | js 'd["last_result"]')"
 [ ! -e "$ROOTFS/root/ut-pending-configured" ] && ok "its maintainer script did not run" || bad "dpkg --configure -a ran it"
 [ "$(md5sum < "$ROOTFS$S/previous/manifest.json" 2>/dev/null || echo none)" = "$kept" ] &&

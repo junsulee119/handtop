@@ -75,3 +75,12 @@ def test_signature_errors_are_not_wifi():
     assert "signature" in msg and "Wi-Fi" not in msg
     assert "Wi-Fi" in M.friendly_error("could not refresh every package list",
                                        ["Err:1 https://deb.debian.org/debian trixie InRelease"])
+
+
+def test_migration_texts():
+    t, b, err = M.result_text({"ok": True, "time": 0, "migrated_from": "v0.4.1",
+                               "notes": ["recovery.txt added to the boot partition"]})
+    assert "Moved onto packages" in t and "v0.4.1" in t and "Recovery.txt added" in b and not err
+    assert M.boot_pending_text([]) is None
+    assert "recovery.txt" in M.boot_pending_text(["recovery.txt"])
+    assert "Resume" in M.migration_kept_text()

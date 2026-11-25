@@ -20,7 +20,11 @@ import sys
 
 # v0.4.x built FFmpeg itself and copied it in: the libraries were Debian's (held), but the CLI, the
 # headers (old location), examples and BUILDINFO belonged to no package.
-LEGACY_FFMPEG = re.compile(r"/(libav[a-z]*|libsw[a-z]*|libpostproc|ffmpeg|ffprobe|handtop-ffmpeg)(/|$|[._-])")
+# Only where that build put things (review 2026-11-26 #75: a broad pattern could catch other files).
+LIBS = r"(libav(codec|device|filter|format|util)|libsw(resample|scale)|libpostproc)"
+LEGACY_FFMPEG = re.compile(r"^/usr/(include/%s/[^/]+|share/ffmpeg/.+|share/doc/handtop-ffmpeg/[^/]+|"
+                           r"lib/aarch64-linux-gnu/pkgconfig/%s\.pc|lib/aarch64-linux-gnu/%s\.so|"
+                           r"bin/(ffmpeg|ffprobe))$" % (LIBS, LIBS, LIBS))
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 spec = importlib.util.spec_from_file_location("audit", os.path.join(HERE, "..", "build", "pkg", "audit-unowned.py"))
@@ -50,10 +54,12 @@ def main():
         with open(fn) as f:
             for line in f:
                 cols = line.rstrip("\n").split("\t")
-                p, t, mode, v = cols[:4]
-                owner = cols[4] if len(cols) > 4 else "o"
-                if t == "f" and owner == "u" and p.startswith("/usr/") and LEGACY_FFMPEG.search(p):
-                    files[p] = ("x", v, mode)       # first: classes.txt gives these to handtop-video
+                if len(cols) < 5:
+                    sys.exit("%s: no owner column (made by an older tools/image-manifest.sh): make it again" % fn)
+                p, t, mode, v, owner = cols[:5]
+                if t in ("f", "l") and owner == "u" and LEGACY_FFMPEG.match(p):
+                    # first: classes.txt gives these to handtop-video. A link's value is "l:<target>".
+                    files[p] = ("x", v if t == "f" else "l:" + v, mode if t == "f" else "")
                 elif t in ("f", "l") and wanted(p, rules, divs):
                     files[p] = (t, v, mode if t == "f" else "")
         data.setdefault(rel, {})[var] = files

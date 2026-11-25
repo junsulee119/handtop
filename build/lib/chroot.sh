@@ -5,8 +5,16 @@ chroot_mount() {
   assert_rootfs
   mountpoint -q "$ROOTFS/proc"    || mount -t proc proc "$ROOTFS/proc"
   mountpoint -q "$ROOTFS/sys"     || mount -t sysfs sysfs "$ROOTFS/sys"
-  mountpoint -q "$ROOTFS/dev"     || mount --bind /dev "$ROOTFS/dev"
-  mountpoint -q "$ROOTFS/dev/pts" || mount --bind /dev/pts "$ROOTFS/dev/pts"
+  mount --make-rslave "$ROOTFS/sys" 2>/dev/null || true
+  # Slave mounts: the host's /dev reaches the chroot, but nothing mounted or unmounted there reaches
+  # the host. With the host's shared propagation, a plain bind made each chroot's /dev/pts mount and
+  # unmount the host's too; parallel test runs once left the server without /dev/pts (2026-11-25).
+  if ! mountpoint -q "$ROOTFS/dev"; then
+    mount --bind /dev "$ROOTFS/dev" && mount --make-rslave "$ROOTFS/dev"
+  fi
+  if ! mountpoint -q "$ROOTFS/dev/pts"; then
+    mount --bind /dev/pts "$ROOTFS/dev/pts" && mount --make-rslave "$ROOTFS/dev/pts"
+  fi
   mountpoint -q "$ROOTFS/dev/shm" || mount -t tmpfs -o mode=1777 shm "$ROOTFS/dev/shm"
   mountpoint -q "$ROOTFS/run"     || mount -t tmpfs tmpfs "$ROOTFS/run"
   cp -L /etc/resolv.conf "$ROOTFS/etc/resolv.conf"
