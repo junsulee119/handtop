@@ -20,7 +20,7 @@ an external monitor over mini HDMI, and everything else Debian's arm64 archive o
 - **Desktop:** labwc (Wayland) + Waybar + nwg-drawer + wlogout, 640×480 on the built-in screen
 - **Controls:** a custom input daemon turns the gamepad into mouse + keyboard, with an on-screen keyboard
 
-Status: **v0.4.1**, developed and tested on the RG35XX H.
+Status: **v0.5.0**, developed and tested on the RG35XX H.
 
 <p align="center">
   <img src="media/handtop-v0.4.1.png" width="800" alt="Handtop v0.4.1 on the RG35XX H: the new Controls app with a picture of the handheld, a profile with the apps it switches for, a video playing with big on-screen controls, and the Music app's Now playing page">
@@ -28,6 +28,7 @@ Status: **v0.4.1**, developed and tested on the RG35XX H.
 
 ## Features
 
+- **Updates without reflashing** (new in v0.5.0): Apps → Update installs Handtop's new releases and Debian's updates while the handheld restarts, survives power cuts, and can go back to the release you had (see [Updates](#updates))
 - **Themes** (new in v0.4.0): nine looks built in, your own copies, shareable theme files (see [Themes](#themes))
 - **Controls app** (new in v0.4.1): remap every button (also D-pad, Volume, F, Power), button combinations, macros you build or record, pointer / scroll / stick / vibration settings with live previews, profiles that switch by themselves per app; every risky change runs 15 s on trial and undoes itself
 - **Videos, Music and Image Viewer** (new in v0.4.1): hardware-decoded videos with resume and big themed controls, a music player that keeps playing with the screen off, a picture viewer with a thumbnail strip
@@ -64,7 +65,7 @@ How to change, share and design themes: [docs/themes.md](docs/themes.md).
 
 You need a microSD card (16 GB or larger) and balenaEtcher or Rufus.
 
-1. Download `handtop-<date>-v0.4.1.img.xz` and its `.sha256` from the Releases page. If that image does nothing at all on power-on (no LED), your unit has DDR3 RAM: use the `-DDR3` image instead.
+1. Download `handtop-<date>-v0.5.0.img.xz` and its `.sha256` from the Releases page. If that image does nothing at all on power-on (no LED), your unit has DDR3 RAM: use the `-DDR3` image instead.
 2. Flash the `.img.xz` directly (no need to unpack). If Windows offers to format the card afterwards, choose **Cancel**.
 3. Optional: on the `RG35XXHBOOT` drive, fill in `wifi.txt` (SSID, password, country).
 4. Put the card in the **TF1** (left) slot and power on. The first boot takes longer (the system grows to fill the card).
@@ -76,6 +77,21 @@ RG35XX H units come with one of two screen panels. Handtop checks the board at e
 uses the matching one, restarting once if it had to switch. If the screen stays garbled or black,
 write `rev6` (or `regular`) in `panel.txt` on the boot partition.
 Details: [docs/flashing.md](docs/flashing.md).
+
+## Updates
+
+From v0.5.0 on, **Apps → Update** keeps the handheld up to date: Handtop's releases and Debian's
+updates, downloaded and checked against Handtop's signature, installed while the handheld restarts.
+Details: [docs/apps/update.md](docs/apps/update.md).
+
+- **Already on v0.4.0 or v0.4.1?** One command moves the card onto updates and keeps your settings and
+  files: [docs/migrate.md](docs/migrate.md). Older cards need a reflash.
+- **If an update leaves something broken:** write `handtop=previous` in `recovery.txt` on the boot
+  partition (from any PC) and restart.
+- Handtop's archive key: `EF04B02F6569FB6FC8EAF9C5F5962C429E9C69FF`
+  ([docs/apt-repository.md](docs/apt-repository.md)).
+- The boot partition (kernel, U-Boot, device tree) is never updated; a release that changes it says
+  it needs a new image.
 
 ## External display
 

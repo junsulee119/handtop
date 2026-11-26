@@ -1,5 +1,23 @@
 # Handtop changelog
 
+## v0.5.0
+Updates without reflashing: Handtop now updates itself from Apps → Update, and v0.4.0 / v0.4.1 cards can move over with one command.
+
+- **New: Update app** (Apps → Update). **Check for updates** shows Handtop's next release with its notes and Debian's updates (security fixes included) as a count you can open; **Download** fetches everything and checks every file against Handtop's signed package lists; **Restart and install** installs while the handheld restarts, with progress on the screen and no desktop running, and the desktop comes back when it's done. **Install and power off** does the same and then turns the handheld off. Nothing is checked or downloaded in the background: only when you open the app. A taskbar icon shows when an update is ready, or when the last one failed.
+- **Updates survive power cuts.** If the battery dies or the handheld is switched off while installing, the next start picks up where it stopped. After three tries in a row it gives up and starts normally, and the app says what happened. It won't start an install under 40 % battery without the charger, or while a controller mode is running.
+- **Going back.** The release you had is kept on the card. If an update leaves something broken, write `handtop=previous` in `recovery.txt` on the boot partition (from any PC) and restart: the kept release is installed again. `joypad=previous` does the same for the joypad driver alone. Both work without a screen or buttons.
+- **Your changes are kept.** A settings file you edited (in `/etc`) stays as you made it; the new version goes next to it as `.dpkg-dist`, and the app lists those files. Services you turned on or off stay that way.
+- **Moving a v0.4.0 or v0.4.1 card over:** one command in a Terminal or over SSH, in [docs/migrate.md](docs/migrate.md) and the release notes. It checks Handtop's signature before it runs, recognises which release the card has, shows what you changed, and asks before it does anything. Wi-Fi, the home folder, your apps' settings, SSH and Tailscale are kept. Older cards (v0.3.x and before) need a reflash.
+- **Stable and Testing.** Apps → Update → Advanced switches to the Testing channel, where releases arrive before they are promoted to Stable. Switching back waits until Stable catches up.
+- **Video decoding is now an update like any other.** Handtop's FFmpeg build (with the video-engine patches) comes as packages under Debian's own names, so a newer Debian FFmpeg (for example a security fix) reaches the handheld as a Handtop update instead of needing a new image. Decoding is unchanged.
+- Some fixes still need a new image: the boot partition (kernel, U-Boot, device tree) is never updated. The app says so when a release needs one, and still offers Debian's updates.
+- **Known limits.**
+  - *Going back* (`handtop=previous`) works only on a card where dpkg has no unfinished work outside the packages it restores or removes, and with no other architecture added to dpkg. After a power cut, restart first so the interrupted update can finish. On a slow card the maintenance boot can time out; if an interrupted update can't finish, flash the current image.
+  - *The Update app's result page* may leave out a repair that reinstalls the same version, and shows at most eight changed settings files and six notes. The full result is in `/var/lib/handtop-update/last-result.json`.
+  - *Moving a v0.4.x card over:* leave some extra free space for files you edit after saying yes, and finish other package installs first. The card's release is recognised by a 90 % match of its files; up to 2 % of that release's own files may be missing (the packages bring them back).
+  - *Custom services:* if you changed how `handtop-recovery.service` or `handtop-update-boot-check.service` start, the move turns them back on (from `sysinit.target` and `multi-user.target`); if that fails, the move stops and can be resumed.
+- **For builders:** Handtop's files are built into packages (`handtop`, `handtop-core`, `-desktop`, `-video`, `-keyring`, `-platform-h700`, `-modules-h700-<kernel>`) and published to a signed apt repository on GitHub Pages ([docs/apt-repository.md](docs/apt-repository.md); archive key `EF04B02F6569FB6FC8EAF9C5F5962C429E9C69FF`). Release steps in [docs/release-checklist.md](docs/release-checklist.md): build in a clean, isolated environment and check that the chroot's mounts are gone before reusing it; check the staged and the deployed archive (every index form Release lists, their by-hash objects, the versions a stock card would pick, and every earlier release still listed).
+
 ## v0.4.1
 Controls and media: a Controls app for every button, with profiles that switch by themselves per app, and apps for videos, music and pictures.
 
