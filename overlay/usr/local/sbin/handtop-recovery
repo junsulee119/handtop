@@ -370,7 +370,14 @@ def main():
         # request's own reset), it was edited on a PC since: the newer content counts, also when it
         # cancels everything (none) (#71, #106).
         raw = read_fat_raw()
-        if raw is None and os.path.lexists(RECOVERY_TXT):
+        try:
+            os.lstat(RECOVERY_TXT)
+            there = True
+        except FileNotFoundError:
+            there = False
+        except OSError:
+            there = True                         # the folder can't be read (I/O error): not "absent" (#116)
+        if raw is None and there:
             # There but unreadable: whether it was edited can't be told; nothing acted on (#116).
             log("recovery.txt can't be read: the request waits for the next start")
             return 1

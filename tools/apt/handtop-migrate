@@ -210,15 +210,19 @@ for f in handtop-update handtop-run handtop-recovery; do
 done
 install -d /usr/local/share/handtop
 if [ ! -f "$U/share-new" ]; then       # the folder was there: keep what each file was first (#85)
-  mkdir -p "$U/share"; : > "$U/share-absent"
+  # Built aside and published only when complete (absent list first, then the copies): undo never
+  # puts back a partial copy over a file (#122).
+  SS="$U/share-stage"; rm -rf "$SS"; mkdir -p "$SS/files"; : > "$SS/absent"
   (cd "$T/x/usr/local/share/handtop" && find . ! -type d) > "$T/share-list" || die "could not list the new files"
   while IFS= read -r f; do
     if [ -e "/usr/local/share/handtop/$f" ] || [ -L "/usr/local/share/handtop/$f" ]; then
-      mkdir -p "$U/share/$(dirname "$f")" && cp -a "/usr/local/share/handtop/$f" "$U/share/$f" ||
+      mkdir -p "$SS/files/$(dirname "$f")" && cp -a "/usr/local/share/handtop/$f" "$SS/files/$f" ||
         die "could not save /usr/local/share/handtop/$f"
-    else echo "$f" >> "$U/share-absent"; fi
+    else echo "$f" >> "$SS/absent"; fi
   done < "$T/share-list"
   sync
+  mv "$SS/absent" "$U/share-absent" && mv "$SS/files" "$U/share" || die "could not save the share folder's files"
+  rm -rf "$SS"; sync
 fi
 cp -a "$T/x/usr/local/share/handtop/." /usr/local/share/handtop/
 install -m644 "$T/x/etc/systemd/system/handtop-update-apply.service" "$UNIT"

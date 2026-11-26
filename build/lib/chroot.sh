@@ -33,10 +33,12 @@ chroot_mount() {
 
 # True when the chroot's /dev and /dev/pts binds can't pass mounts or unmounts to the host (#97).
 chroot_dev_private() {
-  local m p
+  local m p e
   for m in dev dev/pts; do
     local rc=0
-    [ -e "$ROOTFS/$m" ] || continue
+    if ! e=$(LC_ALL=C stat -c %n -- "$ROOTFS/$m" 2>&1 >/dev/null); then
+      case "$e" in *"No such file or directory"*) continue ;; *) return 1 ;; esac   # only "absent" is absent
+    fi
     mountpoint -q "$ROOTFS/$m" || rc=$?
     [ "$rc" = 32 ] && continue                   # not a mount point; any other failure: unknown (#119)
     [ "$rc" = 0 ] || return 1

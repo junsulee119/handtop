@@ -157,6 +157,11 @@ def check_suite(tree, suite, a, now, pool_refs):
             bad("%s: main/binary-%s/Packages is missing" % (suite, arch))
     if f.get("Acquire-By-Hash", "").lower() == "yes":
         # apt asks for the strongest hash's object first (SHA512): every strong one must be there (#109)
+        # Every form has a SHA512 entry too (apt prefers it; one left out of the list and out of
+        # by-hash would pass unnoticed otherwise: #120).
+        for name in sha:
+            if name not in lst.get("SHA512", {}) and not (contents(name) and not os.path.isfile(os.path.join(d, name))):
+                bad("%s/Release: %s has no SHA512 entry" % (suite, name))
         for alg in ("SHA256", "SHA512"):
             if alg not in lst:
                 continue
