@@ -23,7 +23,7 @@ an external monitor over mini HDMI, and everything else Debian's arm64 archive o
 Status: **v0.5.0**, developed and tested on the RG35XX H.
 
 <p align="center">
-  <img src="media/handtop-v0.5.0.png" width="800" alt="Handtop v0.5.0 on the RG35XX H: the Update app's pixel-art icon, the Apps drawer with Update highlighted, and the Update app showing a new Handtop release with its notes and Debian's updates">
+  <img src="media/handtop-v0.4.0-to-v0.5.0.png" width="800" alt="Handtop v0.4.0 to v0.5.0 on the RG35XX H: the Update app's icon, the Controls app with a picture of the handheld, a video playing with big on-screen controls, and the Music app's Now playing page">
 </p>
 
 ## Features
