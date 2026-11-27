@@ -7,32 +7,60 @@
 # to it) and one other Handtop file (must be backed up, then replaced). After: every Handtop package
 # installed, dpkg clean, unchanged config files at the package's version, identity files, the boot
 # partition's recovery.txt (and on v0.4.0 the rescue input file), the result, a second run refused.
+# Also checks mode-only changes to an executable and a sudoers conffile.
 #
 #   sudo tools/migrate-test.sh <handtop-...-v0.4.x.img.xz>   (in a second checkout or worktree, after
-#   tools/update-device-archive.sh; its work/rootfs is overwritten)
+#   tools/update-device-archive.sh; uses a fresh scratch directory under WORK)
 set -euo pipefail
 source "$(dirname "$(realpath "$0")")/../build/config.sh"
 source "$TOP/build/lib/chroot.sh"
 IMG=$(realpath "${1:?usage: migrate-test.sh <image.img.xz>}")
+[ -f "$IMG" ] || die "no release image at $IMG"
 ARCH_DIR="${HANDTOP_TEST_ARCHIVE:-$WORK/device-archive/r1}"   # run.sh: shared by parallel runs with their own WORK
 [ -f "$ARCH_DIR/Packages" ] || die "no test archive in $ARCH_DIR: run tools/update-device-archive.sh first"
-MNT="$WORK/migrate-mnt"; LOOP=""
-cleanup() {
-  mountpoint -q "$ROOTFS/boot/firmware" && umount "$ROOTFS/boot/firmware"
-  chroot_umount
-  mountpoint -q "$MNT" && umount "$MNT"
-  [ -n "$LOOP" ] && losetup -d "$LOOP"
-  [ -e "$WORK/migrate.img" ] && safe_rm "$WORK/migrate.img"
-  return 0
+
+detach_image() {
+  local attached
+  [ "$IMAGE_ATTACHING" = 1 ] || return 0
+  # Check the backing file in case an interrupted detach already freed the loop number.
+  attached=$(losetup -l -n -O NAME -j "$IMAGE")
+  if [ -n "$attached" ]; then
+    [ -z "$LOOP" ] || [ "$attached" = "$LOOP" ] || die "unexpected loop attachment for $IMAGE"
+    losetup -d "$attached"
+  fi
+  IMAGE_ATTACHING=0
 }
+cleanup() {
+  if [ "$CHROOT_STARTED" = 1 ]; then chroot_umount --mounts-only; fi
+  if [ "$BOOT_MOUNT_TRIED" = 1 ] && mountpoint -q "$ROOTFS/boot/firmware"; then
+    umount "$ROOTFS/boot/firmware" || true
+  fi
+  mountpoint -q "$MNT" && umount "$MNT"
+  assert_no_mounts "$RUN_DIR"
+  detach_image
+  WORK="$BASE_WORK" safe_rm -r "$RUN_DIR"
+}
+
+chroot_test_lock
+# Refuse an attachment left by an older harness before taking ownership of any test files.
+if [ -e "$WORK/migrate.img" ]; then
+  attached=$(losetup -j "$WORK/migrate.img")
+  [ -z "$attached" ] || die "$WORK/migrate.img is still attached to a loop device; detach it first"
+fi
+BASE_WORK=$WORK
+RUN_DIR=$(mktemp -d "$BASE_WORK/migrate-test.XXXXXX")
+WORK=$RUN_DIR
+ROOTFS="$WORK/rootfs"
+MNT="$WORK/migrate-mnt"
+IMAGE="$WORK/migrate.img"
+LOOP="" IMAGE_ATTACHING=0 CHROOT_STARTED=0 BOOT_MOUNT_TRIED=0
 trap cleanup EXIT
-mkdir -p "$WORK" "$MNT"
+mkdir -p "$MNT"
+echo "== scratch directory $WORK"
 echo "== $(basename "$IMG"): root filesystem and boot partition"
-assert_build_paths
-[ -z "$(losetup -j "$WORK/migrate.img" 2>/dev/null)" ] || die "$WORK/migrate.img is still attached to a loop device (a killed run?): losetup -d it first"
-xz -dc "$IMG" > "$WORK/migrate.img"
-LOOP=$(losetup -P --show -f "$WORK/migrate.img")
-assert_no_mounts "$ROOTFS"
+xz -dc "$IMG" > "$IMAGE"
+IMAGE_ATTACHING=1
+LOOP=$(losetup -P --show -f "$IMAGE")
 mount -o ro "${LOOP}p2" "$MNT"
 rsync -aHAXx --delete --numeric-ids "$MNT/" "$ROOTFS/"
 umount "$MNT"
@@ -40,9 +68,10 @@ FATCOPY="$WORK/migrate-fat"; [ -e "$FATCOPY" ] && safe_rm -r "$FATCOPY"; mkdir -
 mount -o ro "${LOOP}p1" "$MNT"
 cp -a "$MNT/." "$FATCOPY/"
 umount "$MNT"
-losetup -d "$LOOP"; LOOP=""
-safe_rm "$WORK/migrate.img"
+detach_image
+safe_rm "$IMAGE"
 mkdir -p "$ROOTFS/boot/firmware"
+BOOT_MOUNT_TRIED=1
 mount -t tmpfs -o size=64m handtop-test-fat "$ROOTFS/boot/firmware"
 cp -a "$FATCOPY/." "$ROOTFS/boot/firmware/"
 REL=$(basename "$IMG" | grep -o 'v0\.4\.[0-9]*')
@@ -51,6 +80,7 @@ R="$ROOTFS/srv/handtop-test"; [ -e "$R" ] && safe_rm -r "$R"; mkdir -p "$R"
 cp "$ARCH_DIR"/* "$R/"
 mkdir -p "$ROOTFS/root/m"
 cp "$TOP/tools/apt/handtop-migrate" "$TOP/overlay/usr/share/keyrings/handtop-archive.asc" "$ROOTFS/root/m/"
+CHROOT_STARTED=1
 chroot_mount
 
 pass=0; fail=0
@@ -74,9 +104,11 @@ nothing_left() { [ ! -e "$ROOTFS/etc/apt/sources.list.d/handtop.sources" ] && [ 
 
 echo "== the user's changes before migrating"
 CONF=/etc/rg35xxh/power.conf; OTHER=/usr/local/bin/rg35xxh-theme
+MOD="/usr/lib/modules/$KVER/extra/usb_f_fs_xinput.ko"
 echo "# changed by the user (migrate-test)" >> "$ROOTFS$CONF"
 echo "# changed by the user (migrate-test)" >> "$ROOTFS$OTHER"
 MODEF=/usr/local/bin/rg35xxh-battery; chmod 700 "$ROOTFS$MODEF"     # permissions only (review #44)
+MODECONF=/etc/sudoers.d/rg35xxh-lowpower; chmod 400 "$ROOTFS$MODECONF"  # dpkg keeps the conffile mode (#76)
 OLDH=/usr/include/libavutil/avutil.h; KEEPH=/usr/include/libavutil/common.h   # v0.4.x's own FFmpeg (#42)
 echo "/* changed by the user (migrate-test) */" >> "$ROOTFS$KEEPH"
 chroot "$ROOTFS" apt-mark hold nano >/dev/null                       # the user's own hold
@@ -129,6 +161,12 @@ echo "$out" | tail -12
 grep -q "This card: Handtop $REL" <<<"$out" && ok "card named $REL" || bad "card not named $REL"
 grep -q "kept, you changed it: $CONF" <<<"$out" && ok "changed config file announced" || bad "changed config not announced"
 grep -q "you changed $OTHER" <<<"$out" && ok "changed Handtop file announced" || bad "changed file not announced"
+if ! grep -Fq "you changed $MOD:" <<<"$out" &&
+   [ "$(js "any(p == '$MOD' for p, _, _ in d['adoption']['stock'])" < "$ROOTFS$SD/plan.json")" = True ]; then
+  ok "stock USB module recognised without a change notice"
+else
+  bad "stock USB module not recognised or announced as changed"
+fi
 [ "$(readlink "$ROOTFS/system-update")" = /var/lib/handtop-update ] && ok "maintenance boot scheduled" || bad "no marker"
 [ -z "$(ver handtop)" ] && ok "nothing installed before the restart" || bad "handtop installed before the restart"
 
@@ -161,7 +199,8 @@ echo "# changed after the plan (migrate-test)" >> "$ROOTFS$OTHER2"
 
 echo "== maintenance boot (apply)"
 chroot "$ROOTFS" "${ENVV[@]}" /usr/local/sbin/handtop-update apply > "$WORK/migrate-apply.out" 2>&1 || true
-tail -3 "$WORK/migrate-apply.out"
+mv -fT "$WORK/migrate-apply.out" "$BASE_WORK/migrate-apply.out"
+tail -3 "$BASE_WORK/migrate-apply.out"
 st=$(chroot "$ROOTFS" "${ENVV[@]}" /usr/local/sbin/handtop-update status)
 [ "$(echo "$st" | js 'd["last_result"]["ok"] and d["last_result"]["migrated_from"]')" = "$REL" ] &&
   ok "result: moved from $REL" || bad "result: $(echo "$st" | js 'd["last_result"]')"
@@ -192,11 +231,21 @@ if [ "$REL" = v0.4.0 ]; then
   grep -q '^\[rescue\]' "$ROOTFS/boot/firmware/rg35xxh-input.conf" && [ -f "$ROOTFS/boot/firmware/rg35xxh-input.conf.v0.4.0" ] &&
     ok "v0.4.0 input file is the rescue template, old one kept" || bad "v0.4.0 input file not replaced"
 fi
-grep -q "\"$MODEF\": \"700\"" "$ROOTFS/var/backups/handtop-migrate/modes.json" 2>/dev/null &&
-  [ "$(stat -c %a "$ROOTFS$MODEF")" = 755 ] && ok "changed permissions noted, Handtop's back" ||
-  bad "permissions: $(stat -c %a "$ROOTFS$MODEF"), modes.json: $(cat "$ROOTFS/var/backups/handtop-migrate/modes.json" 2>&1)"
+mode_notes=$(echo "$st" | js '"\n".join(d["last_result"]["notes"][:6])')
+mode_backup="$ROOTFS/var/backups/handtop-migrate/modes.json"
+grep -Fq "\"$MODEF\": \"700\"" "$mode_backup" &&
+  [ "$(stat -c %a "$ROOTFS$MODEF")" = 755 ] &&
+  grep -Fq "Restored Handtop's permissions on 1 file" <<<"$mode_notes" &&
+  grep -Fq "Added access on $MODEF (0700 to 0755)" <<<"$mode_notes" &&
+  ok "$MODEF permissions restored and reported" || bad "$MODEF permissions: $mode_notes"
+grep -Fq "\"$MODECONF\": \"400\"" "$mode_backup" &&
+  [ "$(stat -c %a "$ROOTFS$MODECONF")" = 400 ] &&
+  chroot "$ROOTFS" visudo -cf "$MODECONF" >/dev/null 2>&1 &&
+  grep -Fq "Kept your permissions on $MODECONF" <<<"$mode_notes" &&
+  grep -Fq "Sudoers file $MODECONF (mode 0400, expected 0440)" <<<"$mode_notes" &&
+  ok "$MODECONF restrictive permissions kept and reported" || bad "$MODECONF permissions: $mode_notes"
 [ ! -e "$ROOTFS$OLDH" ] && grep -q "changed by the user" "$ROOTFS$KEEPH" &&
-  grep -q "removed [0-9]* unchanged file(s) of v0.4.x's own FFmpeg" "$WORK/migrate-apply.out" "$ROOTFS"/var/log/handtop-update/*.log 2>/dev/null &&
+  grep -q "removed [0-9]* unchanged file(s) of v0.4.x's own FFmpeg" "$BASE_WORK/migrate-apply.out" "$ROOTFS"/var/log/handtop-update/*.log 2>/dev/null &&
   ok "old FFmpeg leftovers removed, the user's changed one kept" ||
   bad "old FFmpeg files: $OLDH $([ -e "$ROOTFS$OLDH" ] && echo still there || echo gone), $KEEPH $(grep -c "changed by the user" "$ROOTFS$KEEPH" 2>&1)"
 grep -q "changed after the plan" "$ROOTFS$CONF2" && ok "config file changed after the plan: the user's version stays" ||

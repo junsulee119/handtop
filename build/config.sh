@@ -63,7 +63,7 @@ FFMPEG_DEBIAN_VERSION="7:7.1.5-0+deb13u1"   # Debian's ffmpeg source package the
 # Raise FFMPEG_HANDTOP_REV whenever our FFmpeg build changes but Debian's version doesn't (our patch,
 # the patchset pin, 04c, the packaging): apt only installs a new build under a new version. CI checks
 # it against build/pkg/ffmpeg-inputs.txt (tools/ffmpeg-inputs.sh). Back to 1 when Debian's changes.
-FFMPEG_HANDTOP_REV=1
+FFMPEG_HANDTOP_REV="2"
 FFMPEG_HANDTOP_VERSION="${FFMPEG_DEBIAN_VERSION}+handtop${FFMPEG_HANDTOP_REV}"   # newer than Debian's for apt
 KWIBOO_URL="https://github.com/Kwiboo/FFmpeg"
 KWIBOO_BASE="f46e514491172d15bd74b4abb1814cd2f05a763e"     # tag n7.1.3

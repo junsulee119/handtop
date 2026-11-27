@@ -11,7 +11,7 @@ and they only carry the release version when the build runs on the tagged commit
 - [ ] `RELEASE_VERSION` in `build/config.sh` is the new version.
 - [ ] FFmpeg build changed (patch, patchset pin, `04c`, packaging) without a new Debian version: `FFMPEG_HANDTOP_REV` raised and recorded with `tools/ffmpeg-inputs.sh --update` (CI checks this). Never record changed inputs under a released rev.
 - [ ] A Handtop package drops a file on purpose: it is listed in `build/pkg/removed-files.txt` (`tools/apt/repo.sh add` refuses unlisted drops).
-- [ ] A release that moves files out of Handtop's packages, or that v0.4.x cards migrate to: `releases.tsv` regenerated from the release images' manifests (`tools/image-manifest.sh`, `tools/release-data.py`).
+- [ ] Regenerate `releases.tsv` when a release moves files out of Handtop's packages or accepts migrations from v0.4.x. Use the release images' manifests (`tools/image-manifest.sh`) and the build's `/etc/handtop/boot-abi` with `tools/release-data.py`. The script uses `build/pkg/modules.txt` to include the stock module hashes.
 - [ ] The release commit pushed to `main`; **tag it locally on the build server's checkout** (`git tag v<version>`), not yet on GitHub.
 
 ## Build (build server, on the tagged commit)

@@ -981,61 +981,76 @@ def _fields(deb):
     return f.get("Package"), f.get("Version"), j("Depends", "Pre-Depends"), f.get("Provides", ""), j("Breaks", "Conflicts")
 
 
+def _providers(state):
+    providers = {}
+    for name, (_, _, provides, _) in state.items():
+        for virtual, _, version in sum(_deps(provides), []):
+            providers.setdefault(virtual, []).append((name, version))    # None: unversioned
+    return providers
+
+
+def _group_satisfied(group, state, providers):
+    for name, op, ver in group:
+        if name in state and (not op or _vcmp(state[name][0], op, ver)):
+            return True
+        if any(not op or (pv and _vcmp(pv, op, ver)) for _, pv in providers.get(name, [])):
+            return True
+    return False
+
+
 def trial_rollback(plan, manifest, where=NEXT, live=False):
-    """Would going back (what handtop-recovery does: install the kept release on top of the planned
-    state, remove the Handtop packages the update added) leave every relationship satisfied? Static
-    check of Depends / Pre-Depends (versioned and virtual), Breaks and Conflicts; None or the reason."""
+    """Would going back leave every relationship satisfied? At download, start from the projected
+    state after the update. Live, use the saved recovery plan and also check Pre-Depends at unpack.
+    Returns None or the reason to refuse."""
     if not manifest or not manifest.get("complete"):
         return "the release to go back to isn't complete (%s)" % ", ".join((manifest or {}).get("missing", []) or ["none kept"])
     p = run(["dpkg-query", "-W", "-f", "${binary:Package}\\t${Version}\\t${Depends}, ${Pre-Depends}\\t"
              "${Provides}\\t${Breaks}, ${Conflicts}\\t${db:Status-Abbrev}\\n"], timeout=120)
-    state, foreign, healthy = {}, {}, set()
+    state, foreign, healthy = {}, {}, {}
     for line in p.stdout.splitlines():
         n, v, d, pr, br, st = line.split("\t")
-        if st[:1] in "ih" and st[1:2] == "i" and st[2:3] in ("", " "):
-            healthy.add(n.split(":")[0])
         if len(st) > 1 and st[1] in "iUHFWt":
             if ":" in n and n.split(":", 1)[1] not in (native_arch(), "all"):
                 foreign[n] = d                   # another architecture: not modelled, see below
                 continue
-            state[n.split(":")[0]] = (v, d, pr, br)
-    for i in plan["packages"]:                                   # after the update
-        state[i["name"].split(":")[0]] = _fields(os.path.join(CACHE, i["file"]))[1:]
-    before = dict(state)                                         # after the update, before going back
-    back = set()
-    for i in manifest["packages"]:                               # after going back
-        n, v, d, pr, br = _fields(os.path.join(where, i["file"]))
-        state[n] = (v, d, pr, br)
-        back.add(n)
-    # Recovery removes every Handtop package the kept release doesn't have (but the keyring): the
-    # ones this update adds and any added since (review 2026-11-26 #69).
-    gone = {n for n in state if is_handtop(n) and n not in back and n not in NEVER_ROLLED_BACK}
+            n = n.split(":")[0]
+            state[n] = (v, d, pr, br)
+            if st[:1] in ("i", "h") and st[1:2] == "i" and st[2:3] in ("", " "):
+                healthy[n] = v
+    if not live:
+        for i in plan["packages"]:                               # project a successful update
+            n = i["name"].split(":")[0]
+            state[n] = _fields(os.path.join(CACHE, i["file"]))[1:]
+            healthy[n] = state[n][0]
+    before = dict(state)                                         # before going back
+    back = {p["name"] for p in manifest["packages"]}
+    if live:
+        # A retry still runs the saved operations, including any reinstalls already done.
+        restore = plan["packages"]
+        gone = set(plan.get("remove", []))
+    else:
+        restore = [p for p in manifest["packages"] if healthy.get(p["name"]) != p["version"]]
+        # Recovery removes the Handtop packages absent from the kept release, except the keyring.
+        gone = {n for n in before if is_handtop(n) and n not in back and n not in NEVER_ROLLED_BACK}
     for n in gone:
         state.pop(n, None)
-    touched = back | gone
-    # Virtual names those packages provide (before or after going back) are touched too.
-    for n in list(touched):
-        for st_ in (before, state):
-            if n in st_:
-                touched |= {name for name, _, _ in sum(_deps(st_[n][2]), [])}
-    provides = {}
-    for n, (v, d, pr, br) in state.items():
-        for name, _, pv in sum(_deps(pr), []):
-            provides.setdefault(name, []).append(pv)             # None: unversioned (no versioned dep)
+    for i in restore:
+        n, v, d, pr, br = _fields(os.path.join(where, i["file"]))
+        state[n] = (v, d, pr, br)
+    changed = {p["name"] for p in restore} | gone
+    touched = changed.copy()
+    # Check reverse dependencies on virtual names the changed packages provide before or after.
+    for n in changed:
+        for snapshot in (before, state):
+            if n in snapshot:
+                touched.update(name for name, _, _ in sum(_deps(snapshot[n][2]), []))
+    providers = _providers(state)
     for n, (v, d, pr, br) in state.items():
         deps = _deps(d)
         if n not in back and not any(a[0] in touched for g in deps for a in g):
             continue
         for g in deps:
-            ok = False
-            for name, op, ver in g:
-                if name in state and (not op or _vcmp(state[name][0], op, ver)):
-                    ok = True
-                elif name in provides and (not op or any(x and _vcmp(x, op, ver) for x in provides[name])):
-                    ok = True
-                if ok:
-                    break
-            if not ok:
+            if not _group_satisfied(g, state, providers):
                 return "after going back, %s would need %s" % (n, " | ".join(
                     "%s%s" % (a[0], " (%s %s)" % (a[1], a[2]) if a[1] else "") for a in g))
     # Packages of another architecture aren't modelled. Going back (live) is refused on such cards
@@ -1046,30 +1061,17 @@ def trial_rollback(plan, manifest, where=NEXT, live=False):
         hit = sorted({a[0] for g in _deps(d) for a in g} & touched)
         if hit:
             return "%s (another architecture) depends on %s" % (n, ", ".join(hit))
-    # dpkg -i unpacks the kept packages in order, after the removals: each one's Pre-Depends must hold
-    # in the card's state at that point (removed packages gone, kept ones not yet installed; #101).
     if live:
-        # Only healthy packages that stay untouched while dpkg -i runs count; a pre-dependency on
-        # anything going back changes (or a name it provides) would depend on dpkg's order: refused (#112).
-        at_install = {n: x for n, x in before.items() if n not in gone and n not in back and n in healthy}
-        prov = {}
-        for n, x in at_install.items():
-            for name, _, pv in sum(_deps(x[2]), []):
-                prov.setdefault(name, []).append(pv)
-        for i in manifest["packages"]:
+        # Removals run first. A healthy package outside the saved operations can satisfy a
+        # Pre-Depends even if another alternative or provider changes during unpack (#112, #124).
+        at_install = {n: x for n, x in before.items() if n not in changed and n in healthy}
+        at_install_providers = _providers(at_install)
+        for i in restore:
             pre = run(["dpkg-deb", "-f", os.path.join(where, i["file"]), "Pre-Depends"], timeout=60).stdout.strip()
             for g in _deps(pre):
-                if any(a[0] in touched for a in g):
-                    return "%s pre-depends on %s, which going back changes" % (i["name"], " | ".join(a[0] for a in g))
-                if not any((a[0] in at_install and (not a[1] or _vcmp(at_install[a[0]][0], a[1], a[2])))
-                           or any((not a[1]) or (pv and _vcmp(pv, a[1], a[2])) for pv in prov.get(a[0], []))
-                           for a in g):
+                if not _group_satisfied(g, at_install, at_install_providers):
                     return "%s's pre-dependency %s isn't there when it is installed" % (
                         i["name"], " | ".join(a[0] for a in g))
-    providers = {}
-    for n, (v, d, pr, br) in state.items():
-        for name, _, pv in sum(_deps(pr), []):
-            providers.setdefault(name, []).append((n, pv))
     for n, (v, d, pr, br) in state.items():                      # Breaks / Conflicts, either way
         for name, op, ver in sum(_deps(br), []):
             if name in state and name != n and (n in back or name in back):
@@ -1214,7 +1216,8 @@ def card_value(path):
 
 
 def _root_files(paths):
-    return {p for p in paths if p.startswith("/") and not p.startswith(FAT + "/")}
+    # The module rows are for adoption. Adding or deleting a module must not change identification.
+    return {p for p in paths if p.startswith("/") and not p.startswith((FAT + "/", "/usr/lib/modules/"))}
 
 
 def identify(data):
@@ -1667,6 +1670,118 @@ def later_edits(plan, plan_ad, log):
     return changed, recreated
 
 
+def migrate_packaged_modes(plan, paths, budget):
+    import tarfile
+
+    # releases.tsv describes the old card. Use the verified .debs for what is being installed.
+    packaged = {}
+    sudoers = {path for path in paths if path.startswith("/etc/sudoers.d/")}
+    for p in plan["packages"]:
+        if not is_handtop(p["name"]):
+            continue
+        deb = os.path.join(CACHE, p["file"])
+        conff, sums = deb_control(deb)
+        sudoers.update(path for path in conff if path.startswith("/etc/sudoers.d/"))
+        wanted = paths & sums.keys()
+        if not wanted:
+            continue
+        # Stream the tar headers to avoid holding the unpacked package in memory.
+        cmd = ["timeout", "-k", "5", str(budget(120)), "dpkg-deb", "--fsys-tarfile", deb]
+        with subprocess.Popen(cmd, stdout=subprocess.PIPE, env=APT_ENV) as proc:
+            try:
+                with tarfile.open(fileobj=proc.stdout, mode="r|") as tf:
+                    for member in tf:
+                        path = "/" + member.name.removeprefix("./").lstrip("/")
+                        if path in wanted:
+                            packaged[path] = member.mode if member.isfile() else None
+            except tarfile.TarError as e:
+                raise Fail("could not read permissions from %s (%s)" % (p["file"], e)) from e
+            # Consume any padding after the tar end marker so dpkg-deb can finish writing.
+            while proc.stdout.read(65536):
+                pass
+            if proc.wait() != 0:
+                raise Fail("could not read permissions from %s" % p["file"])
+    return packaged, sudoers
+
+
+def migrate_sudoers_warnings(paths, missing_ok, log):
+    warnings = []
+    for path in sorted(paths):
+        issues = []
+        try:
+            mode = os.lstat(path).st_mode
+        except FileNotFoundError:
+            if path in missing_ok:
+                continue
+            issues.append("file missing")
+        except OSError:
+            issues.append("could not check file type and mode")
+        else:
+            if not stat.S_ISREG(mode):
+                issues.append("expected a regular file")
+            else:
+                if stat.S_IMODE(mode) != 0o440:
+                    issues.append("mode %04o, expected 0440" % stat.S_IMODE(mode))
+                try:
+                    if run(["visudo", "-cf", path], timeout=10, check=False).returncode:
+                        issues.append("visudo rejected it")
+                except (OSError, subprocess.SubprocessError):
+                    issues.append("could not run visudo")
+        if issues:
+            warning = "Sudoers file %s (%s)" % (path, ", ".join(issues))
+            warnings.append(warning)
+            log(warning)
+    return warnings
+
+
+def migrate_mode_notes(modes, packaged, log):
+    if not modes:
+        return []
+    os.makedirs(BACKUP, exist_ok=True)
+    write_json(BACKUP + "/modes.json", modes)
+    restored, added_access, kept, failed = 0, [], [], []
+    for path, saved in sorted(modes.items()):
+        before, expected = int(saved, 8), packaged.get(path)
+        actual = None
+        try:
+            mode = os.lstat(path).st_mode
+            if stat.S_ISREG(mode):
+                actual = stat.S_IMODE(mode)
+        except OSError as e:
+            log("could not check permissions on %s (%s)" % (path, e))
+        # Only observe what dpkg and conffile adoption did. The record is for reporting.
+        if actual is not None and actual == expected:
+            restored += 1
+            outcome = "restored Handtop's permissions"
+            if actual & ~before:
+                added_access.append("%s (%04o to %04o)" % (path, before, actual))
+        elif expected is not None and actual == before:
+            kept.append(path)
+            outcome = "kept your permissions"
+        else:
+            failed.append(path)
+            outcome = "could not restore permissions"
+        log("%s on %s (was %04o, now %s, package %s)" %
+            (outcome, path, before, "%04o" % actual if actual is not None else "unavailable",
+             "%04o" % expected if expected is not None else "no regular file"))
+
+    def listed(paths):
+        return ", ".join(paths[:3]) + (" and %d more (see the update log)" % (len(paths) - 3)
+                                       if len(paths) > 3 else "")
+
+    notes = []
+    if failed:
+        notes.append("Could not restore permissions on " + listed(failed))
+    if kept:
+        notes.append("Kept your permissions on " + listed(kept))
+    if restored:
+        notes.append("Restored Handtop's permissions on %d file%s" % (restored, "s" if restored != 1 else ""))
+        if added_access:
+            notes[-1] += ". Added access on " + listed(added_access)
+    notes[-1] += ". Your old permissions are in %s/modes.json" % BACKUP
+    return notes
+
+
 def install_migrate(plan, log, budget):
     data = release_data()
     # Before any change: the boot partition is there and still has the kernel the plan was made for.
@@ -1684,6 +1799,8 @@ def install_migrate(plan, log, budget):
     if plan_changed(plan):
         run(["dpkg"] + CONF + ["--configure", "-a"], timeout=budget(1200), log=log, check=False)
     plan_ad = plan.get("adoption") or adoption(plan, data)
+    modes = dict(plan_ad.get("modes", []))
+    packaged_modes, sudoers = migrate_packaged_modes(plan, modes.keys(), budget)
     backup(plan_ad["backup"] + plan_ad.get("ffmpeg_backup", []), log, plan_ad.get("pkg_md5"))
     edited, recreated = later_edits(plan, plan_ad, log)
     if plan_ad.get("links"):
@@ -1706,9 +1823,16 @@ def install_migrate(plan, log, budget):
         write_atomic(UNITS_SEEN, "".join(u + "\n" for u in sorted(seen | present)))
     check_against_plan(plan, opts)
     mark_changed(plan)
-    run(["apt-get", "-q", "-y", "--no-download", "--no-remove", "-o", "Dir::Cache::archives=" + CACHE]
-        + opts + ["install"] + plan_targets(plan), timeout=budget(3600), log=log)
-    run(["dpkg"] + CONF + ["--configure", "-a"], timeout=budget(1200), log=log)
+    try:
+        run(["apt-get", "-q", "-y", "--no-download", "--no-remove", "-o", "Dir::Cache::archives=" + CACHE]
+            + opts + ["install"] + plan_targets(plan), timeout=budget(3600), log=log)
+        run(["dpkg"] + CONF + ["--configure", "-a"], timeout=budget(1200), log=log)
+    except Fail as e:
+        # The package's postinst can reject a sudoers file before the final check runs.
+        warnings = migrate_sudoers_warnings(sudoers, sudoers, log)
+        if warnings:
+            raise Fail("%s. %s" % (". ".join(warnings), e)) from e
+        raise
     if plan.get("auto"):
         run(["apt-mark", "auto"] + plan["auto"], timeout=120, log=log)
     have = installed()
@@ -1735,9 +1859,7 @@ def install_migrate(plan, log, budget):
                 break
     for path in plan_ad["keep"]:
         add_missing_settings(path, log)
-    if plan_ad.get("modes"):                             # the package's mode is back; note the user's
-        os.makedirs(BACKUP, exist_ok=True)
-        write_json(BACKUP + "/modes.json", dict(plan_ad["modes"]))
+    mode_notes = migrate_mode_notes(modes, packaged_modes, log)
     removed = remove_old_ffmpeg_files(plan["from"]["release"], log)
     for path in plan_ad.get("deleted", []):              # stays deleted (dpkg won't bring it back later)
         aside = "%s.handtop-deleting-%s" % (path, plan["id"])   # this plan's own name only (#123)
@@ -1767,7 +1889,6 @@ def install_migrate(plan, log, budget):
     # Recovery without a screen needs these two enabled, whatever happened on the way (review #83).
     # Not done until both are: the move stays kept and resumable instead of "succeeding" without
     # screenless recovery (review 2026-11-27 #94).
-    notes = []
     off = []
     for u in RECOVERY_UNITS:
         # Wanted by its own boot target (the link), not just "enabled" somewhere (#107, #118)
@@ -1782,6 +1903,8 @@ def install_migrate(plan, log, budget):
     if off:
         raise Fail("installed, but %s could not be enabled (needed for recovery.txt): the move is kept; "
                    "run the command again to finish it" % ", ".join(off))
+    permissions = migrate_sudoers_warnings(sudoers, plan_ad.get("deleted", []), log) + mode_notes
+    notes = [".\n".join(permissions)] if permissions else []  # the app shows the first six notes
     later = sorted(set(kept_new) | set(edited))
     if later:
         notes.append("you changed these after the move was planned; your version is kept (config files stay, "
@@ -1792,9 +1915,7 @@ def install_migrate(plan, log, budget):
     unlink(NO_PREDECESSOR)
     return notes + (
         ["%d changed file(s) backed up in %s" % (len(plan_ad["backup"]), BACKUP)] if plan_ad["backup"] else []) + (
-        ["%d leftover file(s) of v0.4.x's own FFmpeg build removed" % removed] if removed else []) + (
-        ["permissions you changed on %d file(s) are back to Handtop's; yours are noted in %s/modes.json"
-         % (len(plan_ad["modes"]), BACKUP)] if plan_ad.get("modes") else [])
+        ["%d leftover file(s) of v0.4.x's own FFmpeg build removed" % removed] if removed else [])
 
 
 def cmd_migrate():
@@ -2246,7 +2367,7 @@ def install_recovery(plan, log, budget):
     # Before the first change, against the card as it is now (it may have changed since the update
     # was planned): would the end state satisfy every dependency? (review 2026-11-27 #88)
     kept = read_json(PREVIOUS + "/manifest.json")
-    reason = trial_rollback({"packages": []}, kept, PREVIOUS, live=True) if kept else "no kept release"
+    reason = trial_rollback(plan, kept, PREVIOUS, live=True) if kept else "no kept release"
     if reason:
         raise Drift("going back can't be done safely on this card as it is now (%s): nothing changed" % reason)
     # What going back removes must still be exactly what the request planned (the card can change

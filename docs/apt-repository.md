@@ -19,7 +19,7 @@ Part of updates without reflashing (planned for v0.5.0): Handtop's packages are 
 
 | Script | What | Who |
 |---|---|---|
-| `repo.sh init` / `add` / `snapshot` / `publish <snapshot> <suite>` / `list` | aptly state in `~/.handtop-apt` (`aptly/`, `public/`); publishes unsigned | Claude or Jason |
+| `repo.sh init` / `baseline` / `add` / `snapshot` / `publish <snapshot> <suite>` / `list` | aptly state in `~/.handtop-apt` (`aptly/`, `public/`, `manifests/`). Publishes unsigned | Build operator |
 | `sign.sh` | sets `Date` and `Valid-Until`, writes `InRelease` and `Release.gpg`, checks both | Jason (passphrase) |
 | `export.sh [--with-migrate] [--nonempty SUITE]… <checkout>` | checks the signed tree with `verify-tree.py` (both suites, signatures, Release fields and at least 7 days of validity, every index and by-hash object, every pool package, nothing unlisted; `--with-migrate`: this checkout's `handtop-migrate`, signed), copies it into a `handtop-apt` checkout (links as files, `.nojekyll`, public key, README; `.gitattributes` kept) and checks the checkout again | Claude or Jason |
 | `client-test.sh <url> [SUITE packages.txt]` | `apt-get update` against the live URL with a throwaway state; fails on any signature or expiry error. With a suite and a build's `work/pkg/packages.txt`: every package downloaded from that suite alone at its exact version must be the tested bytes | after every push |
@@ -27,10 +27,27 @@ Part of updates without reflashing (planned for v0.5.0): Handtop's packages are 
 
 ## Publishing
 
+On a server with an existing publication, run `tools/apt/repo.sh baseline` before the first add
+with this version of the tool. It compares each suite's indexes with its aptly snapshot and reads
+the matching SHA-256-verified packages from `public/pool/`. Use the same command to restore missing
+or stale published manifests. Keep `manifests/` with the aptly database and the published tree in
+backups. If the published bytes or indexes are damaged, restore them from a matching archive backup
+before rebuilding baselines. For unpublished packages left in the local repo by the older tool,
+include their exact `.deb` files in the next `add` so the whole set is validated.
+
 1. `repo.sh add …`, `repo.sh snapshot <name>`, `repo.sh publish <name> trixie-testing`.
 2. `ssh -t claude@<build server> "bash ~/handtop-apt-tools/sign.sh"` (Jason).
 3. Export into the local `handtop-apt` clone; Jason commits and pushes; GitHub Pages deploys.
 4. `client-test.sh https://junsulee119.github.io/handtop-apt`.
+
+`add` compares each package to the highest lower Debian version of the same package and architecture
+in either published suite. List intentional drops in `build/pkg/removed-files.txt`, including paths
+leaving a package in a split. A different package that takes ownership needs versioned `Breaks` and
+`Replaces` covering the old owner. The batch is imported into `handtop-incoming` first, and only a
+complete import can enter the release repository. Use the whole tested set from `work/pkg/packages.txt`.
+`snapshot` and `publish` require a recorded package set with matching manifests. Snapshots retain
+published versions from both suites. Publication retains the target suite's versions and all stable
+versions. Use `repo.sh` for archive writes so validation and aptly operations hold the same lock.
 
 The `handtop-apt` checkout has `.gitattributes` `* -text`: any line-ending conversion would break the signatures.
 

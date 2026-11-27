@@ -102,6 +102,13 @@ def collect(root):
     return files
 
 
+def required_match(path, pattern):
+    # A nested file must not count toward the minimum for its parent directory.
+    parts, patterns = path.split("/"), pattern.split("/")
+    return len(parts) == len(patterns) and all(fnmatch.fnmatchcase(p, pat)
+                                               for p, pat in zip(parts, patterns))
+
+
 def script(body):
     return "#!/bin/sh\nset -e\n" + body
 
@@ -114,25 +121,41 @@ def script(body):
 # ours and puts Debian's back. Without a saved copy (a card whose file was Handtop's before the
 # packages came), Debian's updates arrive as <path>.debian.dpkg-dist: the next Handtop version
 # adopts that file; otherwise purging says how to get Debian's back.
-DIVERT_LIB = r"""debian_md5() {  # the md5 dpkg recorded for file $1 of Debian package $2
+DIVERT_LIB = r"""# dpkg gives the new preinst and postrm the same temporary control directory.
+# It skips dotfiles when installing control files and clears the directory for each unpack.
+created="${0%/*}/.handtop-diversions"
+debian_md5() {  # the md5 dpkg recorded for file $1 of Debian package $2
     dpkg-query -W -f='${Conffiles}\n' "$2" 2>/dev/null | awk -v p="$1" '$1 == p { print $2; exit }'
 }
-ours() { dpkg-divert --listpackage "$1" 2>/dev/null | grep -qx "$PKG"; }
+ours() {
+    [ "$2" = "$PKG" ] && [ "$(dpkg-divert --truename "$1")" = "$1.debian" ]
+}
 """
 
-DIVERT_PRE = r"""    if ! ours "$p"; then
+DIVERT_PRE = r"""    diverter=$(dpkg-divert --listpackage "$p")
+    if [ -z "$diverter" ]; then
         if [ -f "$p" ] && [ ! -e "$p.debian" ] && [ "$(md5sum < "$p" | cut -d' ' -f1)" = "$(debian_md5 "$p" "$o")" ]; then
-            cp -p "$p" "$p.debian.tmp" && mv "$p.debian.tmp" "$p.debian"
+            cp -p "$p" "$p.debian.tmp"
+            sync "$p.debian.tmp"
+            mv "$p.debian.tmp" "$p.debian"
+            sync "${p%/*}"
+        fi
+        if [ "$1" = install ]; then
+            printf '%s\n' "$p" >> "$created"
         fi
         dpkg-divert --package "$PKG" --add --no-rename --divert "$p.debian" "$p" >/dev/null
+    elif ! ours "$p" "$diverter"; then
+        echo "$PKG: unexpected diversion for $p (expected $p.debian by $PKG)" >&2
+        exit 1
     elif [ ! -e "$p.debian" ] && [ -f "$p.debian.dpkg-dist" ]; then
         mv "$p.debian.dpkg-dist" "$p.debian"
     fi
 """
 
-# purge: dpkg has deleted our copy. abort-install: the file is still Debian's (or the user's), so
-# a saved copy identical to it goes.
-DIVERT_POST = r"""    if ours "$p"; then
+# On purge dpkg has deleted our copy. On abort-install, undo only diversions this preinst added.
+# The live file can still be Debian's (or the user's), so a saved copy identical to it goes.
+DIVERT_POST = r"""    if { [ "$1" != abort-install ] || grep -Fxq "$p" "$created" 2>/dev/null; } &&
+       ours "$p" "$(dpkg-divert --listpackage "$p")"; then
         if [ -f "$p" ] && [ -f "$p.debian" ] && cmp -s "$p" "$p.debian"; then rm -f "$p.debian"; fi
         if [ -e "$p" ] && [ -e "$p.debian" ]; then mv "$p" "$p.handtop"; echo "$PKG: kept $p as $p.handtop"; fi
         if [ -e "$p.debian" ]; then
@@ -248,22 +271,19 @@ def main():
         raise SystemExit(__doc__)
     root, outdir, version = sys.argv[1].rstrip("/"), sys.argv[2], sys.argv[3]
     want = sys.argv[4:] or ["handtop-core", "handtop-desktop", "handtop-video", "handtop-keyring"]
-    os.makedirs(outdir, exist_ok=True)
-    files = collect(root)
     # Every tracked overlay file a package gets must be in it: an empty or partial package would
     # make dpkg delete the missing files from the card on upgrade.
-    import subprocess as sp
-    tracked = sp.run(["git", "-C", TOP, "ls-files", "overlay"], capture_output=True, text=True,
-                     timeout=60).stdout.split()
-    if tracked:
-        rules, divs = audit.classes(), audit.diversions()
-        for f in tracked:
-            p = f[len("overlay"):]
-            pkg = divs.get(p) or next((c for c, pat, _ in rules if fnmatch.fnmatchcase(p, pat)), None)
-            if pkg in want and p not in files.get(pkg, []):
-                raise SystemExit("%s would lack %s (from overlay/): refusing to build it" % (pkg, p))
-    else:
-        print("build-debs: not a git checkout, overlay completeness not checked", file=sys.stderr)
+    result = subprocess.run(["git", "-C", TOP, "ls-files", "-z", "--", "overlay/"],
+                            stdout=subprocess.PIPE, timeout=60)
+    if result.returncode or not result.stdout:
+        raise SystemExit("build-debs: git found no tracked overlay paths: build from a Handtop checkout")
+    files = collect(root)
+    rules, divs = audit.classes(), audit.diversions()
+    for f in result.stdout.rstrip(b"\0").split(b"\0"):
+        p = os.fsdecode(f)[len("overlay"):]
+        pkg = divs.get(p) or next((c for c, pat, _ in rules if fnmatch.fnmatchcase(p, pat)), None)
+        if pkg in want and p not in files.get(pkg, []):
+            raise SystemExit("%s would lack %s (from overlay/): refusing to build it" % (pkg, p))
     # No empty package, and the files other build steps generate must be there (required.txt).
     short = []
     for pkg in want:
@@ -275,12 +295,13 @@ def main():
             if len(parts) < 2 or parts[0] not in want:
                 continue
             need = int(parts[2]) if len(parts) > 2 else 1
-            have = sum(1 for p in files.get(parts[0], []) if fnmatch.fnmatchcase(p, parts[1]))
+            have = sum(1 for p in files.get(parts[0], []) if required_match(p, parts[1]))
             if have < need:
                 short.append("%s has %d file(s) matching %s, needs %d" % (parts[0], have, parts[1], need))
     if short:
         raise SystemExit("refusing to build packages missing generated files (an earlier step failed?):\n  "
                          + "\n  ".join(short))
+    os.makedirs(outdir, exist_ok=True)
     unit_policy = units()
     for pkg in want:
         build(root, outdir, version, pkg, files.get(pkg, []), unit_policy)

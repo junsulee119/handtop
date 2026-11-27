@@ -167,22 +167,32 @@ FF_PATCH="$TOP/build/patches/ffmpeg-v4l2request-drm.patch"
 (cd "$SRC" && git apply "$FF_PATCH") || die "failed to apply $FF_PATCH"
 grep -q "HWACCEL_DRM_V4L2REQUEST" "$SRC/libavcodec/hwconfig.h" || die "DRM-registration patch did not apply"
 
+# Keep --sysroot for the cross compiler. Omit it from the diagnostic configuration string
+# so the shipped binaries don't expose the build host's path.
+(cd "$SRC" && git apply <<'PATCH'
+diff --git a/configure b/configure
+--- a/configure
++++ b/configure
+@@ -4242,6 +4242,7 @@
+ for v in "$@"; do
++    case "$v" in --sysroot=*) continue ;; esac
+     r=${v#*=}
+     l=${v%"$r"}
+     r=$(sh_quote "$r")
+     FFMPEG_CONFIGURATION="${FFMPEG_CONFIGURATION# } ${l}${r}"
+ done
+PATCH
+) || die "could not remove FFmpeg's diagnostic sysroot path"
+
 export PKG_CONFIG_SYSROOT_DIR="$ROOTFS"
 export PKG_CONFIG_LIBDIR="$ROOTFS/usr/lib/aarch64-linux-gnu/pkgconfig:$ROOTFS/usr/share/pkgconfig"
 (cd "$SRC" && ./configure --arch=aarch64 --target-os=linux --enable-cross-compile --cross-prefix=aarch64-linux-gnu- --sysroot="$ROOTFS" --pkg-config=pkg-config --prefix=/usr --libdir=/usr/lib/aarch64-linux-gnu --incdir=/usr/include/aarch64-linux-gnu --enable-shared --disable-static --disable-doc --disable-debug --enable-gpl --enable-neon --enable-libdrm --enable-libudev --enable-libdav1d --enable-v4l2-request --enable-vaapi --enable-gnutls --enable-libx264 --enable-libmp3lame --enable-libopus --enable-libvorbis --enable-libvpx --enable-libass --enable-libfreetype --enable-libxml2 --enable-vdpau > "$WORK/ffmpeg-config.log" 2>&1)
 (cd "$SRC" && make -j"$(nproc)" > "$WORK/ffmpeg-build.log" 2>&1)
 
 (cd "$SRC" && make DESTDIR="$STAGE" install >> "$WORK/ffmpeg-build.log" 2>&1)
-# The cross-build's library paths (-L<rootfs>/usr/lib/...) end up in Libs.private of the .pc files:
-# they are the standard library directories on the handheld anyway, so they go (review #28).
-ROOTFS="$ROOTFS" python3 - "$STAGE"/usr/lib/aarch64-linux-gnu/pkgconfig/*.pc <<'PC'
-import os, re, sys
-root = re.escape(os.environ["ROOTFS"])
-for p in sys.argv[1:]:
-    t = open(p).read()
-    t = re.sub(r"[ \t]*-L" + root + r"\S*", "", t)
-    open(p, "w").write(t)
-PC
+# Keep target library and include directories when removing the cross-build sysroot prefix.
+python3 "$TOP/build/pkg/ffmpeg-paths.py" rewrite-pc "$ROOTFS" \
+  "$STAGE"/usr/lib/aarch64-linux-gnu/pkgconfig/*.pc
 
 file "$STAGE/usr/bin/ffmpeg" | grep -q "ARM aarch64" || die "ffmpeg is not arm64"
 grep -q "#define CONFIG_V4L2_REQUEST 1" "$SRC/config.h" || die "v4l2_request not compiled in"
@@ -218,15 +228,13 @@ mkdir -p "$STAGE/usr/share/doc/handtop-ffmpeg"
   echo "base:      Debian's ffmpeg source package $FFMPEG_DEBIAN_VERSION (FFmpeg $FFMPEG_VERSION, $debian_patches Debian patches)"
   echo "patchset:  $KWIBOO_URL $KWIBOO_BASE..$KWIBOO_PIN ($KWIBOO_COMMITS commits)"
   echo "patch:     build/patches/ffmpeg-v4l2request-drm.patch sha256 $(sha256sum "$FF_PATCH" | cut -d' ' -f1)"
+  echo "Debian source and reference package SHA-256:"
+  (cd "$DEB" && export LC_ALL=C && sha256sum src/ffmpeg_* ref/*.deb)
 } > "$STAGE/usr/share/doc/handtop-ffmpeg/BUILDINFO"
 chmod -R u=rwX,go=rX "$STAGE"
 python3 "$TOP/build/pkg/build-ffmpeg-debs.py" "$STAGE" "$DEB/ref" "$ROOTFS" "$WORK/pkg-ffmpeg" "$FFMPEG_HANDTOP_VERSION"
-# No packaged file may mention the build machine's paths (they leak the build account and point nowhere).
-for d in "$WORK"/pkg-ffmpeg/*.deb; do
-  if dpkg-deb --fsys-tarfile "$d" | tar -xO 2>/dev/null | grep -a -q -F "$ROOTFS"; then
-    die "$(basename "$d") contains the build root path ($ROOTFS)"
-  fi
-done
+# Reject build sysroot paths in the finished packages before installing them.
+python3 "$TOP/build/pkg/ffmpeg-paths.py" check-debs "$ROOTFS" "$WORK"/pkg-ffmpeg/*.deb
 
 # A reused rootfs still has the files earlier builds copied in without a package: headers in the
 # old /usr/include location, examples, BUILDINFO. The packages put everything else in place.

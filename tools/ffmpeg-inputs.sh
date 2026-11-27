@@ -1,33 +1,67 @@
 #!/bin/bash
-# Checks that Handtop's FFmpeg build gets a new version when what it is built from changes
-# (review 2026-11-19 #22): build/pkg/ffmpeg-inputs.txt records FFMPEG_HANDTOP_REV and a checksum of the
-# inputs (Debian's version, the patchset pin, our patch, 04c and the packaging script; comment lines
-# don't count). Run by tools/ci-checks.sh.
-#   tools/ffmpeg-inputs.sh            check (exit 1 when the inputs changed but the rev didn't)
-#   tools/ffmpeg-inputs.sh --update   record the current inputs (after raising FFMPEG_HANDTOP_REV)
+# Check FFmpeg's build inputs against the latest recorded package version.
+#   tools/ffmpeg-inputs.sh            check (run by CI)
+#   tools/ffmpeg-inputs.sh --update   append a record for a newer package version
 set -euo pipefail
-TOP=$(cd "$(dirname "$(realpath "$0")")/.." && pwd)
-# shellcheck source=/dev/null
-. "$TOP/build/config.sh"
-REC="$TOP/build/pkg/ffmpeg-inputs.txt"
-sum=$( {
-  printf '%s\n' "$FFMPEG_DEBIAN_VERSION" "$KWIBOO_BASE" "$KWIBOO_PIN"
-  cat "$TOP/build/patches/ffmpeg-v4l2request-drm.patch"
-  grep -hv '^[[:space:]]*#' "$TOP/build/04c-v4l2-ffmpeg.sh" "$TOP/build/pkg/build-ffmpeg-debs.py"
-} | sha256sum | cut -d' ' -f1)
-if [ "${1:-}" = --update ]; then
-  printf 'rev=%s\ninputs=%s\n' "$FFMPEG_HANDTOP_REV" "$sum" > "$REC"
-  echo "recorded: rev $FFMPEG_HANDTOP_REV, inputs $sum"
+source "$(dirname "$(realpath "$0")")/../build/config.sh"
+cd "$TOP"
+REC=build/pkg/ffmpeg-inputs.txt
+version=$FFMPEG_HANDTOP_VERSION
+[[ $# -eq 0 || ($# -eq 1 && $1 = --update) ]] || die "usage: $0 [--update]"
+version_pattern='[^[:space:]]+[+]handtop[1-9][0-9]*'
+[[ $version =~ ^$version_pattern$ ]] || die "invalid Handtop FFmpeg package version: $version"
+dpkg --validate-version "$version" || die "invalid FFmpeg package version: $version"
+
+# Lock the directory so another updater can't read stale history across the final rename.
+if [[ $# -eq 1 ]]; then
+  exec 9<build/pkg
+  flock -x -w 10 9 || die "could not lock FFmpeg input history"
+fi
+mapfile -t history < "$REC"
+row="^($version_pattern)[[:blank:]]+([0-9a-f]{64})$"
+last_version=
+last_sum=
+for line in "${history[@]}"; do
+  [[ -z $line || $line = \#* ]] && continue
+  [[ $line =~ $row ]] || die "$REC contains a malformed record: $line"
+  rec_version=${BASH_REMATCH[1]}
+  rec_sum=${BASH_REMATCH[2]}
+  dpkg --validate-version "$rec_version" || die "$REC contains an invalid version: $rec_version"
+  if [[ -n $last_version ]]; then
+    dpkg --compare-versions "$rec_version" gt "$last_version" \
+      || die "$REC versions must increase ($last_version -> $rec_version)"
+  fi
+  last_version=$rec_version
+  last_sum=$rec_sum
+done
+[[ -n $last_version ]] || die "$REC has no FFmpeg input records"
+
+# The source and all reference .debs use the same Debian version pin.
+# Hash raw file bytes because a comment-looking line can be data in a heredoc or string.
+sum=$(
+  {
+    printf '%s\0' "$FFMPEG_VERSION" "$FFMPEG_DEBIAN_VERSION" "$KWIBOO_URL" \
+      "$KWIBOO_BASE" "$KWIBOO_PIN" "$KWIBOO_COMMITS"
+    sha256sum build/patches/ffmpeg-v4l2request-drm.patch build/04c-v4l2-ffmpeg.sh \
+      build/pkg/build-ffmpeg-debs.py build/pkg/ffmpeg-paths.py
+  } | sha256sum
+)
+sum=${sum%% *}
+
+if dpkg --compare-versions "$version" eq "$last_version"; then
+  [[ $version = "$last_version" && $sum = "$last_sum" ]] \
+    || die "FFmpeg inputs differ for already recorded version $last_version. Raise FFMPEG_HANDTOP_REV."
+  echo "FFmpeg build inputs unchanged ($version)"
   exit 0
 fi
-rec_rev=$(sed -n 's/^rev=//p' "$REC"); rec_sum=$(sed -n 's/^inputs=//p' "$REC")
-if [ "$sum" = "$rec_sum" ] && [ "$FFMPEG_HANDTOP_REV" = "$rec_rev" ]; then
-  echo "FFmpeg build inputs unchanged (rev $FFMPEG_HANDTOP_REV)"
-elif [ "$sum" != "$rec_sum" ] && [ "$FFMPEG_HANDTOP_REV" = "$rec_rev" ]; then
-  echo "FFmpeg build inputs changed but FFMPEG_HANDTOP_REV is still $rec_rev: raise it in build/config.sh" \
-       "(or reset it to 1 with a new FFMPEG_DEBIAN_VERSION), then tools/ffmpeg-inputs.sh --update" >&2
-  exit 1
-else
-  echo "FFMPEG_HANDTOP_REV changed ($rec_rev -> $FFMPEG_HANDTOP_REV): record it with tools/ffmpeg-inputs.sh --update" >&2
-  exit 1
-fi
+dpkg --compare-versions "$version" gt "$last_version" \
+  || die "FFmpeg package version $version is older than $last_version"
+[[ $# -eq 1 ]] || die "Run tools/ffmpeg-inputs.sh --update to record FFmpeg package version $version."
+
+# Write the new history beside the old one so a failed write cannot leave a partial record.
+tmp=$(mktemp "$REC.XXXXXX")
+trap 'rm -f -- "$tmp"' EXIT
+printf '%s\n' "${history[@]}" "$version $sum" > "$tmp"
+chmod --reference="$REC" "$tmp"
+mv -fT -- "$tmp" "$REC"
+echo "recorded: $version, inputs $sum"

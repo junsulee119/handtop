@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Release data for moving cards onto packages (handtop-migrate, the update worker's migrate plan):
 from file lists of released images (tools/image-manifest.sh), every file a Handtop package ships
-(classes.txt, diversions.txt) and every file of the boot partition, with its checksum per release.
+(classes.txt, diversions.txt, modules.txt) and every file of the boot partition, with its checksum per release.
 The worker uses it to name a card's release and RAM type, and to tell a file the user edited from
 one an older release put there. Variants (DDR3, DDR4) of a release share a line where they agree.
 
@@ -10,7 +10,8 @@ Output lines: release <TAB> variant (* when all agree) <TAB> path <TAB> type <TA
 <TAB> mode (octal, files; "" for links). Types: f / l Handtop's files; x a file of v0.4.x's own FFmpeg
 build that no package owned (removed after a migration when still unowned and unchanged); k per
 release "@boot-abi": /etc/handtop/boot-abi for its kernel, lines joined with ";".
-BOOT-ABI is a build's /etc/handtop/boot-abi; every release's KERNEL must be the one it names.
+BOOT-ABI is a build's /etc/handtop/boot-abi. Its kernel= names the modules directory.
+Every release's KERNEL must have the checksum it names.
 """
 import fnmatch
 import importlib.util
@@ -27,13 +28,14 @@ LEGACY_FFMPEG = re.compile(r"^/usr/(include/%s/[^/]+|share/ffmpeg/.+|share/doc/h
                            r"bin/(ffmpeg|ffprobe))$" % (LIBS, LIBS, LIBS))
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-spec = importlib.util.spec_from_file_location("audit", os.path.join(HERE, "..", "build", "pkg", "audit-unowned.py"))
+PKG = os.path.join(HERE, "..", "build", "pkg")
+spec = importlib.util.spec_from_file_location("audit", os.path.join(PKG, "audit-unowned.py"))
 audit = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(audit)
 
 
-def wanted(path, rules, divs):
-    if path.startswith("/boot/firmware/"):
+def wanted(path, rules, divs, modules):
+    if path.startswith("/boot/firmware/") or path in modules:
         return True
     if path in divs:
         return True
@@ -45,6 +47,12 @@ def main():
     out, abi_file, specs = sys.argv[1], sys.argv[2], sys.argv[3:]
     abi = [l.strip() for l in open(abi_file) if l.strip()]
     ksha = next(l.split("=", 1)[1] for l in abi if l.startswith("kernel_sha256="))
+    kernel = next((l.split("=", 1)[1] for l in abi if l.startswith("kernel=")), "")
+    if not kernel:
+        sys.exit("%s: missing kernel= value" % abi_file)
+    with open(os.path.join(PKG, "modules.txt")) as f:
+        names = [l.split("#", 1)[0].strip() for l in f]
+    modules = {"/usr/lib/modules/%s/%s" % (kernel, name) for name in names if name}
     rules, divs = audit.classes(), audit.diversions()
     data = {}                                   # release -> variant -> {path: (type, value)}
     for s in specs:
@@ -57,10 +65,12 @@ def main():
                 if len(cols) < 5:
                     sys.exit("%s: no owner column (made by an older tools/image-manifest.sh): make it again" % fn)
                 p, t, mode, v, owner = cols[:5]
+                if p.startswith("/lib/modules/"):
+                    p = audit.canon(p)  # adoption uses the modules package's /usr/lib spelling
                 if t in ("f", "l") and owner == "u" and LEGACY_FFMPEG.match(p):
                     # first: classes.txt gives these to handtop-video. A link's value is "l:<target>".
                     files[p] = ("x", v if t == "f" else "l:" + v, mode if t == "f" else "")
-                elif t in ("f", "l") and wanted(p, rules, divs):
+                elif t in ("f", "l") and wanted(p, rules, divs, modules):
                     files[p] = (t, v, mode if t == "f" else "")
         data.setdefault(rel, {})[var] = files
     rows = []

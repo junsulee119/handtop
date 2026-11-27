@@ -1,6 +1,17 @@
 # Helpers to run commands inside the arm64 rootfs. Source after config.sh.
 # shellcheck shell=bash
 
+chroot_test_lock() {
+  local lock_fd
+  assert_build_paths
+  WORK=$(realpath -m -- "$WORK")
+  mkdir -p "$WORK"
+  # Keep the directory lock open through EXIT, even before the first mount.
+  exec {lock_fd}<"$WORK"
+  flock -n "$lock_fd" || die "cannot lock WORK $WORK (another test may be running)"
+  assert_no_mounts "$ROOTFS" "$WORK/migrate-mnt"
+}
+
 chroot_mount() {
   assert_rootfs
   mountpoint -q "$ROOTFS/proc"    || mount -t proc proc "$ROOTFS/proc"
@@ -49,10 +60,13 @@ chroot_dev_private() {
 chroot_umount() {
   [ -n "${ROOTFS:-}" ] || return 0
   assert_build_paths
-  for f in usr/sbin/policy-rc.d etc/ssl/build-extra-ca.crt etc/apt/apt.conf.d/99build-extra-ca \
-           etc/dpkg/dpkg.cfg.d/99build-unsafe-io etc/apt/apt.conf.d/99build-fast; do
-    [ -e "$ROOTFS/$f" ] && safe_rm "$ROOTFS/$f"
-  done
+  # Tests discard their private copy after unmounting, so leave its files alone here.
+  if [ "${1:-}" != --mounts-only ]; then
+    for f in usr/sbin/policy-rc.d etc/ssl/build-extra-ca.crt etc/apt/apt.conf.d/99build-extra-ca \
+             etc/dpkg/dpkg.cfg.d/99build-unsafe-io etc/apt/apt.conf.d/99build-fast; do
+      [ -e "$ROOTFS/$f" ] && safe_rm "$ROOTFS/$f"
+    done
+  fi
   sync -f "$ROOTFS" 2>/dev/null || sync
   for m in dev dev/pts sys; do                   # never let an unmount reach the host (#97)
     mountpoint -q "$ROOTFS/$m" && mount --make-rslave "$ROOTFS/$m" 2>/dev/null || true

@@ -2,7 +2,7 @@
 # Checks that need no hardware, no root and no image build. Run by CI on every push
 # and pull request (.github/workflows/ci.yml); run it locally before a PR the same way:
 #   tools/ci-checks.sh
-# Needs: bash, dash, shellcheck, python3 with pytest, git. What each check is for:
+# Needs: bash, dash, shellcheck, python3 with pytest, git, dpkg, flock. What each check is for:
 # docs/ci.md.
 set -uo pipefail
 source "$(dirname "$(realpath "$0")")/../build/config.sh"   # TOP, WORK, safe_rm
@@ -64,7 +64,7 @@ python3 -m pytest -q -p no:cacheprovider src/theme/tests || bad "pytest (src/the
 python3 -m pytest -q -p no:cacheprovider src/controls/tests || bad "pytest (src/controls)"
 python3 -m pytest -q -p no:cacheprovider src/media/tests || bad "pytest (src/media)"
 python3 -m pytest -q -p no:cacheprovider src/update/tests || bad "pytest (src/update)"
-bash tools/ffmpeg-inputs.sh || bad "FFmpeg build changed without a new FFMPEG_HANDTOP_REV"
+python3 -m pytest -q -p no:cacheprovider tools/tests/test_release_data.py || bad "pytest (release data)"
 # handtop-migrate carries handtop-keyring's source, pin and key for cards that don't have the package yet
 python3 - <<'MIG' || bad "tools/apt/handtop-migrate: source, pin or key differs from the overlay"
 import re, sys
@@ -87,6 +87,11 @@ n_direct="$(echo "$direct" | tail -n1 | sed -n 's#^[0-9]*/\([0-9]*\) passed$#\1#
 n_pytest="$(cd src/inputd && python3 -m pytest -q --collect-only tests/test_core.py 2>/dev/null | grep -c '::')"
 [ -n "$n_direct" ] && [ "$n_direct" = "$n_pytest" ] \
   || bad "the build's direct run of test_core.py has ${n_direct:-?} tests, pytest finds $n_pytest there"
+
+# ---- FFmpeg version history and package-path fixtures
+step "FFmpeg build guards"
+bash tools/ffmpeg-inputs.sh || bad "FFmpeg input record"
+python3 -m pytest -q -p no:cacheprovider build/pkg/tests/test_ffmpeg_build.py || bad "pytest (FFmpeg build guards)"
 
 # ---- Wi-Fi import, from a copy whose path has a space (audit 2026-10-30, L03)
 step "Wi-Fi import test (path with a space)"

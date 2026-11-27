@@ -18,10 +18,28 @@ SRC_WORK="$(realpath "${SRC_WORK:?SRC_WORK: the work directory of a finished bui
 assert_scratch_copy "$SRC_WORK"
 [ -d "$SRC_WORK/rootfs/usr" ] || die "no finished rootfs in $SRC_WORK"
 ls "$SRC_WORK"/pkg-ffmpeg/*.deb >/dev/null || die "no FFmpeg packages in $SRC_WORK/pkg-ffmpeg"
-trap 'mountpoint -q "$ROOTFS/boot/firmware" && umount "$ROOTFS/boot/firmware"; chroot_umount' EXIT
-mkdir -p "$WORK"
+
+cleanup() {
+  if [ "$BOOT_MOUNT_TRIED" = 1 ] && mountpoint -q "$ROOTFS/boot/firmware"; then
+    umount "$ROOTFS/boot/firmware" || true
+  fi
+  if [ "$CHROOT_STARTED" = 1 ]; then chroot_umount --mounts-only; fi
+  assert_no_mounts "$RUN_DIR"
+  WORK="$BASE_WORK" safe_rm -r "$RUN_DIR"
+}
+
+chroot_test_lock
+assert_no_mounts "$SRC_WORK/rootfs"
+BASE_WORK=$WORK
+RUN_DIR=$(mktemp -d "$BASE_WORK/update-test.XXXXXX")
+WORK=$RUN_DIR
+ROOTFS="$WORK/rootfs"
+ROCKNIX_EX="$WORK/rocknix"
+CHROOT_STARTED=0 BOOT_MOUNT_TRIED=0
+trap cleanup EXIT
+export WORK   # The build steps below source config.sh and need the same scratch directory.
+echo "== scratch directory $WORK"
 echo "== copy of $SRC_WORK/rootfs"
-assert_no_mounts "$SRC_WORK/rootfs" "$ROOTFS"
 rsync -aHAXx --delete --numeric-ids "$SRC_WORK/rootfs/" "$ROOTFS/"
 ln -sfn "$SRC_WORK/rocknix" "$ROCKNIX_EX"
 # What 05 does with the overlay (the rootfs may be older than this checkout).
@@ -34,6 +52,8 @@ chmod 0440 "$ROOTFS"/etc/sudoers.d/rg35xxh-*
 "$TOP/build/07f-update-app.sh" >/dev/null
 
 echo "== release 1: the packages 09b builds and installs"
+# 09b mounts this private rootfs too. Include any mounts it leaves on failure.
+CHROOT_STARTED=1
 HANDTOP_FFMPEG_PKGS="$SRC_WORK/pkg-ffmpeg" "$TOP/build/09b-packages.sh"
 V1=$(chroot "$ROOTFS" dpkg-query -W -f '${Version}' handtop)
 FF1="$FFMPEG_HANDTOP_VERSION"
@@ -120,9 +140,10 @@ policy_back() { [ "$(cat "$ROOTFS/usr/sbin/policy-rc.d" 2>/dev/null)" = "$BUILD_
 dl() { hu check >/dev/null || true; hu download; }
 # The boot partition: recovery reads recovery.txt only from a mounted filesystem.
 # The boot partition as a small tmpfs with the build's KERNEL (an update with the modules package checks it).
-fat_on()  { mkdir -p "$ROOTFS/boot/firmware"; mount -t tmpfs -o size=96m handtop-test-fat "$ROOTFS/boot/firmware"
+fat_on()  { mkdir -p "$ROOTFS/boot/firmware"; BOOT_MOUNT_TRIED=1
+            mount -t tmpfs -o size=96m handtop-test-fat "$ROOTFS/boot/firmware"
             cp "$ROCKNIX_EX/boot/KERNEL" "$ROOTFS/boot/firmware/KERNEL"; }
-fat_off() { umount "$ROOTFS/boot/firmware"; }
+fat_off() { umount "$ROOTFS/boot/firmware"; BOOT_MOUNT_TRIED=0; }
 
 echo "== FFmpeg holds released (09b), units"
 [ -z "$(chroot "$ROOTFS" apt-mark showhold)" ] && ok "no holds left" || bad "holds: $(chroot "$ROOTFS" apt-mark showhold | xargs)"

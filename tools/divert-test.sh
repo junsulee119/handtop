@@ -2,7 +2,7 @@
 # Diversions of Debian's config files (build/pkg/diversions.txt, review 2026-11-19 #8): the preinst and
 # postrm that build/pkg/build-debs.py writes, tried with two small packages (a "Debian owner" and a
 # "Handtop" package diverting its config file) through install, Debian update, upgrade, remove,
-# reinstall, purge, a card whose file was already Handtop's, and an aborted install.
+# reinstall, purge, a card whose file was already Handtop's, and aborted installs.
 #   tools/divert-test.sh ROOTFS   (root; ROOTFS a throwaway copy with dpkg, e.g. update-test's)
 set -euo pipefail
 TOP=$(cd "$(dirname "$(realpath "$0")")/.." && pwd)
@@ -21,7 +21,7 @@ for k in ("preinst", "postrm"):
 PY
 cat > "$W/t.sh" <<'T'
 #!/bin/bash
-export DEBIAN_FRONTEND=noninteractive
+export DEBIAN_FRONTEND=noninteractive LC_ALL=C
 cd /tmp/divert-test
 pass=0; fail=0
 ok() { echo "PASS: $*"; pass=$((pass+1)); }; bad() { echo "FAIL: $*"; fail=$((fail+1)); }
@@ -31,6 +31,7 @@ mk() { d=b/$1-$2; mkdir -p $d/DEBIAN $d/etc/dt; echo "$3" > $d/etc/dt/a.conf; ec
   [ "$1" = dt-handtop ] && cp new/preinst new/postrm $d/DEBIAN/ && chmod 755 $d/DEBIAN/preinst $d/DEBIAN/postrm
   dpkg-deb --root-owner-group -b $d $d.deb >/dev/null; }
 D() { dpkg --force-confdef --force-confold "$@" </dev/null >/tmp/dt.out 2>&1; }
+dt_status() { dpkg-query -W -f='${db:Status-Status}' dt-handtop 2>/dev/null; }
 reset() { D -P dt-handtop; D -P dt-owner; dpkg-divert --list | grep -q dt-handtop && dpkg-divert --package dt-handtop --no-rename --remove /etc/dt/a.conf >/dev/null; rm -f /etc/dt/a.conf*; }
 c() { [ "$(cat /etc/dt/a.conf 2>/dev/null)" = "$1" ]; }; cd_() { [ "$(cat /etc/dt/a.conf.debian 2>/dev/null)" = "$1" ]; }
 mk dt-owner 1 debian1; mk dt-owner 2 debian2; mk dt-handtop 1 handtop1; mk dt-handtop 2 handtop2
@@ -78,8 +79,28 @@ mkdir -p b/dt-handtop-3/DEBIAN; cp -r b/dt-handtop-1/* b/dt-handtop-3/; sed -i '
 mkdir -p b/dt-handtop-3/usr/share/dt; echo x > b/dt-handtop-3/usr/share/dt/clash; dpkg-deb -b b/dt-handtop-3 b/dt-handtop-3.deb >/dev/null
 mkdir -p b/dt-other/DEBIAN b/dt-other/usr/share/dt; echo y > b/dt-other/usr/share/dt/clash
 printf 'Package: dt-other\nVersion: 1\nArchitecture: all\nMaintainer: t <t@t>\nDescription: t\n' > b/dt-other/DEBIAN/control; dpkg-deb -b b/dt-other b/dt-other.deb >/dev/null
-D -i b/dt-other.deb; D -i b/dt-handtop-3.deb; grep -q "trying to overwrite" /tmp/dt.out || echo "(note: no file clash?)"
-chk "aborted: Debian's file in place, no diversion, no copy" 'c debian1 && [ ! -e /etc/dt/a.conf.debian ] && [ -z "$(dpkg-divert --list /etc/dt/a.conf)" ] && ! dpkg -s dt-handtop >/dev/null 2>&1 || dpkg -s dt-handtop 2>/dev/null | grep -q "not-installed\|config-files"'
+D -i b/dt-other.deb
+chk "first install fails in unpack and calls abort-install" \
+  '! D -D2 -i b/dt-handtop-3.deb && grep -Fq "trying to overwrite" /tmp/dt.out &&
+   grep -Fq "postrm ( abort-install )" /tmp/dt.out'
+chk "aborted: Debian's file in place, no diversion, no copy" \
+  'c debian1 && [ ! -e /etc/dt/a.conf.debian ] && [ -z "$(dpkg-divert --list /etc/dt/a.conf)" ] &&
+   [ "$(dt_status || echo not-installed)" = not-installed ]'
+reset
+echo "== S6 reinstall aborted after remove (unpack fails)"
+D -i b/dt-owner-1.deb && D -i b/dt-handtop-2.deb && D -r dt-handtop || { cat /tmp/dt.out; exit 1; }
+chk "reinstall fails in unpack and calls abort-install with both versions" \
+  '! D -D2 -i b/dt-handtop-3.deb && grep -Fq "trying to overwrite" /tmp/dt.out &&
+   grep -Fq "postrm ( abort-install 2 3 )" /tmp/dt.out'
+chk "aborted reinstall: config-files state and diversion kept" \
+  '[ "$(dt_status)" = config-files ] && [ "$(dpkg-divert --listpackage /etc/dt/a.conf)" = dt-handtop ] &&
+   [ "$(dpkg-divert --truename /etc/dt/a.conf)" = /etc/dt/a.conf.debian ]'
+chk "aborted reinstall: live and saved configs unchanged" \
+  'cmp -s /etc/dt/a.conf b/dt-handtop-2/etc/dt/a.conf &&
+   cmp -s /etc/dt/a.conf.debian b/dt-owner-1/etc/dt/a.conf'
+chk "purge after aborted reinstall restores Debian's original" \
+  'D -P dt-handtop && cmp -s /etc/dt/a.conf b/dt-owner-1/etc/dt/a.conf &&
+   [ ! -e /etc/dt/a.conf.debian ] && [ -z "$(dpkg-divert --list /etc/dt/a.conf)" ]'
 D -P dt-other
 reset
 echo "divert-test: $pass passed, $fail failed"

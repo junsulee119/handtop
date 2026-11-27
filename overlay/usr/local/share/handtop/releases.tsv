@@ -237,6 +237,11 @@ v0.4.0	*	/usr/lib/aarch64-linux-gnu/pkgconfig/libavutil.pc	x	419150a9574854f849d
 v0.4.0	*	/usr/lib/aarch64-linux-gnu/pkgconfig/libpostproc.pc	x	18d462fd99ca5c301cd55f07578dbd0d7d68ecc793ec9d92314521ef95f22ddd	644
 v0.4.0	*	/usr/lib/aarch64-linux-gnu/pkgconfig/libswresample.pc	x	4c3d3788afe02c8f2fb489a7544cbe2b6a188c9b232701bc56a0fce2a3da14c7	644
 v0.4.0	*	/usr/lib/aarch64-linux-gnu/pkgconfig/libswscale.pc	x	89918405c8b6d2013a806cc3c37807692f7eaab91d3be73af9535876b19ea66b	644
+v0.4.0	*	/usr/lib/modules/7.2.0/extra/sunxi-cedrus.ko	f	c4bf1085a6c0407d4b46f2222d2bc546a8d9d656c8ccb36b83bb16e3149fe70f	644
+v0.4.0	*	/usr/lib/modules/7.2.0/extra/uhid.ko	f	7f93c25e1747dad905456133a0b7265558d4f23d63042ff7282cde4f20e59ce9	644
+v0.4.0	*	/usr/lib/modules/7.2.0/extra/usb_f_fs_xinput.ko	f	d2cdddac1385f02ef000bcc054b69fe2b9bdc89c244463ab5362a6a7e2955361	644
+v0.4.0	*	/usr/lib/modules/7.2.0/kernel/drivers/media/v4l2-core/v4l2-vp9.ko	f	fdf87f840b08d9c6e1c439feb021642cca3fdc21cf7fca78bf36ac401f23e3e3	644
+v0.4.0	*	/usr/lib/modules/7.2.0/rocknix-joypad/rocknix-singleadc-joypad.ko	f	175f2340de0179348f7a858925e639a43eb4ec8598d58e16c60f33467cd2bedf	644
 v0.4.0	*	/usr/local/bin/__pycache__/rg35xxh-displaycpython-312.pyc	f	4e9d0e7f07b86f389e109f5599376c90724c0044b63e18c74ed8d4d3ff03abd9	644
 v0.4.0	*	/usr/local/bin/__pycache__/rg35xxh-themecpython-312.pyc	f	0ddcf18e1a23961bbbd510952051f427c5f7b8e26007d885ae0aff7c57e43576	644
 v0.4.0	*	/usr/local/bin/nwg-drawer	f	d6e24f2760ce91053f0df6a7ec6397c45dbe0f643ee55e5d9fb3a9311aabe570	755
@@ -1944,6 +1949,11 @@ v0.4.1	*	/usr/lib/aarch64-linux-gnu/pkgconfig/libavutil.pc	x	419150a9574854f849d
 v0.4.1	*	/usr/lib/aarch64-linux-gnu/pkgconfig/libpostproc.pc	x	18d462fd99ca5c301cd55f07578dbd0d7d68ecc793ec9d92314521ef95f22ddd	644
 v0.4.1	*	/usr/lib/aarch64-linux-gnu/pkgconfig/libswresample.pc	x	4c3d3788afe02c8f2fb489a7544cbe2b6a188c9b232701bc56a0fce2a3da14c7	644
 v0.4.1	*	/usr/lib/aarch64-linux-gnu/pkgconfig/libswscale.pc	x	89918405c8b6d2013a806cc3c37807692f7eaab91d3be73af9535876b19ea66b	644
+v0.4.1	*	/usr/lib/modules/7.2.0/extra/sunxi-cedrus.ko	f	c4bf1085a6c0407d4b46f2222d2bc546a8d9d656c8ccb36b83bb16e3149fe70f	644
+v0.4.1	*	/usr/lib/modules/7.2.0/extra/uhid.ko	f	7f93c25e1747dad905456133a0b7265558d4f23d63042ff7282cde4f20e59ce9	644
+v0.4.1	*	/usr/lib/modules/7.2.0/extra/usb_f_fs_xinput.ko	f	d2cdddac1385f02ef000bcc054b69fe2b9bdc89c244463ab5362a6a7e2955361	644
+v0.4.1	*	/usr/lib/modules/7.2.0/kernel/drivers/media/v4l2-core/v4l2-vp9.ko	f	fdf87f840b08d9c6e1c439feb021642cca3fdc21cf7fca78bf36ac401f23e3e3	644
+v0.4.1	*	/usr/lib/modules/7.2.0/rocknix-joypad/rocknix-singleadc-joypad.ko	f	175f2340de0179348f7a858925e639a43eb4ec8598d58e16c60f33467cd2bedf	644
 v0.4.1	*	/usr/local/bin/__pycache__/rg35xxh-displaycpython-312.pyc	f	4e9d0e7f07b86f389e109f5599376c90724c0044b63e18c74ed8d4d3ff03abd9	644
 v0.4.1	*	/usr/local/bin/__pycache__/rg35xxh-themecpython-312.pyc	f	0ddcf18e1a23961bbbd510952051f427c5f7b8e26007d885ae0aff7c57e43576	644
 v0.4.1	*	/usr/local/bin/nwg-drawer	f	14c31ff205ac702178257f536003bf84cc5fec95b775e0a8052996aee1df3666	755

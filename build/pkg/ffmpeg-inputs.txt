@@ -1,2 +1,3 @@
-rev=1
-inputs=5a0772c4467379734a1957dbdf8759c363c76852501935d9beb82a1173d331b2
+# FFmpeg package version and input SHA-256, oldest first. v0.5.0 keeps its original checksum.
+7:7.1.5-0+deb13u1+handtop1 5a0772c4467379734a1957dbdf8759c363c76852501935d9beb82a1173d331b2
+7:7.1.5-0+deb13u1+handtop2 b4ea85289917c69db530c18a90f0be2f757e25cea01325092763c1918a79ca75
