@@ -2,6 +2,7 @@
 
 Design and reasons: project doc `update-system.md`; external review and its triage: `update-review-2026-11-19.md`.
 Archive and keys: [apt-repository.md](../apt-repository.md). The app on top of it: [../apps/update.md](../apps/update.md).
+**Changing any of this? Read [update-internals.md](update-internals.md) first**: state files, invariants, power-cut behaviour, decisions and the tests to run.
 
 ## Pieces
 
